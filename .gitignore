@@ -12,3 +12,4 @@ deconv.egg-info/
 *.egg-info
 *.out
 .gitignore~
+.nfs*
