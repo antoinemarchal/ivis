@@ -1,0 +1,14 @@
+# Ignore entire directories
+examples/
+__pycache__/
+build/
+deconv.egg-info/
+
+# Ignore specific file types
+*.py~
+*.log
+*.tmp
+*.DS_Store
+*.egg-info
+*.out
+

@@ -1,0 +1,44 @@
+2025-02-21 20:57:32	INFO	::casa	
+2025-02-21 20:57:32	INFO	::casa	data_update: version installed or checked less than 1 day ago, nothing updated or checked
+2025-02-21 20:57:33	INFO	::casa	measures_update: version installed or checked less than 1 day ago, nothing updated or checked
+2025-02-21 20:57:33	INFO	::casa	
+2025-02-21 20:57:36	INFO	::casa	Python version 3.10.16
+2025-02-21 20:57:36	INFO	::casa	CASA Version MODULAR 6.6.5.31
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##### Begin Task: uvcontsub_old      #####
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	uvcontsub_old( vis='/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_1.ms', field='', fitspw='0:1~550;1150~1450', excludechans=False, combine='', solint='int', fitorder=1, spw='', want_cont=False )
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##### Begin Task: uvcontsub_old      #####
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	uvcontsub_old( vis='/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_2.ms', field='', fitspw='0:1~550;1150~1450', excludechans=False, combine='', solint='int', fitorder=1, spw='', want_cont=False )
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##### Begin Task: uvcontsub_old      #####
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	uvcontsub_old( vis='/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_4.ms', field='', fitspw='0:1~550;1150~1450', excludechans=False, combine='', solint='int', fitorder=1, spw='', want_cont=False )
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##### Begin Task: uvcontsub_old      #####
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	uvcontsub_old( vis='/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_3.ms', field='', fitspw='0:1~550;1150~1450', excludechans=False, combine='', solint='int', fitorder=1, spw='', want_cont=False )
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	##### Begin Task: uvcontsub_old      #####
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	uvcontsub_old( vis='/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_5.ms', field='', fitspw='0:1~550;1150~1450', excludechans=False, combine='', solint='int', fitorder=1, spw='', want_cont=False )
+2025-02-21 21:00:46	WARN	uvcontsub_old::::casa	This task is deprecated and will be removed in an upcoming release.
+2025-02-21 21:00:46	WARN	uvcontsub_old::::casa	This task is deprecated and will be removed in an upcoming release.
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	Preparing to add scratch columns.
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	Copying /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_4.ms to /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_4.ms.contsubs38cx1l3 with cp.
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	Preparing to add scratch columns.
+2025-02-21 21:00:46	INFO	uvcontsub_old::::casa	Copying /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_3.ms to /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_3.ms.contsubu98y4c0k with cp.
+2025-02-21 21:00:47	WARN	uvcontsub_old::::casa	This task is deprecated and will be removed in an upcoming release.
+2025-02-21 21:00:47	WARN	uvcontsub_old::::casa	This task is deprecated and will be removed in an upcoming release.
+2025-02-21 21:00:47	INFO	uvcontsub_old::::casa	Preparing to add scratch columns.
+2025-02-21 21:00:47	INFO	uvcontsub_old::::casa	Copying /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_2.ms to /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_2.ms.contsubf893_owz with cp.
+2025-02-21 21:00:47	INFO	uvcontsub_old::::casa	Preparing to add scratch columns.
+2025-02-21 21:00:47	INFO	uvcontsub_old::::casa	Copying /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_1.ms to /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_1.ms.contsubwc8wuc5m with cp.
+2025-02-21 21:00:56	WARN	uvcontsub_old::::casa	This task is deprecated and will be removed in an upcoming release.
+2025-02-21 21:00:57	INFO	uvcontsub_old::::casa	Preparing to add scratch columns.
+2025-02-21 21:00:57	INFO	uvcontsub_old::::casa	Copying /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_5.ms to /home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_5.ms.contsubg71uzu30 with cp.
+2025-02-21 21:02:52	SEVERE	uvcontsub_old::::casa	Task uvcontsub_old raised an exception of class FileNotFoundError with the following message: [Errno 2] No such file or directory: '/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/MW-C10_1.ms.contsubwc8wuc5m/table.f3_TSM0'
+2025-02-21 21:02:53	INFO	uvcontsub_old::::casa	Task uvcontsub_old complete. Start time: 2025-02-22 08:00:45.958544 End time: 2025-02-22 08:02:52.618311
+2025-02-21 21:02:53	INFO	uvcontsub_old::::casa	##### End Task: uvcontsub_old        #####
+2025-02-21 21:02:53	INFO	uvcontsub_old::::casa	##########################################
+2025-02-21 21:03:08	SEVERE	uvcontsub_old::::casa	Task uvcontsub_old raised an exception of class FileNotFoundError with the following message: [Errno 2] No such file or directory
+2025-02-21 21:03:08	INFO	uvcontsub_old::::casa	Task uvcontsub_old complete. Start time: 2025-02-22 08:00:45.967349 End time: 2025-02-22 08:03:07.503437
+2025-02-21 21:03:08	INFO	uvcontsub_old::::casa	##### End Task: uvcontsub_old        #####
+2025-02-21 21:03:08	INFO	uvcontsub_old::::casa	##########################################
