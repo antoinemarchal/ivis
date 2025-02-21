@@ -11,4 +11,4 @@ deconv.egg-info/
 *.DS_Store
 *.egg-info
 *.out
-
+.gitignore~
