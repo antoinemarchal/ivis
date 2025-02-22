@@ -1,7 +1,5 @@
 # Ignore entire directories
-__pycache__/
-build/
-deconv.egg-info/
+data/
 
 # Ignore specific file types
 *.py~
