@@ -193,12 +193,12 @@ class DataProcessor:
         return vis_data
 
     
-    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=1421104492.034763):
+    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms"):
         #get filenames of all ms from mspath
-        msl = sorted(glob.glob(self.path_ms+"*.ms"))
+        msl = sorted(glob.glob(self.path_ms+"*"+extension))
         print("number of ms files = {}".format(len(msl)))        
         
-        vis_data = dcasacore.readmsl(msl, uvmin, uvmax, chunks, target_frequency)
+        vis_data = dcasacore.readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel)
                 
         return vis_data #REMOVE ra and dec / should be useless from here
 

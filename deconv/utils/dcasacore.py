@@ -136,7 +136,7 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
     # return msds_with_coords.freq.compute().data, UVW_lambda[:,:,0], SIGMA, I[:,0], ra_hms, dec_dms
 
 
-def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency):
+def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, target_channel):
     """
     Reads a specific channel from the MS file using casacore.tables,
     selected by frequency, without loading the entire dataset.
@@ -160,26 +160,43 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency):
     spw_table = table(f"{ms_path}/SPECTRAL_WINDOW", readonly=True)
     frequencies = np.squeeze(spw_table.getcol("CHAN_FREQ"))
 
-    # Check the shape of the frequencies array
-    if len(np.array([frequencies])) == 1:
-        # If there's only one frequency (i.e., only one channel)
-        print(f"Only one channel in the MS, using frequency: {frequencies} Hz")
-        channel_index = 0
-        frequencies = np.array([frequencies])
+    # # Check the shape of the frequencies array
+    # if len(np.array([frequencies])) == 1:
+    #     # If there's only one frequency (i.e., only one channel)
+    #     print(f"Only one channel in the MS, using frequency: {frequencies} Hz")
+    #     channel_index = 0
+    #     frequencies = np.array([frequencies])
+    # else:
+    #     if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
+    #         print("Target frequency is out of range.")
+    #         return None
+
+    if target_frequency is not None and target_channel is not None:
+        print("Error: Only one of target_frequency or target_channel should be provided.")
+        sys.exit(1)  # Exit with an error code
+        
+    if target_frequency is not None:
+        # Do something with target_frequency
+        print("Using target_frequency:", target_frequency)
+            
+        # Find the closest frequency index
+        channel_index = np.abs(frequencies - target_frequency.value).argmin()
+                
+    elif target_channel is not None:
+        # Do something with target_channel
+        print("Using target_channel:", target_channel)
+
+        channel_index = target_channel        
     else:
-        if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
-            print("Target frequency is out of range.")
-            return None
-    
-    # Find the closest frequency index
-    channel_index = np.abs(frequencies - target_frequency.value).argmin()
-    
+        print("Error: At least one of target_frequency or target_channel must be provided.")
+        sys.exit(1)  # Exit with an error code
+
     # Compute the velocity for the selected channel
     rest_freq_u = 1.42040575177e9 * u.Hz  # Rest frequency of HI line (21 cm)
-    velocity = ((rest_freq_u - frequencies[channel_index] * u.Hz) / rest_freq_u * c).to(u.km / u.s)
-    
-    print(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Frequency: {velocity.value} km/s")
-    
+    velocity = ((rest_freq_u - frequencies[channel_index] * u.Hz) / rest_freq_u * c).to(u.km / u.s)       
+
+    print(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Velocity (warning; could be wrong if ref frame is not LSRK): {velocity.value} km/s")
+
     # Read UVW coordinates
     uvw = ms_table.getcol("UVW")
     
@@ -228,7 +245,7 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency):
     return frequencies[channel_index], velocity, uvw_lambda, sigma_i, stokes_i, ra_hms, dec_dms
     
 
-def readmsl(msl, uvmin, uvmax, chunks, target_frequency):
+def readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel):
     uu=[]
     vv=[]
     ww=[]
@@ -240,7 +257,9 @@ def readmsl(msl, uvmin, uvmax, chunks, target_frequency):
     k=0
     for ms in tqdm(msl):
         print("process file: ", ms)
-        freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax, chunks, target_frequency) #Faster than dask_ms to extract one channel
+        #Faster than dask_ms to extract one channel
+        freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax, chunks,
+                                                                     target_frequency, target_channel)
         # freq, vel, UVW, SIGMA, DATA, ra, dec = readms_dask(ms, uvmin, uvmax, chunks, target_frequency)
         UU = UVW[:,0]; VV = UVW[:,1]; WW = UVW[:,2]
         c = SkyCoord(ra, dec, unit=(u.hourangle, u.deg), frame='icrs')
