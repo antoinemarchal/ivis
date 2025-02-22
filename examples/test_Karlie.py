@@ -24,7 +24,6 @@ import marchalib as ml #remove
 plt.ion()
 
 if __name__ == '__main__':    
-    print("test on MeerKat data from Karlie")
     #path data
     # path_ms = "/priv/myrtle1/gaskap/karlie/meerkat2024/data/fields/original_ms/contsub/split/" #directory of measurement sets
     path_ms = "/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/" #directory of measurement sets    
@@ -37,8 +36,8 @@ if __name__ == '__main__':
     target_header = fits.open(filename)[0].header
     
     #create data processor
-    data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
+    data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
 
     #read single-dish data from "pathout" directory
     fitsname = "MW-C10_GBT_regrid_spec_spat.fits"
@@ -80,13 +79,11 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0#5
     lambda_r = 10
-    device = "cpu" #0 is GPU and "cpu" is CPU
+    device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
     
-    if device == 0: print("GPU:", torch.cuda.get_device_name(0))
-
     #BUILD CUBE
-    N = 2; START=700
+    N = 1; START=980
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
     for i in np.arange(N):
@@ -112,7 +109,8 @@ if __name__ == '__main__':
         result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
         # Move to cube
         cube[i] = result
-    
+
+    stop
     #write on disk
     filename = f"result_chan_{START:04d}_to_{START+N:04d}.fits"
     hdu0 = fits.PrimaryHDU(cube, header=target_header)

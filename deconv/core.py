@@ -13,6 +13,7 @@ from numpy.fft import fft2
 from torch.fft import fft2 as tfft2
 from dataclasses import dataclass
 from reproject import reproject_interp
+from deconv import logger  # Import the logger
 import subprocess
 
 import marchalib as ml
@@ -38,11 +39,13 @@ class DataVisualizer:
         self.path_beams = path_beams
         self.path_sd = path_sd
         self.pathout = pathout
+        logger.info("[Initialize DataVisualizer]")
 
 
     def msplot(self, idfile):
         #get msl from path
         msl = sorted(glob.glob(self.path_ms+"*.ms"))
+        logger.info("Plotting XX for ant2&3 vs channel and velocity.")
         plotms.plotms(msl[idfile])
 
 
@@ -53,6 +56,7 @@ class DataProcessor:
         self.path_beams = path_beams
         self.path_sd = path_sd
         self.pathout = pathout
+        logger.info("[Initialize DataProcessor ]")
 
 
     def fixms(self):
@@ -60,23 +64,23 @@ class DataProcessor:
         msl = sorted(glob.glob(self.path_ms+"*.ms"))
         # Apply fix_ms_dir to each MS file
         for ms in msl:
-            print(f"Processing {ms}...")
+            logger.info(f"Processing {ms}...")
             subprocess.run(["fix_ms_dir", ms])  # Run the command for each MS file    
 
-        print("All MS files processed.")
+        logger.info("All MS files processed.")
     
 
     def package_ms(self, filename, select_fraction=1, uvmin=0, uvmax=7000, nchan=1, start=0, width=1, inc=1):
         #get filenames of all ms from mspath
         msl = sorted(glob.glob(self.path_ms+"*.ms"))
-        print("number of ms files = {}".format(len(msl)))        
+        logger.info("number of ms files = {}".format(len(msl)))        
 
         # get data
         frequency, uu, vv, ww, weight, sigma, data, flag, beam, ra_hms, dec_dms = dms2npz.get_baselines(msl, select_fraction=select_fraction, sigma_rescale=1.0, incl_model_data=False, datacolumn="data", nchan=nchan, start=start, width=width, inc=inc, uvmin=np.float32(uvmin), uvmax=np.float32(uvmax))
 
-        print(data.shape, uu.shape, weight.shape, sigma.shape)
+        logger.info(data.shape, uu.shape, weight.shape, sigma.shape)
         
-        print("write " + filename + " on disk")
+        logger.info("write " + filename + " on disk")
         np.savez(
             self.pathout + filename,
             frequency=frequency, # [GHz]
@@ -103,15 +107,15 @@ class DataProcessor:
         #get beam files 
         filenames = sorted(glob.glob(self.path_beams+"*.fits"))
         n_beams = len(filenames)
-        print("number of beams:", n_beams)
+        logger.info("number of beams:", n_beams)
         #compute shape of scaled primary beam
-        print("using {} to rescale the PB with cell_size of target hdr".format(filenames[0]))
+        logger.info("using {} to rescale the PB with cell_size of target hdr".format(filenames[0]))
         hdr_pb = fits.open(filenames[0])[0].header
         shape = (hdr_pb["NAXIS2"],hdr_pb["NAXIS1"])
 
         #ratio cell_size
         ratio = hdr_pb["CDELT2"] / hdr["CDELT2"]
-        print("ratio pixel size PB and target: ", ratio)
+        logger.info("ratio pixel size PB and target: ", ratio)
         shape_out = (int(hdr_pb["NAXIS1"]*ratio),int(hdr_pb["NAXIS2"]*ratio))
 
         #init interpolation grid
@@ -181,7 +185,7 @@ class DataProcessor:
 
     def read_vis(self, _npz, select_fraction=1):
         #read packaged data
-        print("read {}".format(_npz))
+        logger.info("read {}".format(_npz))
         archive = np.load(self.pathout + _npz, allow_pickle=True)
 
         #Select subset of visibilities
@@ -196,7 +200,7 @@ class DataProcessor:
     def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms"):
         #get filenames of all ms from mspath
         msl = sorted(glob.glob(self.path_ms+"*"+extension))
-        print("number of ms files = {}".format(len(msl)))        
+        logger.info("number of ms files = {}".format(len(msl)))
         
         vis_data = dcasacore.readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel)
                 
@@ -232,6 +236,10 @@ class Imager:
         self.lambda_r = lambda_r
         self.positivity = positivity
         self.device = device
+        logger.info("[Initialize Imager        ]")
+        if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
+        if self.lambda_r == 0: logger.warning("lambda_r = 0 - No spatial regularization.")
+        if self.lambda_sd == 0: logger.warning("lambda_sd = 0 - No short spacing correction (ignoring single dish data).")
         
 
     def process(self, units, disk=False):
@@ -263,7 +271,8 @@ class Imager:
         #Get idx beams in array
         nb = len(self.vis_data.coords)
         idmin = np.zeros(nb); idmax = np.zeros(nb)
-        for i in tqdm(np.arange(nb)):
+        logger.info("Processing beams position..")
+        for i in np.arange(nb):
             idmin[i] = np.where(self.vis_data.beam == i)[0][0];
             idmax[i] = len(np.where(self.vis_data.beam == i)[0])-1
 
@@ -277,7 +286,13 @@ class Imager:
             bounds = dutils.ROHSA_bounds(data_shape=shape, lb_amp=0, ub_amp=np.inf)
             
         # Use gradient-descent to minimise cost
-        print('Starting optimisation')
+        logger.info('Starting optimisation (using LBFGS-B)')
+        if self.positivity == True:
+            logger.info('Optimizer bounded - Positivity == True')
+            logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
+        else:
+            logger.info('Optimizer not bounded - Positivity == False')
+            
         opt_output = optimize.minimize(mod_loss.objective, init_params.ravel().astype(np.float32),
                                        args=(
                                            beam.astype(np.float32),
@@ -305,7 +320,7 @@ class Imager:
                                        bounds=bounds, method='L-BFGS-B',
                                        options={'maxiter': self.max_its, 'maxfun': 1e100, 'iprint': 1, 'disp': 2})
 
-        print(opt_output)
+        # logger.info(opt_output)
         
         result = np.reshape(opt_output.x, shape)
 
@@ -314,19 +329,19 @@ class Imager:
             return result
 
         if units == "Jy/beam":
-            print("assuming a synthesized beam of 3 x cell_size")
+            logger.info("assuming a synthesized beam of 3 x cell_size")
             cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
             nu = self.vis_data.frequency *1.e9 *u.Hz
             beam_r = Beam(3*cell_size, 3*cell_size, 1.e-12*u.deg)
             return result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
 
         elif units == "K":
-            print("assuming a synthesized beam of 3 x cell_size")
+            logger.info("assuming a synthesized beam of 3 x cell_size")
             cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
             nu = self.vis_data.frequency *1.e9 *u.Hz
             beam_r = Beam(3*cell_size, 3*cell_size, 1.e-12*u.deg)
             result_Jy = result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
             return (result_Jy*u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
             
-        else: print("unit must be 'Jy/arcsec^2' or 'K'")            
+        else: logger.info("unit must be 'Jy/arcsec^2' or 'K'")            
     

@@ -4,6 +4,8 @@ import pytorch_finufft
 from torch.fft import fft2 as tfft2
 from tqdm import tqdm as tqdm
 
+from deconv import logger  # Import the logger
+
 def format_input_tensor(input_tensor):
     #ensure the input tensor has 4 dimensions
     if input_tensor.dim() == 2:  # If shape is [H_in, W_in]
@@ -26,7 +28,7 @@ def objective(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, si
     #compute the gradient
     u_grad = u.grad.cpu().numpy().astype(x.dtype)
 
-    print("cost: ", np.format_float_scientific(L.item(), precision=5))
+    logger.info(f"Total cost: {np.format_float_scientific(L.item(), precision=5)}")
 
     return L.item(), u_grad.ravel()
 

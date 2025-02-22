@@ -1,7 +1,9 @@
 #amarchal 10/24
+import os
 import glob
 import time
 import sys
+import contextlib
 import numpy as np
 from tqdm import tqdm as tqdm
 from astropy.constants import c
@@ -12,6 +14,8 @@ from dataclasses import dataclass
 from casacore.tables import table, taql
 from pathlib import Path
 from daskms import xds_from_table
+
+from deconv import logger  # Import the logger
 
 @dataclass #modified from MPol
 class VisData:
@@ -39,7 +43,7 @@ def phasecenter_dask(ms): #FIXME
     ra_hms = Angle(ra_rad, unit=u.rad).to_string(unit=u.hourangle, sep=":")
     dec_dms = Angle(dec_rad, unit=u.rad).to_string(unit=u.deg, sep=":")
 
-    # print(f"RA: {ra_hms}, Dec: {dec_dms}")
+    # logger.info(f"RA: {ra_hms}, Dec: {dec_dms}")
 
     return ra_hms, dec_dms
 
@@ -87,19 +91,19 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
     )
 
     # Print traget frequency
-    print("target freq: ", target_frequency.value)
+    logger.info(f"target freq: {target_frequency.value}")
 
     # Check if the target frequency is out of the range (min/max)
     if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
-        print("target frequency out of range")
+        logger.info("target frequency out of range")
         sys.exit()  # Exits the program
     else:
-        print(f"target frequency {target_frequency.value} is within range.")
+        logger.info(f"target frequency {target_frequency.value} is within range.")
         # Continue with selecting the channel as usual
         channel_index = np.abs(frequencies - target_frequency.value).argmin()
         msds_with_coords = msds_with_coords.isel(chan=channel_index)
             
-    print(msds_with_coords)
+    logger.info(msds_with_coords)
         
     DATA = msds_with_coords.DATA
     SIGMA = msds_with_coords.SIGMA
@@ -125,12 +129,12 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
     I = I[xc]
     SIGMA = SIGMA[xc]    
 
-    print("shape UVW_lambda: ", UVW_lambda.shape)
-    print("shape I: ", I.shape)
-    print("shape SIGMA: ", SIGMA.shape)
-
-    print("returned frequency", msds_with_coords.freq.compute().data)
-    print("returned velocity", msds_with_coords.vel.compute().data)
+    logger.info(f"shape UVW_lambda: {UVW_lambda.shape}")
+    logger.info(f"shape I: {I.shape}")
+    logger.info(f"shape SIGMA: {SIGMA.shape}")
+    
+    logger.info(f"returned frequency: {msds_with_coords.freq.compute().data}")
+    logger.info(f"returned velocity: {msds_with_coords.vel.compute().data}")
 
     return msds_with_coords.freq.compute().data.value, msds_with_coords.vel.compute().data, UVW_lambda, SIGMA, I, ra_hms, dec_dms
     # return msds_with_coords.freq.compute().data, UVW_lambda[:,:,0], SIGMA, I[:,0], ra_hms, dec_dms
@@ -152,50 +156,52 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
     """
     #get phase center
     ra_hms, dec_dms = phasecenter_dask(ms_path)
-    
-    # Open the Measurement Set
-    ms_table = table(ms_path, readonly=True)
-    
-    # Open the spectral window table to get frequency information
-    spw_table = table(f"{ms_path}/SPECTRAL_WINDOW", readonly=True)
-    frequencies = np.squeeze(spw_table.getcol("CHAN_FREQ"))
+
+    # Suppress casacore output when opening tables
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            # Open the Measurement Set
+            ms_table = table(ms_path, readonly=True)
+            
+            # Open the spectral window table to get frequency information
+            spw_table = table(f"{ms_path}/SPECTRAL_WINDOW", readonly=True)
+            frequencies = np.squeeze(spw_table.getcol("CHAN_FREQ"))
 
     # # Check the shape of the frequencies array
     # if len(np.array([frequencies])) == 1:
     #     # If there's only one frequency (i.e., only one channel)
-    #     print(f"Only one channel in the MS, using frequency: {frequencies} Hz")
+    #     logger.info(f"Only one channel in the MS, using frequency: {frequencies} Hz")
     #     channel_index = 0
     #     frequencies = np.array([frequencies])
     # else:
     #     if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
-    #         print("Target frequency is out of range.")
+    #         logger.info("Target frequency is out of range.")
     #         return None
 
     if target_frequency is not None and target_channel is not None:
-        print("Error: Only one of target_frequency or target_channel should be provided.")
+        logger.error("Error: Only one of target_frequency or target_channel should be provided.")
         sys.exit(1)  # Exit with an error code
         
     if target_frequency is not None:
         # Do something with target_frequency
-        print("Using target_frequency:", target_frequency)
-            
+        # logger.info(f"Using target_frequency: {target_frequency}")
+        
         # Find the closest frequency index
         channel_index = np.abs(frequencies - target_frequency.value).argmin()
-                
+        
     elif target_channel is not None:
         # Do something with target_channel
-        print("Using target_channel:", target_channel)
-
+        # logger.info(f"Using target_channel: {target_channel}")        
         channel_index = target_channel        
     else:
-        print("Error: At least one of target_frequency or target_channel must be provided.")
+        logger.error("Error: At least one of target_frequency or target_channel must be provided.")
         sys.exit(1)  # Exit with an error code
 
     # Compute the velocity for the selected channel
     rest_freq_u = 1.42040575177e9 * u.Hz  # Rest frequency of HI line (21 cm)
     velocity = ((rest_freq_u - frequencies[channel_index] * u.Hz) / rest_freq_u * c).to(u.km / u.s)       
 
-    print(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Velocity (warning; could be wrong if ref frame is not LSRK): {velocity.value} km/s")
+    logger.info(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Velocity (warning; could be wrong if ref frame is not LSRK): {velocity.value} km/s")
 
     # Read UVW coordinates
     uvw = ms_table.getcol("UVW")
@@ -215,11 +221,17 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
     
     # Compute Stokes I (XX + YY) / 2
     stokes_i = (data[..., 0] + data[..., -1]) * 0.5  
+
     # Use full sigma values (per channel)
-    sigma_i = np.sqrt(sigma[..., 0]**2 + sigma[..., -1]**2)  
+    # Temporarily suppress overflow warnings
+    np.seterr(over='ignore')    
+    # Your operation that causes the warning
+    sigma_i = np.sqrt(sigma[..., 0]**2 + sigma[..., -1]**2)
+    # Restore the default error handling (optional, but good practice)
+    np.seterr(over='warn')  # 'warn' is the default setting
     
     # Compute baseline lengths
-    wavelengths = c.value / frequencies[channel_index]  # λ = c / ν
+    wavelengths = c.value / frequencies[channel_index]
     uvw_lambda = uvw / wavelengths
     baseline_lengths = np.sqrt((uvw_lambda ** 2).sum(axis=1))  
     
@@ -236,11 +248,11 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
     # Close the ms_table after processing
     ms_table.close()
 
-    print("shape UVW_lambda: ", uvw_lambda.shape)
-    print("shape I: ", stokes_i.shape)
-    print("shape SIGMA: ", sigma_i.shape)
+    # logger.info(f"shape UVW_lambda: {uvw_lambda.shape}")
+    # logger.info(f"shape I: {stokes_i.shape}")
+    # logger.info(f"shape SIGMA: {sigma_i.shape}")
 
-    print(f"Extracted {uvw_lambda.shape[0]} valid baselines.")
+    logger.info(f"Extracted {uvw_lambda.shape[0]} valid baselines.")
     
     return frequencies[channel_index], velocity, uvw_lambda, sigma_i, stokes_i, ra_hms, dec_dms
     
@@ -254,9 +266,15 @@ def readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel):
     nvis=[]
     beam=[]
     centers=[]
-    k=0
-    for ms in tqdm(msl):
-        print("process file: ", ms)
+
+    # Log the start of processing
+    total_files = len(msl)
+    start_time = time.time()  # Record the start time of the entire loop
+
+    for k, ms in enumerate(msl, start=1):
+    # for ms in msl:
+        iteration_start_time = time.time()  # Record start time for this iteration
+        logger.info(f"Processing file {k}/{total_files}: {ms}")
         #Faster than dask_ms to extract one channel
         freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax, chunks,
                                                                      target_frequency, target_channel)
@@ -269,9 +287,19 @@ def readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel):
         sigma.append(SIGMA)
         data.append(DATA)
         nvis.append(len(UU))
-        beam.append(np.full(len(UU),k))
+        beam.append(np.full(len(UU),k-1)) #beam index should start at 0
         centers.append(c)
-        k+=1
+
+        # Time taken for this iteration
+        iteration_time = time.time() - iteration_start_time
+        
+        # Estimate remaining time (ETA)
+        elapsed_time = time.time() - start_time  # Time elapsed since the start of the loop
+        avg_iteration_time = elapsed_time / k  # Average time per iteration so far
+        remaining_time = avg_iteration_time * (total_files - k)  # Estimated remaining time
+        
+        # Log time taken for the iteration and ETA
+        logger.info(f"Time for iteration {k}: {iteration_time:.2f}s, ETA: {remaining_time / 60:.2f} minutes")
         
     #concatenate all files at the end
     uu = np.concatenate(uu); vv = np.concatenate(vv); ww = np.concatenate(ww)
@@ -304,7 +332,7 @@ if __name__ == '__main__':
     
     #get filenames of all ms from mspath
     msl = sorted(glob.glob(path_ms+"*.ms"))
-    print("number of ms files = {}".format(len(msl)))        
+    logger.info(f"number of ms files = {len(msl)}")
     
     uvmin = 0; uvmax=7000
     vis_data = readmsl(msl, uvmin, uvmax, chunks=1.e7)
@@ -316,7 +344,7 @@ if __name__ == '__main__':
 # results = {}
 
 # for chunk in chunk_sizes:
-#     print(f"\n🔹 Testing chunk size: {int(chunk)}")
+#     logger.info(f"\n🔹 Testing chunk size: {int(chunk)}")
 #     start_time = time.time()
 
 #     try:
@@ -332,11 +360,11 @@ if __name__ == '__main__':
 
 #         elapsed_time = time.time() - start_time
 #         results[int(chunk)] = elapsed_time
-#         print(f"✅ Chunk {int(chunk)} rows -> {elapsed_time:.2f} sec")
+#         logger.info(f"✅ Chunk {int(chunk)} rows -> {elapsed_time:.2f} sec")
 #     except Exception as e:
-#         print(f"❌ Chunk {int(chunk)} rows -> Failed: {str(e)}")
+#         logger.info(f"❌ Chunk {int(chunk)} rows -> Failed: {str(e)}")
 
 # # Print summary of results
-# print("\n🚀 Best Chunk Size Based on Speed:")
+# logger.info("\n🚀 Best Chunk Size Based on Speed:")
 # for chunk, time_taken in sorted(results.items(), key=lambda x: x[1]):
-#     print(f"🔸 Chunk {chunk}: {time_taken:.2f} sec")
+#     logger.info(f"🔸 Chunk {chunk}: {time_taken:.2f} sec")
