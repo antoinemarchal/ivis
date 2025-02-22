@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import glob
+import os
 import numpy as np
 from astropy import units as u
 import matplotlib.pyplot as plt
@@ -11,6 +12,10 @@ import torch
 from tqdm import tqdm as tqdm
 from reproject import reproject_interp
 from astropy.constants import c
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Array
+import psutil
+from joblib import Parallel, delayed
 
 from deconv.core import DataVisualizer, DataProcessor, Imager
 
@@ -79,9 +84,9 @@ if __name__ == '__main__':
     positivity = False
     
     if device == 0: print("GPU:", torch.cuda.get_device_name(0))
-    
+
     #BUILD CUBE
-    N = 200; START=700
+    N = 2; START=700
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
     for i in np.arange(N):
@@ -107,11 +112,13 @@ if __name__ == '__main__':
         result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
         # Move to cube
         cube[i] = result
-
+    
     #write on disk
+    filename = f"result_chan_{START:04d}_to_{START+N:04d}.fits"
     hdu0 = fits.PrimaryHDU(cube, header=target_header)
     hdulist = fits.HDUList([hdu0])
-    hdulist.writeto(pathout + "result_chan_700_to_900.fits", overwrite=True)
+    hdulist.writeto(pathout + filename, overwrite=True)
+
 
     stop
     
@@ -171,4 +178,4 @@ if __name__ == '__main__':
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
-    plt.savefig(pathout + 'deconv_result_cloud_MeerKAT_GBT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig(pathout + 'deconv_result_cloud_MeerKAT_GBT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    
