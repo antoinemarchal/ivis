@@ -202,7 +202,7 @@ class DataProcessor:
         msl = sorted(glob.glob(self.path_ms+"*"+extension))
         logger.info("number of ms files = {}".format(len(msl)))
         
-        vis_data = dcasacore.readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel)
+        vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
                 
         return vis_data #REMOVE ra and dec / should be useless from here
 

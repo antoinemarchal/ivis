@@ -83,12 +83,12 @@ if __name__ == '__main__':
     positivity = False
     
     #BUILD CUBE
-    N = 1; START=980 + 20
+    N = 1; START=991
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
     for i in np.arange(N):
         #Read data
-        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000, chunks=1.e6,
+        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
                                                         target_frequency=None,
                                                         target_channel=START+i,
                                                         extension=".contsub") #fixme dummy chunks

@@ -16,6 +16,7 @@ from pathlib import Path
 from daskms import xds_from_table
 
 from deconv import logger  # Import the logger
+from deconv.utils import vlsrk_from_ms
 
 @dataclass #modified from MPol
 class VisData:
@@ -140,7 +141,7 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
     # return msds_with_coords.freq.compute().data, UVW_lambda[:,:,0], SIGMA, I[:,0], ra_hms, dec_dms
 
 
-def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, target_channel):
+def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channel):
     """
     Reads a specific channel from the MS file using casacore.tables,
     selected by frequency, without loading the entire dataset.
@@ -189,10 +190,14 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
 
     # Compute the velocity for the selected channel
     rest_freq_u = 1.42040575177e9 * u.Hz  # Rest frequency of HI line (21 cm)
+    #FIXME
+    # velocity = vlsrk_from_ms.calculate_velocity_for_single_freq(ms_path,
+    #                                                             frequencies[channel_index] * u.Hz,
+    #                                                             rest_freq_u, field_id=0)    
     velocity = ((rest_freq_u - frequencies[channel_index] * u.Hz) / rest_freq_u * c).to(u.km / u.s)       
 
-    logger.info(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Velocity (warning; could be wrong if ref frame is not LSRK): {velocity.value} km/s")
-
+    logger.info(f"Selected channel: {channel_index} | Frequency: {frequencies[channel_index]} Hz | Velocity (LSRK): {velocity.value} km/s")
+    
     # Read UVW coordinates
     uvw = ms_table.getcol("UVW")
     
@@ -247,7 +252,7 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
     return frequencies[channel_index], velocity, uvw_lambda, sigma_i, stokes_i, ra_hms, dec_dms
     
 
-def readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel):
+def readmsl(msl, uvmin, uvmax, target_frequency, target_channel):
     uu=[]
     vv=[]
     ww=[]
@@ -266,7 +271,7 @@ def readmsl(msl, uvmin, uvmax, chunks, target_frequency, target_channel):
         iteration_start_time = time.time()  # Record start time for this iteration
         logger.info(f"Processing file {k}/{total_files}: {ms}")
         #Faster than dask_ms to extract one channel
-        freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax, chunks,
+        freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax,
                                                                      target_frequency, target_channel)
         # freq, vel, UVW, SIGMA, DATA, ra, dec = readms_dask(ms, uvmin, uvmax, chunks, target_frequency)
         UU = UVW[:,0]; VV = UVW[:,1]; WW = UVW[:,2]

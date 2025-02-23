@@ -6,7 +6,7 @@ import dask.array as da
 
 plt.ion()
 
-from deconv.utils.vlsrk_from_ms import print_spectral_window_frame, convert_freq_to_velocity
+from deconv.utils.vlsrk_from_ms import get_spectral_window_frame, convert_freq_to_velocity
 
 def plotms(msfile):
     # Print window frame

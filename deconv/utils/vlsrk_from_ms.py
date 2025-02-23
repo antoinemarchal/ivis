@@ -4,8 +4,11 @@ from astropy import constants as const
 from astropy.time import Time
 import astropy.units as u
 from casatools import table, msmetadata
+from casatools import msmetadata, measures
 import casatools
 from astropy.constants import c
+
+from deconv import logger
 
 # Create an msmetadata object
 msmd = msmetadata()
@@ -41,7 +44,7 @@ def convert_freq_to_velocity(ms_file, rest_frequency=1420405751.77):
     
     tb.close()
 
-    return velocities
+    return velocities.to(u.km/u.s)
 
 
 def get_spectral_window_info(ms_file):
@@ -74,7 +77,7 @@ def get_spectral_window_info(ms_file):
     tb.close()
 
 
-def print_spectral_window_frame(ms_file):
+def get_spectral_window_frame(ms_file):
     tb = table()
 
     try:
@@ -87,28 +90,29 @@ def print_spectral_window_frame(ms_file):
     # Check the MEAS_FREQ_REF column for the frame type (reference frame)
     if 'MEAS_FREQ_REF' in tb.colnames():
         meas_freq_ref = tb.getcol('MEAS_FREQ_REF')  # Get data from MEAS_FREQ_REF
-        print("MEAS_FREQ_REF (Frame Type) information:")
-
+ 
         # Map frame code to frame type
         frame_codes = {
-            0: "TOPO (Topocentric)",
-            1: "LSRK (Local Standard Rest Kinematic)",
-            2: "LSRD (Local Standard Rest Dynamical)",
-            3: "BARY (Barycentric)",
-            4: "GEO (Geocentric)"
+            0: "TOPO",# (Topocentric)",
+            1: "LSRK",# (Local Standard Rest Kinematic)",
+            2: "LSRD",# (Local Standard Rest Dynamical)",
+            3: "BARY",# (Barycentric)",
+            4: "GEO"# (Geocentric)"
         }
 
         # Handle unknown frame by assuming LSRK
         frame_type = frame_codes.get(meas_freq_ref[0], "Unknown frame")
         if frame_type == "Unknown frame":
-            print(f"Reference frame type: {frame_type} (assuming LSRK)")
-            frame_type = "LSRK (Local Standard Rest Kinematic)"  # Default to LSRK
+            logger.info(f"Reference frame type: {frame_type} (assuming 0:TOPO)")
+            frame_type = "TOPO"
         else:
-            print(f"Reference frame type: {frame_type}")
+            logger.info(f"Reference frame type: {frame_type}")
     else:
-        print("MEAS_FREQ_REF column not found in SPECTRAL_WINDOW table.")
+        logger.warning("MEAS_FREQ_REF column not found in SPECTRAL_WINDOW table.")
 
     tb.close()
+
+    return frame_type
 
     
 def get_observation_times(msfile):
@@ -141,6 +145,7 @@ def get_observation_times(msfile):
 
     return start_time_utc, end_time_utc, avg_time_utc, duration_seconds
 
+
 def get_phase_center_from_ms(ms, field_id):
     #open ms metadata
     msmd.open(ms)
@@ -154,7 +159,7 @@ def get_phase_center_from_ms(ms, field_id):
     ra_hms = Angle(ra_rad, unit=u.rad).to_string(unit=u.hourangle, sep=':')
     dec_dms = Angle(dec_rad, unit=u.rad).to_string(unit=u.deg, sep=':')
 
-    print("phase center: ", ra_hms, dec_dms)
+    # print("phase center: ", ra_hms, dec_dms)
 
     return ra_rad*u.rad, dec_rad*u.rad
 
@@ -212,100 +217,151 @@ def get_frequency_from_ms(msfile):
     return freq_array * u.Hz
 
 
-def get_heliocentric_velocity(msfile, phase_center_coord, obs_time, location, rest_freq):
-    """Computes the heliocentric velocity using data from the MS."""
-    
-    # Compute the heliocentric velocity correction
-    heliocentric_corr = phase_center_coord.radial_velocity_correction(kind="heliocentric", 
-                                                                    obstime=obs_time, 
-                                                                    location=location)
-    
-    # Get Frequency from MS
-    freq_array = get_frequency_from_ms(msfile)
-
-    # Compute Doppler Velocity using astropy.units.doppler_radio (radio convention)
-    radio_velocity_equiv = u.doppler_radio(rest_freq)  # Create equivalency
-    radio_velocity = freq_array.to(u.km/u.s, equivalencies=radio_velocity_equiv)
-
-    # Compute Heliocentric velocity
-    heliocentric_velocity = radio_velocity - heliocentric_corr
-
-    return heliocentric_velocity
-
-# Function to compute VLSRK
-def get_vlsrk_velocity(msfile, phase_center_coord, obs_time, location, rest_freq):
+def calculate_velocity(ms_file, rest_freq, field_id=0):
     """
-    Compute the VLSRK velocity from the frequency of the MS file.
-    
-    Args:
-        msfile (str): The Measurement Set (MS) file path.
-        phase_center_coord (SkyCoord): The phase center coordinates of the observation (in celestial coordinates).
-        obs_time (str): The observation time (in ISO format, e.g., "2025-02-16T00:00:00").
-        location (EarthLocation): The location of the telescope (e.g., ASKAP).
-    
+    Calls get_spectral_window_frame to determine the frame type and computes the corresponding velocity.
+    Returns the LSRK velocity if frame type is "LSRK", or computes the velocity assuming "TOPO" frame.
+
+    Parameters:
+    ms_file (str): Path to the Measurement Set (MS) file.
+    rest_freq (Quantity): Rest frequency of the spectral line as an astropy Quantity (e.g., `rest_freq = 1.4e9 * u.Hz`).
+    field_id (int, optional): Field ID to extract phase center. Default is 0.
+
     Returns:
-        float: The VLSRK velocity in km/s.
+    np.ndarray: A 1D array of velocities in km/s.
     """
-    
-    # Open the MS file using CASA or relevant package
-    # For simplicity, assuming msfile is in a format that you can extract frequency from
-    # Example: Using the CASA package (make sure you import necessary functions)
-    
-    # For now, let's assume the MS frequency is extracted from the MS header directly
-    # Replace this with code to read the MS file's frequency, e.g., using CASA's ms tool
-    
-    # Example frequency from MS file (just an assumption)
-    ms_freq = get_frequency_from_ms(msfile)
-        
-    # Convert observation time to Astropy Time object
-    observation_time = Time(obs_time)
+    frame_type = get_spectral_window_frame(ms_file)  # Get frame type from SPECTRAL_WINDOW table
 
-    # Get the position of the telescope (e.g., ASKAP location)
-    # If a custom location is provided, use that
-    if location is None:
-        location = get_askap_location()
+    if frame_type == "LSRK":
+        # If frame type is LSRK, use the convert_freq_to_velocity function
+        return convert_freq_to_velocity(ms_file, rest_freq)
     
-    # Calculate the observer's velocity using the location and time
-    observer = location.get_gcrs(obstime=observation_time)
+    elif frame_type == "TOPO":
+        # If frame type is TOPO, use the compute_vlsrk function
+        msmd = msmetadata()
+        me = measures()
+        msmd.open(ms_file)
+
+        # Extract telescope name
+        telescope = msmd.observatorynames()[0]  # Get first observatory name
+
+        # Use existing function to get phase center
+        ra, dec = get_phase_center_from_ms(ms_file, field_id)
+
+        # Use existing function to get observation time
+        _, _, avg_time_utc, _ = get_observation_times(ms_file)
+        obs_time = Time(avg_time_utc, format='iso', scale='utc')
+
+        # Get telescope location using measures
+        obs_pos = me.observatory(telescope)
+        observatory = EarthLocation.from_geocentric(obs_pos['m0']['value'] * u.m,
+                                                    obs_pos['m1']['value'] * u.m,
+                                                    obs_pos['m2']['value'] * u.m)
+
+        target = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
+
+        # Compute velocity correction
+        v_corr = target.radial_velocity_correction(kind='barycentric', obstime=obs_time, location=observatory).to(u.m / u.s)
+
+        # Ensure rest_freq is a Quantity (if not already)
+        if not isinstance(rest_freq, u.Quantity):
+            rest_freq = rest_freq * u.Hz  # Convert to Quantity if needed
+
+        vlsrk_list = []  # List to hold velocities for all channels
+
+        # Iterate over spectral windows
+        for spw in msmd.spwsforfield(msmd.fieldsforname(msmd.fieldnames()[0])[0]):
+            chan_freqs = msmd.chanfreqs(spw) * u.Hz  # Extract channel frequencies
+
+            # Make sure chan_freqs are Quantity objects
+            if not isinstance(chan_freqs, u.Quantity):
+                chan_freqs = chan_freqs * u.Hz
+
+            # Compute velocity using radio convention (LSRK)
+            v_lsrk = c * (rest_freq - chan_freqs) / rest_freq + v_corr  # Correct velocity formula
+
+            print(v_corr.to(u.km/u.s))
+
+            # Convert to km/s by dividing by 1000 (and keeping the astropy Quantity format)
+            v_lsrk_kms = v_lsrk.to(u.km / u.s)  # Convert velocity to km/s
+
+            # Append the velocities to the list
+            vlsrk_list.extend(v_lsrk_kms.value)  # .value extracts the underlying numpy array
+
+        msmd.close()
+
+        # Return the velocities as a numpy array with astropy Quantity in km/s
+        return np.array(vlsrk_list) * u.km / u.s  # Return as Quantity in km/s
+
+    else:
+        print(f"Unsupported frame type: {frame_type}")
+        return None
+
+
+def calculate_velocity_for_single_freq(ms_file, freq, rest_freq, field_id=0):
+    """
+    Computes the velocity for a single frequency using the radio convention and considering the frame type.
+
+    Parameters:
+    ms_file (str): Path to the Measurement Set (MS) file.
+    freq (Quantity): The observed frequency in Hz as an astropy Quantity (e.g., `freq = 1.4e9 * u.Hz`).
+    rest_freq (Quantity): Rest frequency of the spectral line as an astropy Quantity (e.g., `rest_freq = 1.4e9 * u.Hz`).
+    field_id (int, optional): Field ID to extract phase center. Default is 0.
+
+    Returns:
+    Quantity: The velocity in km/s (astropy Quantity).
+    """
+    frame_type = get_spectral_window_frame(ms_file)  # Get frame type from SPECTRAL_WINDOW table
+
+    if frame_type == "LSRK":
+        # If frame type is LSRK, use the convert_freq_to_velocity function
+        return convert_freq_to_velocity(ms_file, rest_freq)
     
-    # Extract velocity components using the correct attributes (d_x, d_y, d_z)
-    velocity_x = observer.velocity.d_x.to(u.km / u.s)  # Convert to km/s
-    velocity_y = observer.velocity.d_y.to(u.km / u.s)  # Convert to km/s
-    velocity_z = observer.velocity.d_z.to(u.km / u.s)  # Convert to km/s
-    
-    # Compute the total velocity magnitude
-    observer_velocity_kms = np.sqrt(velocity_x**2 + velocity_y**2 + velocity_z**2)
-    
-    # Using the Doppler shift formula (radio convention)
-    # Radio velocity (Doppler shift) using the rest frequency
-    radio_equiv = u.doppler_radio(rest_freq)
-    radio_velocity = ms_freq.to(u.km / u.s, equivalencies=radio_equiv)
-    
-    # Now calculate the VLSRK based on the observer's velocity (ASKAP) and the Doppler velocity
-    vlsrk_velocity = radio_velocity - observer_velocity_kms
+    elif frame_type == "TOPO":
+        # If frame type is TOPO, calculate velocity manually using observed frequency and radio convention
+        msmd = msmetadata()
+        me = measures()
+        msmd.open(ms_file)
 
-    print("observer_velocity_kms: ",  observer_velocity_kms)
+        # Extract telescope name
+        telescope = msmd.observatorynames()[0]  # Get first observatory name
 
-    return vlsrk_velocity
+        # Use existing function to get phase center
+        ra, dec = get_phase_center_from_ms(ms_file, field_id)
 
+        # Use existing function to get observation time
+        _, _, avg_time_utc, _ = get_observation_times(ms_file)
+        obs_time = Time(avg_time_utc, format='iso', scale='utc')
 
-def get_velocities(msfile, field_id=0, rest_freq=1.42040575177e9*u.Hz):
-    """Computes both VLSRK and heliocentric velocities at the phase center."""
-    
-    # Get Phase Center RA, Dec
-    phase_center_ra, phase_center_dec = get_phase_center_from_ms(msfile, field_id)
-    phase_center_coord = SkyCoord(ra=phase_center_ra, dec=phase_center_dec, frame="icrs")
+        # Get telescope location using measures
+        obs_pos = me.observatory(telescope)
+        observatory = EarthLocation.from_geocentric(obs_pos['m0']['value'] * u.m,
+                                                    obs_pos['m1']['value'] * u.m,
+                                                    obs_pos['m2']['value'] * u.m)
 
-    # Get Observation Time & ASKAP Location from MS
-    obs_time, location = get_observation_metadata(msfile)
+        target = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
 
-    # Compute the heliocentric velocity
-    heliocentric_velocity = get_heliocentric_velocity(msfile, phase_center_coord, obs_time, location, rest_freq)
+        # Compute velocity correction
+        v_corr = target.radial_velocity_correction(kind='barycentric', obstime=obs_time, location=observatory).to(u.m / u.s)
 
-    # Compute the VLSRK velocity
-    vlsrk_velocity = get_vlsrk_velocity(msfile, phase_center_coord, obs_time, location, rest_freq)
+        # Ensure rest_freq is a Quantity (if not already)
+        if not isinstance(rest_freq, u.Quantity):
+            rest_freq = rest_freq * u.Hz  # Convert to Quantity if needed
 
-    return heliocentric_velocity, vlsrk_velocity
+        # Calculate the velocity for the given observed frequency using the radio convention
+        velocity = c * (rest_freq - freq) / rest_freq + v_corr  # Correct velocity formula
+
+        # Convert to km/s
+        velocity_kms = velocity.to(u.km / u.s)
+
+        msmd.close()
+
+        # Return the velocity as an astropy Quantity in km/s
+        return velocity_kms
+
+    else:
+        print(f"Unsupported frame type: {frame_type}")
+        return None
 
 
 if __name__ == '__main__':    
@@ -320,12 +376,12 @@ if __name__ == '__main__':
     # path="/home/amarchal/Projects/deconv/examples/data/ATCA/rg17/msl/"
     # msfile="rg17.2100_2023-10-06.ms"
 
-    # path="/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/"
-    # msfile="MW-C10_1.ms.contsub"
+    path="/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/"
+    msfile="MW-C10_2.ms.contsub"
 
     # Print info header
-    print_spectral_window_frame(path+msfile)
-    
+    frame_type = get_spectral_window_frame(path+msfile)
+
     #Info time
     start_utc, end_utc, avg_utc, duration = get_observation_times(path+msfile)
     
@@ -336,12 +392,7 @@ if __name__ == '__main__':
     print("")
     
     # Example Usage
-    rest_freq = 1.42040575177e9 * u.Hz  # More precise 21 cm HI line rest frequency
-    velcocity = convert_freq_to_velocity(path+msfile, rest_freq) #OK
-    heliocentric_velocity, vlsrk_velocity = get_velocities(path+msfile, field_id=0, rest_freq=rest_freq) # field_id is 2 here for interleave C. Don't use
-
-    print("")
-    print(f"Heliocentric Velocity: {heliocentric_velocity}")
-    print(f"VLSRK Velocity: {vlsrk_velocity}")
+    rest_freq = 1.42040575177e9 * u.Hz  # More precise 21 cm HI line rest frequency    
+    vlsrk = calculate_velocity(path+msfile, rest_freq)
 
     
