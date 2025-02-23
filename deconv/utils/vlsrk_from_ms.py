@@ -320,6 +320,9 @@ if __name__ == '__main__':
     # path="/home/amarchal/Projects/deconv/examples/data/ATCA/rg17/msl/"
     # msfile="rg17.2100_2023-10-06.ms"
 
+    # path="/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/"
+    # msfile="MW-C10_1.ms.contsub"
+
     # Print info header
     print_spectral_window_frame(path+msfile)
     

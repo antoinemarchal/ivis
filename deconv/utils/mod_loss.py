@@ -180,23 +180,25 @@ def compute_loss_low_memory(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idma
         # Add to total loss
         loss_tot += 0.5 * (J1 + J11)
 
-    # SINGLE DISH
-    fftsd = torch.from_numpy(fftsd).to(device)
-    tapper = torch.from_numpy(tapper).to(device)
-    # FFT2 of tapper sky image
-    xfft2 = tfft2(x * tapper)
-    # Convolution in Fourier space to apply single dish beam
-    model_sd = cell_size**2 * xfft2 * torch.from_numpy(fftbeam).to(device)
-    # Residual real and imag
-    J2 = torch.nansum((model_sd.real - fftsd.real)**2)
-    J22 = torch.nansum((model_sd.imag - fftsd.imag)**2)
-    # Add to total loss
-    loss_tot += 0.5 * (J2 + J22) * lambda_sd
+    if lambda_sd != 0: 
+        # SINGLE DISH
+        fftsd = torch.from_numpy(fftsd).to(device)
+        tapper = torch.from_numpy(tapper).to(device)
+        # FFT2 of tapper sky image
+        xfft2 = tfft2(x * tapper)
+        # Convolution in Fourier space to apply single dish beam
+        model_sd = cell_size**2 * xfft2 * torch.from_numpy(fftbeam).to(device)
+        # Residual real and imag
+        J2 = torch.nansum((model_sd.real - fftsd.real)**2)
+        J22 = torch.nansum((model_sd.imag - fftsd.imag)**2)
+        # Add to total loss
+        loss_tot += 0.5 * (J2 + J22) * lambda_sd
 
-    # REGULARIZATION
-    conv = cell_size**2 * xfft2 * torch.from_numpy(fftkernel).to(device)
-    R = torch.nansum(abs(conv)**2)
-    loss_tot += 0.5 * R * lambda_r
+    if lambda_r != 0:
+        # REGULARIZATION
+        conv = cell_size**2 * xfft2 * torch.from_numpy(fftkernel).to(device)
+        R = torch.nansum(abs(conv)**2)
+        loss_tot += 0.5 * R * lambda_r
 
     loss_tot.backward(retain_graph=True)
 

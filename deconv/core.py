@@ -237,6 +237,7 @@ class Imager:
         self.positivity = positivity
         self.device = device
         logger.info("[Initialize Imager        ]")
+        logger.info(f"Number of iterations to be performed by the optimizer : {self.max_its}.")
         if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
         if self.lambda_r == 0: logger.warning("lambda_r = 0 - No spatial regularization.")
         if self.lambda_sd == 0: logger.warning("lambda_sd = 0 - No short spacing correction (ignoring single dish data).")
