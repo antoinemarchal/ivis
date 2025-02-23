@@ -165,19 +165,9 @@ def read_channel_casacore(ms_path, uvmin, uvmax, chunck, target_frequency, targe
             
             # Open the spectral window table to get frequency information
             spw_table = table(f"{ms_path}/SPECTRAL_WINDOW", readonly=True)
-            frequencies = np.squeeze(spw_table.getcol("CHAN_FREQ"))
-
-    # # Check the shape of the frequencies array
-    # if len(np.array([frequencies])) == 1:
-    #     # If there's only one frequency (i.e., only one channel)
-    #     logger.info(f"Only one channel in the MS, using frequency: {frequencies} Hz")
-    #     channel_index = 0
-    #     frequencies = np.array([frequencies])
-    # else:
-    #     if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
-    #         logger.info("Target frequency is out of range.")
-    #         return None
-
+            # frequencies = np.squeeze(spw_table.getcol("CHAN_FREQ"))
+            frequencies = np.atleast_1d(np.squeeze(spw_table.getcol("CHAN_FREQ")))
+            
     if target_frequency is not None and target_channel is not None:
         logger.error("Error: Only one of target_frequency or target_channel should be provided.")
         sys.exit(1)  # Exit with an error code

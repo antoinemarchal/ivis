@@ -10,7 +10,7 @@ from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
 
-from deconv.core import DataProcessor, Imager
+from deconv.core import DataVisualizer, DataProcessor, Imager
 
 import marchalib as ml #remove
 
@@ -32,6 +32,7 @@ if __name__ == '__main__':
     target_header["CRVAL2"] = cfield.dec.value
     
     #create data processor
+    data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     
     #PRE-COMPUTE DATA
@@ -55,8 +56,10 @@ if __name__ == '__main__':
 
     #read packaged visibilities from "pathout" directory
     vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000, chunks=1.e6,
-                                                    target_frequency=chan_freq) #fixme dummy chunks
-    # vis_data = data_processor.read_vis(_npz="NPZ/uvdata_Dave.npz", select_fraction=1) #no longer used - too slow. 
+                                                    target_frequency=None,
+                                                    target_channel=0,
+                                                    extension=".ms") #fixme dummy chunks
+    
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
     
     # #read single-dish data from "pathout" directory
@@ -66,24 +69,23 @@ if __name__ == '__main__':
     hdu_sd = fits.open(path_sd+fitsname)
     hdr_sd = hdu_sd[0].header
     sd = hdu_sd[0].data; sd[sd != sd] = 0. #NaN to 0
-    #Get CHIPASS
-    hdu_chipass = fits.open(pathout+"reproj_CHIPASS.fits")    
-    sd += (hdu_chipass[0].data *1.e-3)
+    # #Get CHIPASS
+    # hdu_chipass = fits.open(pathout+"reproj_CHIPASS.fits")    
+    # sd += (hdu_chipass[0].data *1.e-3)
     #Beam sd
     # beam_sd = Beam(hdr_sd["BMIN"]*u.deg, hdr_sd["BMAJ"]*u.deg, 1.e-12*u.deg)
     beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
     sd = sd * beam_sd.jtok(vis_data.frequency*u.GHz).value # convertion from K to Jy/beam
     sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
+    sd /= 2#ASKAP I convention
     
     #____________________________________________________________________________
     #user parameters
-    max_its = 120
-    lambda_sd = 1
+    max_its = 20
+    lambda_sd = 0#1
     lambda_r = 20
     device = 0#"cpu" #0 is GPU and "cpu" is CPU
-    positivity = True
-
-    if device == 0: print("GPU:", torch.cuda.get_device_name(0))
+    positivity = False
 
     #create image processor
     image_processor = Imager(vis_data,      # visibilities
@@ -100,6 +102,8 @@ if __name__ == '__main__':
     #get image
     result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
 
+    stop
+    
     #write on disk
     # target_header["BUNIT"] = 'Jy/beam'
     hdu0 = fits.PrimaryHDU(result, header=target_header)
