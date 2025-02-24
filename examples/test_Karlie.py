@@ -83,7 +83,7 @@ if __name__ == '__main__':
     positivity = False
     
     #BUILD CUBE
-    N = 1; START=991
+    N = 2; START=991
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
     for i in np.arange(N):

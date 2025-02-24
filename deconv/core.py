@@ -59,7 +59,7 @@ class DataProcessor:
         logger.info("[Initialize DataProcessor ]")
 
 
-    def fixms(self):
+    def fixms(self): #fixme ran in parallel 
         #get msl from path
         msl = sorted(glob.glob(self.path_ms+"*.ms"))
         # Apply fix_ms_dir to each MS file
@@ -68,7 +68,7 @@ class DataProcessor:
             subprocess.run(["fix_ms_dir", ms])  # Run the command for each MS file    
 
         logger.info("All MS files processed.")
-    
+            
 
     def package_ms(self, filename, select_fraction=1, uvmin=0, uvmax=7000, nchan=1, start=0, width=1, inc=1):
         #get filenames of all ms from mspath
