@@ -20,7 +20,7 @@ if __name__ == '__main__':
     print("test 4 SBIDs ASKAP Dave")
     #path data
     # path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/" #directory
-    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/scienceData.MS_M345-09A_1/" #directory of measurement sets
+    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/scienceData.MS_M345-09A_4/" #directory of measurement sets
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
     pathout = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/" #path where data will be packaged and stored
@@ -110,7 +110,7 @@ if __name__ == '__main__':
     # target_header["BUNIT"] = 'Jy/beam'
     hdu0 = fits.PrimaryHDU(result, header=target_header)
     hdulist = fits.HDUList([hdu0])
-    hdulist.writeto(pathout + "result_deconv_ASKAP_Dave_Parkes.fits", overwrite=True)
+    hdulist.writeto(pathout + "result_deconv_ASKAP_Dave_SB_1.fits", overwrite=True)
     #_____________________________________________________________________________
 
     stop
@@ -125,18 +125,18 @@ if __name__ == '__main__':
     w_img = ml.wcs2D(target_header)
 
     #PLOT RESULT
-    pathout="/priv/avatar/amarchal/ASKAP/IMAGING/plot/"
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
     ax.set_xlabel(r"RA (deg)", fontsize=18.)
     ax.set_ylabel(r"DEC (deg)", fontsize=18.)
-    img = ax.imshow(result, vmin=-30, vmax=40, origin="lower", cmap="inferno")
+    img = ax.imshow(result*mask, vmin=-30, vmax=40, origin="lower", cmap="inferno")
     ax.contour(effpb, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
-    plt.savefig(pathout + 'deconv_SMC_ASKAP_Dave_2.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    # plt.title("scienceData.MS_M345-09A_1")
+    plt.savefig(pathout + 'plot/deconv_SMC_ASKAP_Dave.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
     
     #PLOT RESULT
     pathout="/priv/avatar/amarchal/ASKAP/IMAGING/plot/"
