@@ -12,16 +12,21 @@ import torch
 from tqdm import tqdm as tqdm
 from reproject import reproject_interp
 from astropy.constants import c
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import Array
-import psutil
-from joblib import Parallel, delayed
+from spectral_cube import SpectralCube
 
 from deconv.core import DataVisualizer, DataProcessor, Imager
 
 import marchalib as ml #remove
 
 plt.ion()
+
+def wcs2D(hdr):
+    w = wcs.WCS(naxis=2)
+    w.wcs.crpix = [hdr['CRPIX1'], hdr['CRPIX2']]
+    w.wcs.cdelt = np.array([hdr['CDELT1'], hdr['CDELT2']])
+    w.wcs.crval = [hdr['CRVAL1'], hdr['CRVAL2']]
+    w.wcs.ctype = [hdr['CTYPE1'], hdr['CTYPE2']]
+    return w
 
 if __name__ == '__main__':    
     #path data
@@ -38,11 +43,6 @@ if __name__ == '__main__':
     #create data processor
     data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
-
-    #read single-dish data from "pathout" directory
-    fitsname = "MW-C10_GBT_regrid_spec_spat.fits"
-    hdu_sd = fits.open(path_sd+fitsname)
-    hdr_sd = hdu_sd[0].header
     
     # Test DataVisualizer
     # data_visualizer.msplot(0) # Plot I vs channel and velocity for ant2&3 for the first ms in directory
@@ -61,37 +61,52 @@ if __name__ == '__main__':
     # # pre-compute pb and interpolation grids
     # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_test.fits", fitsname_grid="grid_interp_test.fits") 
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits")
-    
-    sd = hdu_sd[0].data[0]; sd[sd != sd] = 0. #NaN to 0
+
+    #Open SD data
+    fitsname="/home/amarchal/Projects/deconv/examples/data/MeerKAT/MW_C10_GBT_0.7kms.fits"
+    hdu_sd = fits.open(fitsname)
+    hdr_sd = hdu_sd[0].header
+    w_sd = wcs2D(hdr_sd)
+    # Load the sd data cube (downloaded earlier)
+    cube_sd = SpectralCube.read(fitsname)
+        
     #Beam sd
     beam_sd = Beam(hdr_sd["BMIN"]*u.deg, hdr_sd["BMAJ"]*u.deg, 1.e-12*u.deg)
-    sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
-    
-    #reproject on target_header                                                    
-    w_sd = ml.wcs2D(hdr_sd)
-    w = ml.wcs2D(target_header)
-    shape_out = (target_header["NAXIS2"],target_header["NAXIS1"]) 
-    sd, footprint = reproject_interp((sd,w_sd.to_header()), w.to_header(), shape_out)
-    sd[sd != sd] = 0.
-    
+
     #____________________________________________________________________________
     #user parameters
-    max_its = 20
-    lambda_sd = 0#5
+    max_its = 25
+    lambda_sd = 1#5
     lambda_r = 10
     device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
     
     #BUILD CUBE
-    N = 2; START=991
+    N = 300; START=0
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
-    for i in np.arange(N):
+    for i in np.arange(N):        
         #Read data
         vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
                                                         target_frequency=None,
                                                         target_channel=START+i,
-                                                        extension=".contsub") #fixme dummy chunks
+                                                        extension=".vlsrk") #fixme dummy chunks
+
+        # Define the velocity you want
+        target_velocity = vis_data.velocity.value  # Correct way to create a Quantity
+        
+        # Interpolate the HI intensity at the exact velocity
+        hi_slice = cube_sd.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
+        hi_slice_array = hi_slice.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
+        shape = (target_header["NAXIS2"],target_header["NAXIS1"])
+        
+        #reproject on target_header
+        w = wcs2D(target_header)
+        target_hdr = w.to_header()
+        sd, footprint = reproject_interp((hi_slice_array,w_sd.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
+        sd[sd != sd] = 0.        
+        
+        sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
         
         #create image processor
         image_processor = Imager(vis_data,      # visibilities
@@ -110,7 +125,6 @@ if __name__ == '__main__':
         # Move to cube
         cube[i] = result
 
-    stop
     #write on disk
     filename = f"result_chan_{START:04d}_to_{START+N:04d}.fits"
     hdu0 = fits.PrimaryHDU(cube, header=target_header)
