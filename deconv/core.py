@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import glob
 import sys
 import numpy as np
@@ -14,11 +15,10 @@ from numpy.fft import fft2
 from torch.fft import fft2 as tfft2
 from dataclasses import dataclass
 from reproject import reproject_interp
-from deconv import logger  # Import the logger
 import subprocess
-
 import marchalib as ml
 
+from deconv import logger
 from deconv.utils import dunits, dutils, dformat, dms2npz, mod_loss, dcasacore, plotms
 
 @dataclass #modified from MPol
@@ -32,7 +32,7 @@ class VisData:
     coords: np.ndarray
     frequency: np.ndarray
 
-
+# DataVisualizer class    
 class DataVisualizer:
     def __init__(self, path_ms, path_beams, path_sd, pathout):
         super(DataVisualizer, self).__init__()
@@ -50,6 +50,7 @@ class DataVisualizer:
         plotms.plotms(msl[idfile])
 
 
+# DataProcessor class    
 class DataProcessor:
     def __init__(self, path_ms, path_beams, path_sd, pathout):
         super(DataProcessor, self).__init__()
@@ -183,41 +184,90 @@ class DataProcessor:
 
         return None#reproj_pb, grid_array
 
-
-    def read_vis(self, _npz, select_fraction=1):
-        #read packaged data
-        logger.info("read {}".format(_npz))
-        archive = np.load(self.pathout + _npz, allow_pickle=True)
-
-        #Select subset of visibilities
-        uu_lam, vv_lam, ww_lam, sigma, beam, data, coords, frequency = dformat.format_data(select_fraction, archive)
-
-        # store everything as 1D
-        vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, coords, frequency)
-        
-        return vis_data
-
     
     def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single"):
         if blocks == 'single':
-            logger.info("processing single scheduling block.")
-            
-            #get filenames of all ms from mspath
-            msl = sorted(glob.glob(self.path_ms+"*"+extension))
-            logger.info("number of ms files = {}".format(len(msl)))
-            
+            logger.info("Processing single scheduling block.")
+
+            # Get filenames of all ms files
+            msl = sorted(glob.glob(os.path.join(self.path_ms, f"*{extension}")))
+            logger.info("Number of MS files = {}".format(len(msl)))
+
             vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
-            
             return vis_data
-        
+
         elif blocks == 'multiple':
             logger.info("Processing multiple scheduling blocks.")
-            logger.warning("work in progress")
-            sys.exit()  # Exits the program
 
-        else: 
-            logger.error("Provide 'single' or 'multiple' blocks.")
-            sys.exit()  # Exits the program
+            subdirs = [d for d in sorted(os.listdir(self.path_ms)) if os.path.isdir(os.path.join(self.path_ms, d))]
+            if not subdirs:
+                logger.error("No subdirectories found in the path.")
+                sys.exit()
+
+            all_vis_data = []
+
+            for subdir in subdirs:
+                subdir_path = os.path.join(self.path_ms, subdir)
+                msl = sorted(glob.glob(os.path.join(subdir_path, f"*{extension}")))
+
+                if not msl:
+                    logger.warning(f"No MS files found in {subdir_path}, skipping...")
+                    continue
+
+                vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
+                all_vis_data.append(vis_data)
+
+            if not all_vis_data:
+                logger.error("No valid data found across subdirectories.")
+                sys.exit()
+
+            # Concatenate the data
+            concatenated_data = self.concatenate_vis_data(all_vis_data)
+            return concatenated_data
+
+        else:
+            logger.error("Provide 'single' or 'multiple' for blocks.")
+            sys.exit()
+
+
+    @staticmethod
+    def concatenate_vis_data(vis_data_list):
+        """Concatenates a list of VisData objects along the first axis and sorts all arrays based on the beam array, keeping coords and frequency as they are."""
+        
+        # Concatenate all arrays (except for coords and frequency)
+        uu = np.concatenate([v.uu for v in vis_data_list])
+        vv = np.concatenate([v.vv for v in vis_data_list])
+        ww = np.concatenate([v.ww for v in vis_data_list])
+        sigma = np.concatenate([v.sigma for v in vis_data_list])
+        data = np.concatenate([v.data for v in vis_data_list])
+        beam = np.concatenate([v.beam for v in vis_data_list])
+        
+        # Get the indices that would sort the beam array
+        sort_indices = np.argsort(beam)
+        
+        # Apply the sorting indices to all arrays to keep them aligned
+        uu = uu[sort_indices]
+        vv = vv[sort_indices]
+        ww = ww[sort_indices]
+        sigma = sigma[sort_indices]
+        data = data[sort_indices]
+        beam = beam[sort_indices]  # Reorder the beam array using sort_indices
+        
+        # Keep the first value of coords and frequency (without concatenation)
+        coords = vis_data_list[0].coords
+        frequency = vis_data_list[0].frequency
+        
+        return VisData(
+            uu=uu, 
+            vv=vv, 
+            ww=ww, 
+            sigma=sigma, 
+            data=data, 
+            beam=beam, 
+            coords=coords, 
+            frequency=frequency
+        )
+
 
     def read_pb_and_grid(self, fitsname_pb, fitsname_grid):
         #read pre-computed pb
@@ -233,7 +283,7 @@ class DataProcessor:
         
         return sd, beam_sd
 
-    
+# Imager class    
 class Imager:
     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, max_its, lambda_sd, lambda_r, positivity, device):
         super(Imager, self).__init__()
@@ -259,7 +309,8 @@ class Imager:
         if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
 
 
-    def get_device(self, user_device):
+    @staticmethod
+    def get_device(user_device):
         if user_device == 0:  # User requested GPU
             try:
                 if torch.cuda.is_available():
@@ -380,3 +431,38 @@ class Imager:
             
         else: logger.info("unit must be 'Jy/arcsec^2' or 'K'")            
     
+
+
+# def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single"):
+    #     if blocks == 'single':
+    #         logger.info("processing single scheduling block.")
+            
+    #         #get filenames of all ms from mspath
+    #         msl = sorted(glob.glob(self.path_ms+"*"+extension))
+    #         logger.info("number of ms files = {}".format(len(msl)))
+            
+    #         vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
+            
+    #         return vis_data
+        
+    #     elif blocks == 'multiple':
+    #         logger.info("Processing multiple scheduling blocks.")
+    #         logger.warning("work in progress")
+    #         sys.exit()  # Exits the program
+
+    #     else: 
+    #         logger.error("Provide 'single' or 'multiple' blocks.")
+    #         sys.exit()  # Exits the program
+
+# def read_vis(self, _npz, select_fraction=1):
+#     #read packaged data
+#     logger.info("read {}".format(_npz))
+#     archive = np.load(self.pathout + _npz, allow_pickle=True)
+
+#     #Select subset of visibilities
+#     uu_lam, vv_lam, ww_lam, sigma, beam, data, coords, frequency = dformat.format_data(select_fraction, archive)
+    
+#     # store everything as 1D
+#     vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, coords, frequency)
+    
+#     return vis_data

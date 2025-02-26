@@ -87,11 +87,11 @@ if __name__ == '__main__':
     
     for i in np.arange(N):        
         #Read data
-        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=6000,
+        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
                                                         target_frequency=None,
                                                         target_channel=START+i,
                                                         extension=".vlsrk",
-                                                        blocks='single') #fixme dummy chunks
+                                                        blocks='single')
 
         # Define the velocity you want
         target_velocity = vis_data.velocity.value  # Correct way to create a Quantity

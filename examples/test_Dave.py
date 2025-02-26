@@ -19,7 +19,8 @@ plt.ion()
 if __name__ == '__main__':    
     print("test 4 SBIDs ASKAP Dave")
     #path data
-    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/" #directory of measurement sets
+    # path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/" #directory
+    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/scienceData.MS_M345-09A_1/" #directory of measurement sets
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
     pathout = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/" #path where data will be packaged and stored
@@ -55,10 +56,11 @@ if __name__ == '__main__':
     chan_freq = rest_freq_u - (velocity * rest_freq_u) / c
 
     #read packaged visibilities from "pathout" directory
-    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000, chunks=1.e6,
+    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
                                                     target_frequency=None,
                                                     target_channel=0,
-                                                    extension=".ms") #fixme dummy chunks
+                                                    extension=".ms",
+                                                    blocks='single')
     
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
     
