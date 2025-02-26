@@ -96,7 +96,7 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
 
     # Check if the target frequency is out of the range (min/max)
     if target_frequency.value < frequencies.min() or target_frequency.value > frequencies.max():
-        logger.info("target frequency out of range")
+        logger.error("target frequency out of range")
         sys.exit()  # Exits the program
     else:
         logger.info(f"target frequency {target_frequency.value} is within range.")

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import glob
+import sys
 import numpy as np
 from astropy import units as u
 from astropy import wcs
@@ -57,7 +58,7 @@ class DataProcessor:
         self.path_sd = path_sd
         self.pathout = pathout
         logger.info("[Initialize DataProcessor ]")
-
+        
 
     def fixms(self): #fixme ran in parallel 
         #get msl from path
@@ -197,15 +198,26 @@ class DataProcessor:
         return vis_data
 
     
-    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms"):
-        #get filenames of all ms from mspath
-        msl = sorted(glob.glob(self.path_ms+"*"+extension))
-        logger.info("number of ms files = {}".format(len(msl)))
+    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single"):
+        if blocks == 'single':
+            logger.info("processing single scheduling block.")
+            
+            #get filenames of all ms from mspath
+            msl = sorted(glob.glob(self.path_ms+"*"+extension))
+            logger.info("number of ms files = {}".format(len(msl)))
+            
+            vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
+            
+            return vis_data
         
-        vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
-                
-        return vis_data #REMOVE ra and dec / should be useless from here
+        elif blocks == 'multiple':
+            logger.info("Processing multiple scheduling blocks.")
+            logger.warning("work in progress")
+            sys.exit()  # Exits the program
 
+        else: 
+            logger.error("Provide 'single' or 'multiple' blocks.")
+            sys.exit()  # Exits the program
 
     def read_pb_and_grid(self, fitsname_pb, fitsname_grid):
         #read pre-computed pb
@@ -235,12 +247,34 @@ class Imager:
         self.lambda_sd = lambda_sd
         self.lambda_r = lambda_r
         self.positivity = positivity
-        self.device = device
         logger.info("[Initialize Imager        ]")
-        logger.info(f"Number of iterations to be performed by the optimizer : {self.max_its}.")
-        if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
+        logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
+
+        # Logger for hyper-parameters
         if self.lambda_r == 0: logger.warning("lambda_r = 0 - No spatial regularization.")
         if self.lambda_sd == 0: logger.warning("lambda_sd = 0 - No short spacing correction (ignoring single dish data).")
+
+        # Check if CUDA is found on the machine and fall back on CPU otherwise
+        self.device = self.get_device(device)
+        if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
+
+
+    def get_device(self, user_device):
+        if user_device == 0:  # User requested GPU
+            try:
+                if torch.cuda.is_available():
+                    device = torch.device("cuda:0")
+                    logger.info(f"Using GPU device: {torch.cuda.get_device_name(0)}")
+                else:
+                    raise RuntimeError("CUDA not available.")
+            except RuntimeError as e:
+                logger.warning(f"{e} Falling back on CPU.")
+                device = torch.device("cpu")
+        else:
+            device = torch.device("cpu")
+            logger.info("Using CPU.")
+
+        return device
         
 
     def process(self, units, disk=False):
