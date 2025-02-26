@@ -76,21 +76,22 @@ if __name__ == '__main__':
     #____________________________________________________________________________
     #user parameters
     max_its = 25
-    lambda_sd = 1#5
+    lambda_sd = 0#5
     lambda_r = 10
     device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
     
     #BUILD CUBE
-    N = 300; START=0
+    N = 3; START=170
     cube = np.zeros((N,target_header["NAXIS2"],target_header["NAXIS1"]))
     
     for i in np.arange(N):        
         #Read data
-        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
+        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=6000,
                                                         target_frequency=None,
                                                         target_channel=START+i,
-                                                        extension=".vlsrk") #fixme dummy chunks
+                                                        extension=".vlsrk",
+                                                        blocks='single') #fixme dummy chunks
 
         # Define the velocity you want
         target_velocity = vis_data.velocity.value  # Correct way to create a Quantity
@@ -103,10 +104,10 @@ if __name__ == '__main__':
         #reproject on target_header
         w = wcs2D(target_header)
         target_hdr = w.to_header()
-        sd, footprint = reproject_interp((hi_slice_array,w_sd.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
-        sd[sd != sd] = 0.        
-        
-        sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
+        sd_K, footprint = reproject_interp((hi_slice_array,w_sd.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
+        sd_K[sd_K != sd_K] = 0.        
+
+        sd = sd_K / (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
         
         #create image processor
         image_processor = Imager(vis_data,      # visibilities
@@ -121,9 +122,10 @@ if __name__ == '__main__':
                                  positivity,    # impose a positivity constaint
                                  device)        # device: 0 is GPU; "cpu" is CPU
         #get image
-        result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+        result = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
         # Move to cube
         cube[i] = result
+
 
     #write on disk
     filename = f"result_chan_{START:04d}_to_{START+N:04d}.fits"
