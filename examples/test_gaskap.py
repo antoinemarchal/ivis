@@ -77,13 +77,14 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0#1
     lambda_r = 20
-    device = 0#"cpu" #0 is GPU and "cpu" is CPU
+    device = "cpu" #0 is GPU and "cpu" is CPU
     positivity = False
 
     #BUILD CUBE
     #100 to 200 km/s -> chan 874 - 1079        
-    start = 874; end=1079; step=20
+    start = 874; end=1079; step=3
     idlist = np.arange(start, end, step)
+    
     cube = np.zeros((len(idlist),target_header["NAXIS2"],target_header["NAXIS1"]))
 
     for k, i in enumerate(idlist):
@@ -93,7 +94,7 @@ if __name__ == '__main__':
                                                         target_channel=i,
                                                         extension=".ms",
                                                         blocks='single',
-                                                        max_workers=4)
+                                                        max_workers=8)
 
     
         

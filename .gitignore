@@ -2,6 +2,7 @@
 __pycache__/
 build/
 deconv.egg-info/
+jnk/
 
 # Ignore specific file types
 *.py~
