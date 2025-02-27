@@ -10,6 +10,7 @@ from astropy.constants import c
 from astropy.coordinates import Angle, SkyCoord
 import astropy.units as u
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from casacore.tables import table, taql
 from pathlib import Path
@@ -252,7 +253,75 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
     return frequencies[channel_index], velocity, uvw_lambda, sigma_i, stokes_i, ra_hms, dec_dms
     
 
-def readmsl(msl, uvmin, uvmax, target_frequency, target_channel):
+def process_ms(ms, uvmin, uvmax, target_frequency, target_channel, k):
+    """ Process a single MS file and return the extracted data. """
+    iteration_start_time = time.time()
+    
+    try:
+        logger.info(f"Processing file {k}: {ms}")
+        
+        freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax, target_frequency, target_channel)
+        
+        UU, VV, WW = UVW[:,0], UVW[:,1], UVW[:,2]
+        c = SkyCoord(ra, dec, unit=(u.hourangle, u.deg), frame='icrs')
+
+        beam_index = np.full(len(UU), k)  # Beam index should start at 0
+        
+        iteration_time = time.time() - iteration_start_time
+        logger.info(f"Finished processing {ms} in {iteration_time:.2f}s")
+        
+        return UU, VV, WW, SIGMA, DATA, beam_index, c, freq, vel
+    
+    except Exception as e:
+        logger.error(f"Error processing {ms}: {e}")
+        return None  # Returning None allows us to filter failed tasks later
+
+
+def readmsl(msl, uvmin, uvmax, target_frequency, target_channel, n_workers):
+    """ Parallelized version of readmsl using ProcessPoolExecutor. """
+
+    uu, vv, ww, sigma, data, beam, centers = [], [], [], [], [], [], []
+    total_files = len(msl)
+    
+    start_time = time.time()
+    
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        future_to_ms = {executor.submit(process_ms, ms, uvmin, uvmax, target_frequency, target_channel, k): ms
+                        for k, ms in enumerate(msl)}
+
+        for future in as_completed(future_to_ms):
+            result = future.result()
+            if result is not None:
+                UU, VV, WW, SIGMA, DATA, beam_index, c, freq, vel = result
+                uu.append(UU); vv.append(VV); ww.append(WW)
+                sigma.append(SIGMA); data.append(DATA)
+                beam.append(beam_index); centers.append(c)
+    
+    # Concatenate results
+    uu = np.concatenate(uu); vv = np.concatenate(vv); ww = np.concatenate(ww)
+    sigma = np.concatenate(sigma); data = np.concatenate(data); beam = np.concatenate(beam)
+
+    # Sort by beam
+    sort = np.argsort(beam)
+    uu_lam = uu[sort]; vv_lam = vv[sort]; ww_lam = ww[sort]
+    sigma = sigma[sort]; beam = beam[sort]; data = data[sort]
+
+    # Convert to appropriate types
+    uu_lam = np.float32(uu_lam); vv_lam = np.float32(vv_lam); ww_lam = np.float32(ww_lam)
+    sigma = np.float32(sigma); beam = np.int32(beam); data = np.complex64(data)
+
+    # Take the complex conjugate
+    data = np.conj(data)
+
+    # Create VisData object
+    vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, centers, freq/1.e9, vel)
+
+    logger.info(f"Total processing time: {(time.time() - start_time) / 60:.2f} minutes")
+
+    return vis_data
+
+
+def readmsl_no_parallel(msl, uvmin, uvmax, target_frequency, target_channel):
     uu=[]
     vv=[]
     ww=[]

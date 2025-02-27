@@ -17,10 +17,8 @@ import marchalib as ml #remove
 plt.ion()
 
 if __name__ == '__main__':    
-    print("test 4 SBIDs ASKAP Dave")
     #path data
-    # path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/" #directory
-    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/"#scienceData.MS_M345-09A_4/" #directory of measurement sets
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb68329/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -38,7 +36,8 @@ if __name__ == '__main__':
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     
     #PRE-COMPUTE DATA
-    #fixms
+    #untardir and fixms
+    # data_processor.untardir(max_workers=6, clear=False) #warning clean=True will clear the .tar files
     # data_processor.fixms()
     # Continuum subtractin using casatools
     #XXX fixme
@@ -49,21 +48,6 @@ if __name__ == '__main__':
     
     #READ DATA - WILL BE IGNORED HERE FOR NOW
 
-    # Select velocity - will get the closest
-    velocity = -182*u.km/u.s
-    rest_freq_u = 1.42040575177e9 * u.Hz  # Must be in Hz
-    chan_freq = rest_freq_u - (velocity * rest_freq_u) / c
-
-    #read packaged visibilities from "pathout" directory
-    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-                                                    target_frequency=None,
-                                                    target_channel=0,
-                                                    extension=".ms",
-                                                    blocks='multiple',
-                                                    max_workers=8)
-    stop
-    pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
-    
     # #read single-dish data from "pathout" directory
     # sd, beam_sd = data_processor.read_sd()
     #single-dish data and beam
@@ -77,10 +61,17 @@ if __name__ == '__main__':
     #Beam sd
     # beam_sd = Beam(hdr_sd["BMIN"]*u.deg, hdr_sd["BMAJ"]*u.deg, 1.e-12*u.deg)
     beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
-    sd = sd * beam_sd.jtok(vis_data.frequency*u.GHz).value # convertion from K to Jy/beam
-    sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
-    sd /= 2#ASKAP I convention
+    # sd = sd * beam_sd.jtok(vis_data.frequency*u.GHz).value # convertion from K to Jy/beam
+    # sd /= (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
+    # sd /= 2#ASKAP I convention
     
+    pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
+
+    # Select velocity - will get the closest
+    velocity = 200*u.km/u.s
+    rest_freq_u = 1.42040575177e9 * u.Hz  # Must be in Hz
+    chan_freq = rest_freq_u - (velocity * rest_freq_u) / c
+
     #____________________________________________________________________________
     #user parameters
     max_its = 20
@@ -89,20 +80,47 @@ if __name__ == '__main__':
     device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
 
-    #create image processor
-    image_processor = Imager(vis_data,      # visibilities
-                             pb,            # array of primary beams
-                             grid,          # array of interpolation grids
-                             sd,            # single dish data in unit of Jy/arcsec^2
-                             beam_sd,       # beam of single-dish data in radio_beam format
-                             target_header, # header on which to image the data
-                             max_its,       # maximum number of iterations
-                             lambda_sd,     # hyper-parameter single-dish
-                             lambda_r,      # hyper-parameter regularization
-                             positivity,    # impose a positivity constaint
-                             device)        # device: 0 is GPU; "cpu" is CPU
-    #get image
-    result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+    #BUILD CUBE
+    #100 to 200 km/s -> chan 874 - 1079        
+    start = 874; end=1079; step=20
+    idlist = np.arange(start, end, step)
+    cube = np.zeros((len(idlist),target_header["NAXIS2"],target_header["NAXIS1"]))
+
+    for k, i in enumerate(idlist):
+        #read packaged visibilities from "pathout" directory
+        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+                                                        target_frequency=None,
+                                                        target_channel=i,
+                                                        extension=".ms",
+                                                        blocks='single',
+                                                        max_workers=4)
+
+    
+        
+        
+        #create image processor
+        image_processor = Imager(vis_data,      # visibilities
+                                 pb,            # array of primary beams
+                                 grid,          # array of interpolation grids
+                                 sd,            # single dish data in unit of Jy/arcsec^2
+                                 beam_sd,       # beam of single-dish data in radio_beam format
+                                 target_header, # header on which to image the data
+                                 max_its,       # maximum number of iterations
+                                 lambda_sd,     # hyper-parameter single-dish
+                                 lambda_r,      # hyper-parameter regularization
+                                 positivity,    # impose a positivity constaint
+                                 device)        # device: 0 is GPU; "cpu" is CPU
+        #get image
+        result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+
+        # Move to cube
+        cube[k] = result
+            
+    #write on disk
+    filename = f"result_chan_{start:04d}_to_{end:04d}_{step:02d}.fits"
+    hdu0 = fits.PrimaryHDU(cube, header=target_header)
+    hdulist = fits.HDUList([hdu0])
+    hdulist.writeto(pathout + filename, overwrite=True)
 
     stop
     

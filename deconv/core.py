@@ -16,6 +16,10 @@ from torch.fft import fft2 as tfft2
 from dataclasses import dataclass
 from reproject import reproject_interp
 import subprocess
+import tarfile
+import concurrent.futures
+from pathlib import Path
+
 import marchalib as ml
 
 from deconv import logger
@@ -70,35 +74,155 @@ class DataProcessor:
             subprocess.run(["fix_ms_dir", ms])  # Run the command for each MS file    
 
         logger.info("All MS files processed.")
+
+
+    def extract_tar(self, tar_file, clear=False):
+        """Extracts a .tar file and optionally deletes the .tar file after extraction"""
+        output_dir = os.path.dirname(tar_file)  # Extract in the same directory
+        logger.info(f"Starting extraction: {tar_file}")
+
+        try:
+            with tarfile.open(tar_file) as tar:
+                tar.extractall(path=output_dir)
+            logger.info(f"Finished extracting: {tar_file}")
+        except Exception as e:
+            logger.warning(f"Error extracting {tar_file}: {e}")
+
+        if clear:
+            try:
+                os.remove(tar_file)  # Delete the .tar file
+                logger.info(f"Deleted .tar file: {tar_file}")
+            except Exception as e:
+                logger.warning(f"Error deleting {tar_file}: {e}")
+
+        return tar_file  # Return tar_file for deletion after processing
+
+
+    def untardir(self, max_workers=4, clear=False):
+        """Recursively extracts all .tar files in the given directory and subdirectories in sorted order"""
+        if not os.path.isdir(self.path_ms):
+            logger.warning(f"Invalid directory: {self.path_ms}")
+            return
+
+        # Ask user to confirm before starting extraction process
+        confirm = input(f"Do you want to start extracting and possibly delete all .tar files in {self.path_ms}? (y/n): ")
+        if confirm.lower() != 'y':
+            logger.info("Extraction process canceled.")
+            return
+
+        # Get all .tar files, convert Path objects to strings, and sort them
+        tar_files = sorted(str(p) for p in Path(self.path_ms).rglob("*.tar"))
+
+        if not tar_files:
+            logger.info("No .tar files found.")
+            return
+
+        logger.info(f"Found {len(tar_files)} .tar files. Starting extraction...")
+
+        # Extract files in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            executor.map(self.extract_tar, tar_files, [clear] * len(tar_files))
+
+        logger.info("All .tar files have been processed.")
             
 
-    def package_ms(self, filename, select_fraction=1, uvmin=0, uvmax=7000, nchan=1, start=0, width=1, inc=1):
-        #get filenames of all ms from mspath
-        msl = sorted(glob.glob(self.path_ms+"*.ms"))
-        logger.info("number of ms files = {}".format(len(msl)))        
+    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single", max_workers=1):
+        if blocks == 'single':
+            logger.info("Processing single scheduling block.")
 
-        # get data
-        frequency, uu, vv, ww, weight, sigma, data, flag, beam, ra_hms, dec_dms = dms2npz.get_baselines(msl, select_fraction=select_fraction, sigma_rescale=1.0, incl_model_data=False, datacolumn="data", nchan=nchan, start=start, width=width, inc=inc, uvmin=np.float32(uvmin), uvmax=np.float32(uvmax))
+            # Get filenames of all ms files
+            msl = sorted(glob.glob(os.path.join(self.path_ms, f"*{extension}")))
+            logger.info("Number of MS files = {}".format(len(msl)))
 
-        logger.info(data.shape, uu.shape, weight.shape, sigma.shape)
+            if max_workers > 1:
+                logger.info("Processing read ms files in parallel.")
+                vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel,
+                                             max_workers)
+            else:
+                logger.info("Processing read ms files with single thread.")
+                vis_data = dcasacore.readmsl_no_parallel(msl, uvmin, uvmax, target_frequency,
+                                                         target_channel)
+            return vis_data
+
+        elif blocks == 'multiple':
+            logger.info("Processing multiple scheduling blocks.")
+
+            subdirs = [d for d in sorted(os.listdir(self.path_ms)) if os.path.isdir(os.path.join(self.path_ms, d))]
+            if not subdirs:
+                logger.error("No subdirectories found in the path.")
+                sys.exit()
+
+            all_vis_data = []
+
+            for subdir in subdirs:
+                subdir_path = os.path.join(self.path_ms, subdir)
+                msl = sorted(glob.glob(os.path.join(subdir_path, f"*{extension}")))
+
+                if not msl:
+                    logger.warning(f"No MS files found in {subdir_path}, skipping...")
+                    continue
+
+                if max_workers > 1:
+                    logger.info("Processing read ms files in parallel.")
+                    vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel,
+                                                 max_workers)
+                else:
+                    logger.info("Processing read ms files with single thread.")
+                    vis_data = dcasacore.readmsl_no_parallel(msl, uvmin, uvmax, target_frequency,
+                                                 target_channel)
+                    
+                all_vis_data.append(vis_data)
+
+            if not all_vis_data:
+                logger.error("No valid data found across subdirectories.")
+                sys.exit()
+
+            # Concatenate the data
+            concatenated_data = self.concatenate_vis_data(all_vis_data)
+            return concatenated_data
+
+        else:
+            logger.error("Provide 'single' or 'multiple' for blocks.")
+            sys.exit()
+
+
+    @staticmethod
+    def concatenate_vis_data(vis_data_list):
+        """Concatenates a list of VisData objects along the first axis and sorts all arrays based on the beam array, keeping coords and frequency as they are."""
         
-        logger.info("write " + filename + " on disk")
-        np.savez(
-            self.pathout + filename,
-            frequency=frequency, # [GHz]
-            uu=uu, # [lambda]
-            vv=vv, # [lambda]
-            ww=ww, # [lambda]
-            weight=weight, # [1/Jy^2]
-            sigma=sigma, # assumed to be [Jy]
-            data=data, # [Jy]       
-            flag=flag, # [Bool]
-            beam=beam, #beam position in the list
-            ra_hms=ra_hms, #phase center Right ascension [h:m:s]
-            dec_dms=dec_dms, #phase center Declination [h:m:s]
+        # Concatenate all arrays (except for coords and frequency)
+        uu = np.concatenate([v.uu for v in vis_data_list])
+        vv = np.concatenate([v.vv for v in vis_data_list])
+        ww = np.concatenate([v.ww for v in vis_data_list])
+        sigma = np.concatenate([v.sigma for v in vis_data_list])
+        data = np.concatenate([v.data for v in vis_data_list])
+        beam = np.concatenate([v.beam for v in vis_data_list])
+        
+        # Get the indices that would sort the beam array
+        sort_indices = np.argsort(beam)
+        
+        # Apply the sorting indices to all arrays to keep them aligned
+        uu = uu[sort_indices]
+        vv = vv[sort_indices]
+        ww = ww[sort_indices]
+        sigma = sigma[sort_indices]
+        data = data[sort_indices]
+        beam = beam[sort_indices]  # Reorder the beam array using sort_indices
+        
+        # Keep the first value of coords and frequency (without concatenation)
+        coords = vis_data_list[0].coords
+        frequency = vis_data_list[0].frequency
+        
+        return VisData(
+            uu=uu, 
+            vv=vv, 
+            ww=ww, 
+            sigma=sigma, 
+            data=data, 
+            beam=beam, 
+            coords=coords, 
+            frequency=frequency
         )
-        
-        return None
 
 
     def compute_pb_and_grid(self, hdr, fitsname_pb=None, fitsname_grid=None):
@@ -181,92 +305,6 @@ class DataProcessor:
         hdu0 = fits.PrimaryHDU(grid_array, header=None)
         hdulist = fits.HDUList([hdu0])
         hdulist.writeto(self.pathout + fitsname_grid, overwrite=True)
-
-        return None#reproj_pb, grid_array
-
-    
-    def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single"):
-        if blocks == 'single':
-            logger.info("Processing single scheduling block.")
-
-            # Get filenames of all ms files
-            msl = sorted(glob.glob(os.path.join(self.path_ms, f"*{extension}")))
-            logger.info("Number of MS files = {}".format(len(msl)))
-
-            vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
-            return vis_data
-
-        elif blocks == 'multiple':
-            logger.info("Processing multiple scheduling blocks.")
-
-            subdirs = [d for d in sorted(os.listdir(self.path_ms)) if os.path.isdir(os.path.join(self.path_ms, d))]
-            if not subdirs:
-                logger.error("No subdirectories found in the path.")
-                sys.exit()
-
-            all_vis_data = []
-
-            for subdir in subdirs:
-                subdir_path = os.path.join(self.path_ms, subdir)
-                msl = sorted(glob.glob(os.path.join(subdir_path, f"*{extension}")))
-
-                if not msl:
-                    logger.warning(f"No MS files found in {subdir_path}, skipping...")
-                    continue
-
-                vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel)
-                all_vis_data.append(vis_data)
-
-            if not all_vis_data:
-                logger.error("No valid data found across subdirectories.")
-                sys.exit()
-
-            # Concatenate the data
-            concatenated_data = self.concatenate_vis_data(all_vis_data)
-            return concatenated_data
-
-        else:
-            logger.error("Provide 'single' or 'multiple' for blocks.")
-            sys.exit()
-
-
-    @staticmethod
-    def concatenate_vis_data(vis_data_list):
-        """Concatenates a list of VisData objects along the first axis and sorts all arrays based on the beam array, keeping coords and frequency as they are."""
-        
-        # Concatenate all arrays (except for coords and frequency)
-        uu = np.concatenate([v.uu for v in vis_data_list])
-        vv = np.concatenate([v.vv for v in vis_data_list])
-        ww = np.concatenate([v.ww for v in vis_data_list])
-        sigma = np.concatenate([v.sigma for v in vis_data_list])
-        data = np.concatenate([v.data for v in vis_data_list])
-        beam = np.concatenate([v.beam for v in vis_data_list])
-        
-        # Get the indices that would sort the beam array
-        sort_indices = np.argsort(beam)
-        
-        # Apply the sorting indices to all arrays to keep them aligned
-        uu = uu[sort_indices]
-        vv = vv[sort_indices]
-        ww = ww[sort_indices]
-        sigma = sigma[sort_indices]
-        data = data[sort_indices]
-        beam = beam[sort_indices]  # Reorder the beam array using sort_indices
-        
-        # Keep the first value of coords and frequency (without concatenation)
-        coords = vis_data_list[0].coords
-        frequency = vis_data_list[0].frequency
-        
-        return VisData(
-            uu=uu, 
-            vv=vv, 
-            ww=ww, 
-            sigma=sigma, 
-            data=data, 
-            beam=beam, 
-            coords=coords, 
-            frequency=frequency
-        )
 
 
     def read_pb_and_grid(self, fitsname_pb, fitsname_grid):
@@ -466,3 +504,31 @@ class Imager:
 #     vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, coords, frequency)
     
 #     return vis_data
+
+# def package_ms(self, filename, select_fraction=1, uvmin=0, uvmax=7000, nchan=1, start=0, width=1, inc=1):
+#     #get filenames of all ms from mspath
+#     msl = sorted(glob.glob(self.path_ms+"*.ms"))
+#     logger.info("number of ms files = {}".format(len(msl)))        
+
+#     # get data
+#     frequency, uu, vv, ww, weight, sigma, data, flag, beam, ra_hms, dec_dms = dms2npz.get_baselines(msl, select_fraction=select_fraction, sigma_rescale=1.0, incl_model_data=False, datacolumn="data", nchan=nchan, start=start, width=width, inc=inc, uvmin=np.float32(uvmin), uvmax=np.float32(uvmax))
+    
+#     logger.info(data.shape, uu.shape, weight.shape, sigma.shape)
+    
+#     logger.info("write " + filename + " on disk")
+#     np.savez(
+#         self.pathout + filename,
+#         frequency=frequency, # [GHz]
+#         uu=uu, # [lambda]
+#         vv=vv, # [lambda]
+#         ww=ww, # [lambda]
+#         weight=weight, # [1/Jy^2]
+#         sigma=sigma, # assumed to be [Jy]
+#         data=data, # [Jy]       
+#         flag=flag, # [Bool]
+#         beam=beam, #beam position in the list
+#         ra_hms=ra_hms, #phase center Right ascension [h:m:s]
+#         dec_dms=dec_dms, #phase center Declination [h:m:s]
+#     )
+    
+#     return None

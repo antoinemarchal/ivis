@@ -91,7 +91,8 @@ if __name__ == '__main__':
                                                         target_frequency=None,
                                                         target_channel=START+i,
                                                         extension=".vlsrk",
-                                                        blocks='single')
+                                                        blocks='single',
+                                                        max_workers=1)
 
         # Define the velocity you want
         target_velocity = vis_data.velocity.value  # Correct way to create a Quantity
