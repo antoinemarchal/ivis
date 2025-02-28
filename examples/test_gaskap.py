@@ -18,7 +18,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb68329/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb68329/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -77,7 +77,7 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0#1
     lambda_r = 20
-    device = "cpu" #0 is GPU and "cpu" is CPU
+    device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
 
     #BUILD CUBE
@@ -93,11 +93,8 @@ if __name__ == '__main__':
                                                         target_frequency=None,
                                                         target_channel=i,
                                                         extension=".ms",
-                                                        blocks='single',
+                                                        blocks='multiple',
                                                         max_workers=8)
-
-    
-        
         
         #create image processor
         image_processor = Imager(vis_data,      # visibilities
@@ -112,13 +109,13 @@ if __name__ == '__main__':
                                  positivity,    # impose a positivity constaint
                                  device)        # device: 0 is GPU; "cpu" is CPU
         #get image
-        result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+        result = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
         # Move to cube
         cube[k] = result
             
     #write on disk
-    filename = f"result_chan_{start:04d}_to_{end:04d}_{step:02d}.fits"
+    filename = f"result_chan_{start:04d}_to_{end:04d}_{step:02d}_Jy_arcsec2.fits"
     hdu0 = fits.PrimaryHDU(cube, header=target_header)
     hdulist = fits.HDUList([hdu0])
     hdulist.writeto(pathout + filename, overwrite=True)

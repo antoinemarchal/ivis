@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     #____________________________________________________________________________
     #user parameters
-    max_its = 25
+    max_its = 20
     lambda_sd = 0#5
     lambda_r = 10
     device = 0#"cpu" #0 is GPU and "cpu" is CPU

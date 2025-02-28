@@ -336,12 +336,13 @@ def readmsl_no_parallel(msl, uvmin, uvmax, target_frequency, target_channel):
     start_time = time.time()  # Record the start time of the entire loop
 
     for k, ms in enumerate(msl, start=1):
-    # for ms in msl:
+        # for ms in msl:
         iteration_start_time = time.time()  # Record start time for this iteration
         logger.info(f"Processing file {k}/{total_files}: {ms}")
         #Faster than dask_ms to extract one channel
         freq, vel, UVW, SIGMA, DATA, ra, dec = read_channel_casacore(ms, uvmin, uvmax,
                                                                      target_frequency, target_channel)
+        # chunks=1.e8
         # freq, vel, UVW, SIGMA, DATA, ra, dec = readms_dask(ms, uvmin, uvmax, chunks, target_frequency)
         UU = UVW[:,0]; VV = UVW[:,1]; WW = UVW[:,2]
         c = SkyCoord(ra, dec, unit=(u.hourangle, u.deg), frame='icrs')

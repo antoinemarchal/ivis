@@ -60,7 +60,7 @@ if __name__ == '__main__':
                                                     target_channel=0,
                                                     extension=".ms",
                                                     blocks='multiple',
-                                                    max_workers=8)
+                                                    max_workers=1)
     stop
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
     
