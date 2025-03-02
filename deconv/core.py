@@ -323,7 +323,7 @@ class DataProcessor:
 
 # Imager class    
 class Imager:
-    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, max_its, lambda_sd, lambda_r, positivity, device):
+    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, lambda_r, positivity, device):
         super(Imager, self).__init__()
         self.vis_data = vis_data
         self.pb = pb
@@ -331,6 +331,7 @@ class Imager:
         self.sd = sd
         self.beam_sd = beam_sd
         self.hdr = hdr
+        self.init_params = init_params
         self.max_its = max_its
         self.lambda_sd = lambda_sd
         self.lambda_r = lambda_r
@@ -364,7 +365,41 @@ class Imager:
             logger.info("Using CPU.")
 
         return device
+
+
+    def process_beam_positions(self):
+        """
+        Computes the first and last occurrence indices of each beam in self.vis_data.beam.
         
+        Returns:
+        idmin (np.ndarray): Array of first occurrence indices for each beam.
+        idmax (np.ndarray): Array of last occurrence indices for each beam.
+        """
+        # nb = len(self.vis_data.coords)
+        # idmin = np.zeros(nb); idmax = np.zeros(nb)
+        # for i in np.arange(nb):
+        #     idmin[i] = np.where(self.vis_data.beam == i)[0][0];
+        #     idmax[i] = len(np.where(self.vis_data.beam == i)[0])#-1
+        nb = len(self.vis_data.coords)
+        
+        # Find unique beam indices and their first occurrence
+        unique_beams, first_idx = np.unique(self.vis_data.beam, return_index=True)
+        
+        # Get counts of occurrences per beam
+        beam_counts = np.bincount(self.vis_data.beam, minlength=nb)
+        
+        # Initialize arrays
+        idmin = np.zeros(nb, dtype=int)
+        idmax = np.zeros(nb, dtype=int)
+        
+        # Assign first index
+        idmin[unique_beams] = first_idx
+        
+        # Assign (count - 1) for each beam
+        idmax[unique_beams] = beam_counts[unique_beams] #- 1
+        
+        return idmin, idmax
+
 
     def process(self, units, disk=False):
         #Image parameters
@@ -393,15 +428,8 @@ class Imager:
         fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).numpy()
 
         #Get idx beams in array
-        nb = len(self.vis_data.coords)
-        idmin = np.zeros(nb); idmax = np.zeros(nb)
-        logger.info("Processing beams position..")
-        for i in np.arange(nb):
-            idmin[i] = np.where(self.vis_data.beam == i)[0][0];
-            idmax[i] = len(np.where(self.vis_data.beam == i)[0])-1
-
-        #init array
-        init_params = np.zeros(shape).ravel() #Start with null map
+        # logger.info("Processing beams position..")
+        idmin, idmax = self.process_beam_positions()
 
         #define bounds for optimisation
         if self.positivity == False:
@@ -416,36 +444,50 @@ class Imager:
             logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
         else:
             logger.info('Optimizer not bounded - Positivity == False')
-            
-        opt_output = optimize.minimize(mod_loss.objective, init_params.ravel().astype(np.float32),
-                                       args=(
-                                           beam.astype(np.float32),
-                                           fftbeam.astype(np.float32),
-                                           self.vis_data.data.astype(np.complex64),
-                                           uu_radpix.astype(np.float32),
-                                           vv_radpix.astype(np.float32),
-                                           ww_radpix.astype(np.float32),
-                                           self.pb.astype(np.float32),
-                                           idmin.astype(np.int32),
-                                           idmax.astype(np.int32),
-                                           self.device,
-                                           self.vis_data.sigma.astype(np.float32),
-                                           fftsd.astype(np.complex64),
-                                           tapper.astype(np.float32),
-                                           self.lambda_sd,
-                                           self.lambda_r,
-                                           fftkernel.astype(np.float32),
-                                           shape,
-                                           cell_size.value, #in arcsec
-                                           self.grid.astype(np.float32)
-                                       ),
-                                       jac=True,
-                                       tol=1.e-8,
-                                       bounds=bounds, method='L-BFGS-B',
-                                       options={'maxiter': self.max_its, 'maxfun': 1e100, 'iprint': 1, 'disp': 2})
-
-        # logger.info(opt_output)
+                
+        # Precompute type conversions (done once)
+        params_f32 = self.init_params.ravel().astype(np.float32)
+        beam_f32 = np.asarray(self.vis_data.beam, dtype=np.float32)
+        fftbeam_f32 = np.asarray(fftbeam, dtype=np.float32)
+        data_c64 = np.asarray(self.vis_data.data, dtype=np.complex64)
+        uu_f32 = np.asarray(uu_radpix, dtype=np.float32)
+        vv_f32 = np.asarray(vv_radpix, dtype=np.float32)
+        ww_f32 = np.asarray(ww_radpix, dtype=np.float32)
+        pb_f32 = np.asarray(self.pb, dtype=np.float32)
+        idmin_i32 = np.asarray(idmin, dtype=np.int32)
+        idmax_i32 = np.asarray(idmax, dtype=np.int32)
+        sigma_f32 = np.asarray(self.vis_data.sigma, dtype=np.float32)
+        fftsd_c64 = np.asarray(fftsd, dtype=np.complex64)
+        tapper_f32 = np.asarray(tapper, dtype=np.float32)
+        fftkernel_f32 = np.asarray(fftkernel, dtype=np.float32)
+        grid_f32 = np.asarray(self.grid, dtype=np.float32)
         
+        opt_args = (
+            beam_f32, fftbeam_f32, data_c64, uu_f32, vv_f32, ww_f32,
+            pb_f32, idmin_i32, idmax_i32, self.device, sigma_f32, fftsd_c64,
+            tapper_f32, self.lambda_sd, self.lambda_r, fftkernel_f32, shape,
+            cell_size.value, grid_f32
+        )
+        
+        options = {
+            'maxiter': self.max_its,
+            'maxfun': int(1e6),
+            'iprint': 1,
+        }
+        
+        # Run optimization
+        opt_output = optimize.minimize(
+            mod_loss.objective, params_f32,
+            args=opt_args,
+            jac=True,
+            tol=1.e-8,
+            bounds=bounds,
+            method='L-BFGS-B',
+            options=options
+        )
+
+
+        # logger.info(opt_output)        
         result = np.reshape(opt_output.x, shape)
 
         #unit conversion
@@ -470,6 +512,33 @@ class Imager:
         else: logger.info("unit must be 'Jy/arcsec^2' or 'K'")            
     
 
+
+# opt_output = optimize.minimize(mod_loss.objective, self.init_params.ravel().astype(np.float32),
+#                                        args=(
+#                                            beam.astype(np.float32),
+#                                            fftbeam.astype(np.float32),
+#                                            self.vis_data.data.astype(np.complex64),
+#                                            uu_radpix.astype(np.float32),
+#                                            vv_radpix.astype(np.float32),
+#                                            ww_radpix.astype(np.float32),
+#                                            self.pb.astype(np.float32),
+#                                            idmin.astype(np.int32),
+#                                            idmax.astype(np.int32),
+#                                            self.device,
+#                                            self.vis_data.sigma.astype(np.float32),
+#                                            fftsd.astype(np.complex64),
+#                                            tapper.astype(np.float32),
+#                                            self.lambda_sd,
+#                                            self.lambda_r,
+#                                            fftkernel.astype(np.float32),
+#                                            shape,
+#                                            cell_size.value, #in arcsec
+#                                            self.grid.astype(np.float32)
+#                                        ),
+#                                        jac=True,
+#                                        tol=1.e-8,
+#                                        bounds=bounds, method='L-BFGS-B',
+#                                        options={'maxiter': self.max_its, 'maxfun': 1e6, 'iprint': 1, 'disp': 2})
 
 # def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single"):
     #     if blocks == 'single':

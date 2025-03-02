@@ -29,17 +29,23 @@ def laplacian(shape):
 
 
 def ROHSA_bounds(data_shape, lb_amp, ub_amp):
-    bounds_inf = np.zeros(data_shape)
-    bounds_sup = np.zeros(data_shape)
+    bounds_inf = np.full(data_shape, lb_amp)
+    bounds_sup = np.full(data_shape, ub_amp)
+    
+    return np.column_stack((bounds_inf.ravel(), bounds_sup.ravel()))
 
-    bounds_a = [lb_amp, ub_amp]
+# def ROHSA_bounds(data_shape, lb_amp, ub_amp):
+#     bounds_inf = np.zeros(data_shape)
+#     bounds_sup = np.zeros(data_shape)
 
-    bounds_inf[:,:] = bounds_a[0]
-    bounds_sup[:,:] = bounds_a[1]
+#     bounds_a = [lb_amp, ub_amp]
 
-    bounds = [(bounds_inf.ravel()[i], bounds_sup.ravel()[i]) for i in np.arange(len(bounds_sup.ravel()))]
+#     bounds_inf[:,:] = bounds_a[0]
+#     bounds_sup[:,:] = bounds_a[1]
+
+#     bounds = [(bounds_inf.ravel()[i], bounds_sup.ravel()[i]) for i in np.arange(len(bounds_sup.ravel()))]
                  
-    return np.array(bounds)
+#     return np.array(bounds)
 
 
 def gauss_beam(sigma, shape, FWHM=False):

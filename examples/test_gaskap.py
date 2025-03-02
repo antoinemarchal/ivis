@@ -9,8 +9,14 @@ from astropy.coordinates import SkyCoord
 from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
+import queue  # Standard Python queue for passing data between threads
+import threading
+import multiprocessing
+import time
 
 from deconv.core import DataVisualizer, DataProcessor, Imager
+from deconv.utils import dutils
+from deconv import logger
 
 import marchalib as ml #remove
 
@@ -18,7 +24,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb68329/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb67521/"#sb68329/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -30,7 +36,7 @@ if __name__ == '__main__':
     target_header = fits.open(filename)[0].header
     target_header["CRVAL1"] = cfield.ra.value
     target_header["CRVAL2"] = cfield.dec.value
-    
+
     #create data processor
     data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
@@ -55,9 +61,6 @@ if __name__ == '__main__':
     hdu_sd = fits.open(path_sd+fitsname)
     hdr_sd = hdu_sd[0].header
     sd = hdu_sd[0].data; sd[sd != sd] = 0. #NaN to 0
-    # #Get CHIPASS
-    # hdu_chipass = fits.open(pathout+"reproj_CHIPASS.fits")    
-    # sd += (hdu_chipass[0].data *1.e-3)
     #Beam sd
     # beam_sd = Beam(hdr_sd["BMIN"]*u.deg, hdr_sd["BMAJ"]*u.deg, 1.e-12*u.deg)
     beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
@@ -82,40 +85,123 @@ if __name__ == '__main__':
 
     #BUILD CUBE
     #100 to 200 km/s -> chan 874 - 1079        
-    start = 874; end=1079; step=3
+    start = 820; end=824; step=1
+    # start = 820; end=970; step=1
     idlist = np.arange(start, end, step)
     
-    cube = np.zeros((len(idlist),target_header["NAXIS2"],target_header["NAXIS1"]))
+    shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
-    for k, i in enumerate(idlist):
-        #read packaged visibilities from "pathout" directory
-        vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-                                                        target_frequency=None,
-                                                        target_channel=i,
-                                                        extension=".ms",
-                                                        blocks='multiple',
-                                                        max_workers=8)
+    # Example usage
+    cube = np.zeros((len(idlist), *shape))  # Preallocate cube storage
+
+    def preload_visibilities(data_processor, idlist, vis_queue, maxsize):
+        """Loads visibility data while ensuring the queue does not exceed maxsize."""
+        logger.info("Starting visibility preloading...")
         
-        #create image processor
-        image_processor = Imager(vis_data,      # visibilities
-                                 pb,            # array of primary beams
-                                 grid,          # array of interpolation grids
-                                 sd,            # single dish data in unit of Jy/arcsec^2
-                                 beam_sd,       # beam of single-dish data in radio_beam format
-                                 target_header, # header on which to image the data
-                                 max_its,       # maximum number of iterations
-                                 lambda_sd,     # hyper-parameter single-dish
-                                 lambda_r,      # hyper-parameter regularization
-                                 positivity,    # impose a positivity constaint
-                                 device)        # device: 0 is GPU; "cpu" is CPU
-        #get image
-        result = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+        for i in idlist:
+            logger.info(f"Loading visibilities for channel {i}...")
+            
+            # Ensure queue does not exceed maxsize
+            while vis_queue.qsize() >= maxsize:
+                time.sleep(0.1)  # Wait for the consumer to process the current dataset
+                
+            try:
+                vis_data = data_processor.read_vis_from_scratch(
+                    uvmin=0, uvmax=7000, target_frequency=None,
+                    target_channel=i, extension=".ms", blocks='single', max_workers=12
+                )
+                
+                vis_queue.put((i, vis_data))  # Store (index, data) in queue
+                logger.info(f"Preloaded channel {i}, waiting for processing...")
+            except Exception as e:
+                logger.error(f"Error loading visibilities for channel {i}: {e}")
+                vis_queue.put(None)  # Signal an error
+                
+        vis_queue.put(None)  # Sentinel value to signal end of processing
+        logger.info("Finished preloading all visibilities.")
 
-        # Move to cube
-        cube[k] = result
+
+    def process_visibilities(vis_queue, idlist, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube):
+        """Processes visibility data retrieved from the queue."""
+        for k in range(len(idlist)):
+            logger.info(f"Waiting for preloaded visibilities (iteration {k})...")
+            
+            item = vis_queue.get()  # Fetch preloaded visibilities
+            if item is None:  # If sentinel value received, exit loop
+                logger.warning("No more visibilities to process. Exiting loop.")
+                break
+        
+            i, vis_data = item
+            logger.info(f"Processing visibilities for channel {i}...")
+            
+            # Set initial parameters
+            init_params = np.zeros(shape).ravel()
+            
+            # Create image processor
+            image_processor = Imager(vis_data, pb, grid, sd, beam_sd, target_header,
+                                     init_params, max_its, lambda_sd, lambda_r, positivity, device)
+            
+            # Start processing
+            try:
+                result = image_processor.process(units="Jy/arcsec^2")
+                logger.info(f"Successfully processed channel {i}.")
+            except Exception as e:
+                logger.error(f"Error processing channel {i}: {e}")
+                break
+            
+            # Store result in cube
+            cube[k] = result
+
+    maxsize = 2  # Adjust queue size dynamically
+    vis_queue = multiprocessing.Queue(maxsize=maxsize)
+
+    preload_process = multiprocessing.Process(target=preload_visibilities, args=(data_processor, idlist, vis_queue, maxsize))
+    preload_process.start()
+
+    process_visibilities(vis_queue, idlist, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube)
+    
+    logger.info("Joining the preload process...")
+    preload_process.join()
+    logger.info("Processing completed successfully.")
+        
+
+    # cube = np.zeros((len(idlist),shape[0],shape[1]))
+
+    # for k, i in enumerate(idlist):
+    #     # if k == 0:
+    #     init_params = np.zeros(shape).ravel() #Start with null map
+    #     # else:
+    #     #     init_params = result
+
+    #     #read packaged visibilities from "pathout" directory
+    #     vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+    #                                                     target_frequency=None,
+    #                                                     target_channel=i,
+    #                                                     extension=".ms",
+    #                                                     blocks='multiple',
+    #                                                     max_workers=12)
+        
+    #     #create image processor
+    #     image_processor = Imager(vis_data,      # visibilities
+    #                              pb,            # array of primary beams
+    #                              grid,          # array of interpolation grids
+    #                              sd,            # single dish data in unit of Jy/arcsec^2
+    #                              beam_sd,       # beam of single-dish data in radio_beam format
+    #                              target_header, # header on which to image the data
+    #                              init_params,   # array to start this optimization with 
+    #                              max_its,       # maximum number of iterations
+    #                              lambda_sd,     # hyper-parameter single-dish
+    #                              lambda_r,      # hyper-parameter regularization
+    #                              positivity,    # impose a positivity constaint
+    #                              device)        # device: 0 is GPU; "cpu" is CPU
+    #     #get image
+    #     result = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+
+    #     # Move to cube
+    #     cube[k] = result
             
     #write on disk
-    filename = f"result_chan_{start:04d}_to_{end:04d}_{step:02d}_Jy_arcsec2.fits"
+    filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_arcsec2.fits"
     hdu0 = fits.PrimaryHDU(cube, header=target_header)
     hdulist = fits.HDUList([hdu0])
     hdulist.writeto(pathout + filename, overwrite=True)
@@ -167,3 +253,76 @@ if __name__ == '__main__':
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
     plt.savefig(pathout + 'deconv_SMC_nufftt_ASKAP_Parkes.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+
+
+# #Get CHIPASS
+# hdu_chipass = fits.open(pathout+"reproj_CHIPASS.fits")    
+# sd += (hdu_chipass[0].data *1.e-3)
+
+    # # Create a multiprocessing queue (size 1: strictly one preloaded batch at a time)
+    # vis_queue = multiprocessing.Queue(maxsize=1)
+    
+    # def preload_visibilities(data_processor, idlist, vis_queue):
+    #     """Loads visibility data while ensuring only one is preloaded at a time."""
+    #     logger.info("Starting visibility preloading...")
+        
+    #     for i in idlist:
+    #         logger.info(f"Loading visibilities for channel {i}...")
+            
+    #         # Ensure only ONE preloaded batch is in memory
+    #         while vis_queue.full():
+    #             time.sleep(0.1)  # Wait for processing to consume an item
+                
+    #         try:
+    #             vis_data = data_processor.read_vis_from_scratch(
+    #                 uvmin=0, uvmax=7000, target_frequency=None, 
+    #                 target_channel=i, extension=".ms", blocks='multiple', max_workers=12
+    #             )
+                
+    #             vis_queue.put((i, vis_data))  # Store (index, data) in queue
+    #             logger.info(f"Preloaded channel {i}, waiting for processing...")
+    #         except Exception as e:
+    #             logger.error(f"Error loading visibilities for channel {i}: {e}")
+    #             vis_queue.put(None)  # Signal an error
+                
+    #     vis_queue.put(None)  # Sentinel value to signal end of processing
+    #     logger.info("Finished preloading all visibilities.")
+                
+    # # Start the preloading process
+    # preload_process = multiprocessing.Process(target=preload_visibilities, args=(data_processor, idlist, vis_queue))
+    # preload_process.start()
+    
+    # # Processing loop
+    # for k in range(len(idlist)):
+    #     logger.info(f"Waiting for preloaded visibilities (iteration {k})...")
+        
+    #     item = vis_queue.get()  # Fetch preloaded visibilities
+    #     if item is None:  # If sentinel value received, exit loop
+    #         logger.warning("No more visibilities to process. Exiting loop.")
+    #         break
+        
+    #     i, vis_data = item
+    #     logger.info(f"Processing visibilities for channel {i}...")
+        
+    #     # Set initial parameters
+    #     init_params = np.zeros(shape).ravel()
+        
+    #     # Create image processor
+    #     image_processor = Imager(vis_data, pb, grid, sd, beam_sd, target_header, 
+    #                              init_params, max_its, lambda_sd, lambda_r, positivity, device)
+        
+    #     # Start processing
+    #     try:
+    #         result = image_processor.process(units="Jy/arcsec^2")  
+    #         logger.info(f"Successfully processed channel {i}.")
+    #     except Exception as e:
+    #         logger.error(f"Error processing channel {i}: {e}")
+    #         break
+        
+    #     # Store result in cube
+    #     cube[k] = result  
+        
+    # # Ensure preloading is completed
+    # logger.info("Joining the preload process...")
+    # preload_process.join()
+    # logger.info("Processing completed successfully.")    

@@ -19,7 +19,7 @@ import marchalib as ml #remove
 plt.ion()
 
 #Open data
-fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP_shared/result_chan_0874_to_1079_03_pbmask.fits"
+fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP/result_chan_0874_to_1079_03_pbmask.fits"
 hdu = fits.open(fitsname)
 hdr = hdu[0].header
 cube = hdu[0].data
