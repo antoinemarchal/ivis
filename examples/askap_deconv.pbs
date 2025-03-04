@@ -1,0 +1,24 @@
+#!/bin/bash
+#### JOB NAME
+#PBS -N askap_0
+### Ask for email at job start, end, and if aborted
+#PBS -M antoine.marchal@anu.edu.au
+#PBS -m abe
+#### Ask for 1 total nodes,  cores per one job instance
+#PBS -l select=1:ncpus=56:mpiprocs=1
+#PBS -l place=free:shared
+#PBS -q large
+#job_num=$PBS_ARRAY_INDEX
+
+# Change to working directory
+cd $PBS_O_WORKDIR
+
+# Source Conda
+source /priv/avatar/amarchal/library/miniforge3/etc/profile.d/conda.sh
+
+# Activate casacore conda env
+conda activate casacore
+
+# Run script
+python3 test_gaskap_multiproc.py > output.log 2>&1
+

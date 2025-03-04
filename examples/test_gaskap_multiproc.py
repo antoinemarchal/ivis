@@ -83,64 +83,62 @@ if __name__ == '__main__':
     device = "cpu" #0 is GPU and "cpu" is CPU
     positivity = False
 
-    max_workers = 12 # Number of workers used by the DataProcessor
-    maxsize = 2  # Adjust queue size dynamically
-
-    #BUILD CUBE
-    #100 to 200 km/s -> chan 874 - 1079        
-    start = 820; end=821; step=1
-    # start = 820; end=970; step=1
-    idlist = np.arange(start, end, step)
+    # Define separate worker counts
+    data_processor_workers = 32  # Workers for DataProcessor
+    imager_workers = 4           # Workers for the Imager
+    queue_maxsize = 6            # Queue size to balance memory and speed
     
+    # Define cube parameters
+    start, end, step = 850, 1050, 1
+    idlist = np.arange(start, end, step)
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
-
-    # Example usage
     cube = np.zeros((len(idlist), *shape))  # Preallocate cube storage
-
-    def preload_visibilities(data_processor, idlist, vis_queue, maxsize):
-        """Loads visibility data while ensuring the queue does not exceed maxsize."""
+    
+    def preload_visibilities(data_processor, idlist, vis_queue):
+        """Loads visibility data while ensuring strict queue space waiting."""
         logger.info("Starting visibility preloading...")
         
         for i in idlist:
-            logger.info(f"Loading visibilities for channel {i}...")
+            logger.info(f"Waiting for space in queue to load channel {i}...")
             
-            # Ensure queue does not exceed maxsize
-            while vis_queue.qsize() >= maxsize:
-                time.sleep(0.1)  # Wait for the consumer to process the current dataset
+            # Strictly wait until there is space in the queue
+            while vis_queue.full():
+                time.sleep(0.1)  # Small wait to prevent busy looping
+                
+            logger.info(f"Loading visibilities for channel {i}...")
                 
             try:
                 vis_data = data_processor.read_vis_from_scratch(
                     uvmin=0, uvmax=7000, target_frequency=None,
-                    target_channel=i, extension=".ms", blocks='single', max_workers=max_workers
+                    target_channel=i, extension=".ms", blocks='single', max_workers=data_processor_workers
                 )
-                
-                vis_queue.put((i, vis_data))  # Store (index, data) in queue
-                logger.info(f"Preloaded channel {i}, waiting for processing...")
+                vis_queue.put((i, vis_data))  # Add visibility data to queue
             except Exception as e:
                 logger.error(f"Error loading visibilities for channel {i}: {e}")
-                vis_queue.put(None)  # Signal an error
+                vis_queue.put((i, None))  # Send error signal
                 
-        vis_queue.put(None)  # Sentinel value to signal end of processing
         logger.info("Finished preloading all visibilities.")
-
-
-    def process_visibilities(vis_queue, idlist, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube):
-        """Processes visibility data retrieved from the queue."""
-        for k in range(len(idlist)):
-            logger.info(f"Waiting for preloaded visibilities (iteration {k})...")
+                
+        # Send one sentinel value for each worker, so they know when to stop
+        for _ in range(imager_workers):
+            vis_queue.put(None)
             
-            item = vis_queue.get()  # Fetch preloaded visibilities
-            if item is None:  # If sentinel value received, exit loop
-                logger.warning("No more visibilities to process. Exiting loop.")
-                break
-        
+    def process_visibilities(vis_queue, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube):
+        """Processes visibility data as soon as it's available in the queue."""
+        while True:
+            item = vis_queue.get()
+            if item is None:
+                logger.info("Received stop signal. Exiting worker.")
+                break  # Exit loop when sentinel value is received
+            
             i, vis_data = item
+            if vis_data is None:
+                logger.error(f"Skipping channel {i} due to failed visibility loading.")
+                continue  # Skip failed visibility data
+            
             logger.info(f"Processing visibilities for channel {i}...")
             
-            # Set initial parameters
             init_params = np.zeros(shape).ravel()
-            
-            # Create image processor
             image_processor = Imager(vis_data=vis_data,
                                      pb=pb,
                                      grid=grid,
@@ -154,64 +152,37 @@ if __name__ == '__main__':
                                      positivity=positivity,
                                      device=device)
             
-            # Start processing
             try:
                 result = image_processor.process(units="Jy/arcsec^2")
                 logger.info(f"Successfully processed channel {i}.")
+                cube[i - start] = result  # Store result in cube
             except Exception as e:
                 logger.error(f"Error processing channel {i}: {e}")
-                break
-            
-            # Store result in cube
-            cube[k] = result
-
-    # Set queue and size
-    vis_queue = multiprocessing.Queue(maxsize=maxsize)
-
-    preload_process = multiprocessing.Process(target=preload_visibilities, args=(data_processor, idlist, vis_queue, maxsize))
+                
+    # Create queue with a strict max size
+    vis_queue = multiprocessing.Queue(maxsize=queue_maxsize)
+    
+    # Start the preloading process
+    preload_process = multiprocessing.Process(target=preload_visibilities, args=(data_processor, idlist, vis_queue))
     preload_process.start()
 
-    process_visibilities(vis_queue, idlist, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube)
-    
-    logger.info("Joining the preload process...")
+    # Start parallel processing workers
+    processing_workers = []
+    for _ in range(imager_workers):
+        worker = multiprocessing.Process(target=process_visibilities, args=(vis_queue, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube))
+        worker.start()
+        processing_workers.append(worker)
+
+    # Ensure preloading completes
     preload_process.join()
+
+    # Ensure all processing workers complete
+    for worker in processing_workers:
+        worker.join()
+
     logger.info("Processing completed successfully.")
-        
 
-    # cube = np.zeros((len(idlist),shape[0],shape[1]))
-
-    # for k, i in enumerate(idlist):
-    #     # if k == 0:
-    #     init_params = np.zeros(shape).ravel() #Start with null map
-    #     # else:
-    #     #     init_params = result
-
-    #     #read packaged visibilities from "pathout" directory
-    #     vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-    #                                                     target_frequency=None,
-    #                                                     target_channel=i,
-    #                                                     extension=".ms",
-    #                                                     blocks='multiple',
-    #                                                     max_workers=12)
-        
-    #     #create image processor
-    #     image_processor = Imager(vis_data,      # visibilities
-    #                              pb,            # array of primary beams
-    #                              grid,          # array of interpolation grids
-    #                              sd,            # single dish data in unit of Jy/arcsec^2
-    #                              beam_sd,       # beam of single-dish data in radio_beam format
-    #                              target_header, # header on which to image the data
-    #                              init_params,   # array to start this optimization with 
-    #                              max_its,       # maximum number of iterations
-    #                              lambda_sd,     # hyper-parameter single-dish
-    #                              lambda_r,      # hyper-parameter regularization
-    #                              positivity,    # impose a positivity constaint
-    #                              device)        # device: 0 is GPU; "cpu" is CPU
-    #     #get image
-    #     result = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
-
-    #     # Move to cube
-    #     cube[k] = result
+    stop
             
     #write on disk
     filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_arcsec2.fits"

@@ -19,7 +19,8 @@ import marchalib as ml #remove
 plt.ion()
 
 #Open data
-fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP/result_chan_0874_to_1079_03_pbmask.fits"
+# fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0874_to_1079_03_pbmask.fits"
+fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0850_to_0900_01_Jy_arcsec2.fits"
 hdu = fits.open(fitsname)
 hdr = hdu[0].header
 cube = hdu[0].data
@@ -44,8 +45,11 @@ w_img = ml.wcs2D(target_header)
 # Path output
 pathout="/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP_shared/"
 
+# Assuming `cube`, `mask`, `effpb`, and `target_header` are already defined
+w_img = ml.wcs2D(target_header)
+
 # Create a video writer
-writer = imageio.get_writer(pathout + 'movie_askap.mp4', fps=10)
+writer = imageio.get_writer(pathout + 'movie_askap_2_blocks.mp4', fps=10)
 
 # Setup for plotting (only done once)
 fig = plt.figure(figsize=(10, 10), dpi=200)
@@ -57,16 +61,16 @@ ax.set_ylabel(r"DEC (deg)", fontsize=18.)
 contours = ax.contour(effpb, linestyles="--", levels=[0.2, 0.3], colors=["w", "w"])
 
 # Create the colorbar once before the loop
-img = ax.imshow(cube[0], vmin=-25, vmax=35, origin="lower", cmap="inferno")
+img = ax.imshow(cube[0], vmin=-2.e-5, vmax=3.e-5, origin="lower", cmap="inferno")
 colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
 cbar = fig.colorbar(img, cax=colorbar_ax)
 cbar.ax.tick_params(labelsize=14.)
-cbar.set_label(r"$T_b$ (K)", fontsize=18.)
+cbar.set_label(r"Jy/arcsec$^2$", fontsize=18.)
 
 # Write to the video file
 for i in tqdm(np.arange(len(cube))):
     # Update only the image data, no need to recreate or redraw the colorbar or contours
-    img.set_data(cube[i])
+    img.set_data(cube[i]*mask)
     
     # Save the figure to a BytesIO buffer (avoid plt.savefig overhead)
     buf = BytesIO()
