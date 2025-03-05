@@ -2,6 +2,7 @@
 data/
 
 # Ignore specific file types
+*.pbs~
 *.py~
 *.log
 *.tmp

@@ -13,6 +13,7 @@ import queue  # Standard Python queue for passing data between threads
 import threading
 import multiprocessing
 import time
+from multiprocessing import Array
 
 from deconv.core import DataVisualizer, DataProcessor, Imager
 from deconv.utils import dutils
@@ -24,7 +25,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb67521/"#sb68329/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb67521/"#sb68329/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -80,19 +81,29 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0#1
     lambda_r = 20
-    device = "cpu" #0 is GPU and "cpu" is CPU
+    device = 0#"cpu" #0 is GPU and "cpu" is CPU
     positivity = False
 
     # Define separate worker counts
     data_processor_workers = 32  # Workers for DataProcessor
-    imager_workers = 4           # Workers for the Imager
-    queue_maxsize = 6            # Queue size to balance memory and speed
-    
+    imager_workers = 8           # Workers for the Imager
+    queue_maxsize = 12           # Queue size to balance memory and speed
+    blocks = 'multiple'          # Single or multiple blocks in path_ms
+    uvmin = 0                    
+    uvmax = 7000
+    extension = ".ms"
+        
     # Define cube parameters
-    start, end, step = 850, 1050, 1
+    start, end, step = 900, 1050, 1
     idlist = np.arange(start, end, step)
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
-    cube = np.zeros((len(idlist), *shape))  # Preallocate cube storage
+
+    num_channels = len(idlist)
+    num_elements_per_channel = int(np.prod(shape))
+    cube_total_size = num_channels * num_elements_per_channel
+    
+    # Create a shared flat array (double precision) for the cube
+    shared_cube = multiprocessing.Array('d', cube_total_size, lock=True)
     
     def preload_visibilities(data_processor, idlist, vis_queue):
         """Loads visibility data while ensuring strict queue space waiting."""
@@ -109,8 +120,8 @@ if __name__ == '__main__':
                 
             try:
                 vis_data = data_processor.read_vis_from_scratch(
-                    uvmin=0, uvmax=7000, target_frequency=None,
-                    target_channel=i, extension=".ms", blocks='single', max_workers=data_processor_workers
+                    uvmin=uvmin, uvmax=uvmax, target_frequency=None,
+                    target_channel=i, extension=extension, blocks=blocks, max_workers=data_processor_workers
                 )
                 vis_queue.put((i, vis_data))  # Add visibility data to queue
             except Exception as e:
@@ -154,39 +165,55 @@ if __name__ == '__main__':
             
             try:
                 result = image_processor.process(units="Jy/arcsec^2")
-                logger.info(f"Successfully processed channel {i}.")
-                cube[i - start] = result  # Store result in cube
+                logger.info(f"Successfully processed channel {i}. Storing result in shared_cube.")
+
+                # Compute the correct offset into the flat array:
+                channel_index = i - start
+                offset = channel_index * num_elements_per_channel
+                flat_result = result.ravel()  # Ensure the result is flat
+                
+                # Write the flat_result into the shared_cube (with locking)
+                with shared_cube.get_lock():
+                    for j in range(num_elements_per_channel):
+                        shared_cube[offset + j] = flat_result[j]
             except Exception as e:
                 logger.error(f"Error processing channel {i}: {e}")
                 
-    # Create queue with a strict max size
+
+    # Create a queue with a strict max size
     vis_queue = multiprocessing.Queue(maxsize=queue_maxsize)
     
     # Start the preloading process
-    preload_process = multiprocessing.Process(target=preload_visibilities, args=(data_processor, idlist, vis_queue))
+    preload_process = multiprocessing.Process(target=preload_visibilities,
+                                              args=(data_processor, idlist, vis_queue))
     preload_process.start()
-
+    
     # Start parallel processing workers
     processing_workers = []
     for _ in range(imager_workers):
-        worker = multiprocessing.Process(target=process_visibilities, args=(vis_queue, shape, pb, grid, sd, beam_sd, target_header, max_its, lambda_sd, lambda_r, positivity, device, cube))
+        worker = multiprocessing.Process(
+            target=process_visibilities,
+            args=(vis_queue, shape, pb, grid, sd, beam_sd, target_header,
+                  max_its, lambda_sd, lambda_r, positivity, device, shared_cube)
+        )
         worker.start()
         processing_workers.append(worker)
-
+        
     # Ensure preloading completes
     preload_process.join()
-
+    
     # Ensure all processing workers complete
     for worker in processing_workers:
         worker.join()
-
+        
     logger.info("Processing completed successfully.")
-
-    stop
-            
+    
+    # Convert shared_cube (flat) to a NumPy array and reshape it to the cube dimensions:
+    final_cube = np.frombuffer(shared_cube.get_obj()).reshape((num_channels, *shape))
+        
     #write on disk
     filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_arcsec2.fits"
-    hdu0 = fits.PrimaryHDU(cube, header=target_header)
+    hdu0 = fits.PrimaryHDU(final_cube, header=target_header)
     hdulist = fits.HDUList([hdu0])
     hdulist.writeto(pathout + filename, overwrite=True)
     

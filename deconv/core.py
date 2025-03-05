@@ -36,6 +36,11 @@ class VisData:
     coords: np.ndarray
     frequency: np.ndarray
 
+# Pipeline call
+class Pipeline:
+    def __init__(self, path_ms, path_beams, path_sd, pathout):
+        super(Piepline, self).__init__()
+
 # DataVisualizer class    
 class DataVisualizer:
     def __init__(self, path_ms, path_beams, path_sd, pathout):
