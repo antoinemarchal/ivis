@@ -23,7 +23,14 @@ plt.ion()
 fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0850_to_0900_01_Jy_arcsec2.fits"
 hdu = fits.open(fitsname)
 hdr = hdu[0].header
-cube = hdu[0].data
+cube1 = hdu[0].data
+
+fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0900_to_1049_01_Jy_arcsec2.fits"
+hdu = fits.open(fitsname)
+hdr = hdu[0].header
+cube2 = hdu[0].data[1:]
+
+cube = np.concatenate([cube1,cube2[:2],cube2[4:]],0)
 
 #REF WCS INPUT USER
 cfield = SkyCoord(ra="1h21m46s", dec="-72d19m26s", frame='icrs')
@@ -49,7 +56,7 @@ pathout="/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP_shared/"
 w_img = ml.wcs2D(target_header)
 
 # Create a video writer
-writer = imageio.get_writer(pathout + 'movie_askap_2_blocks.mp4', fps=10)
+writer = imageio.get_writer(pathout + 'movie_askap_2_blocks_slice3.mp4', fps=10)
 
 # Setup for plotting (only done once)
 fig = plt.figure(figsize=(10, 10), dpi=200)
@@ -61,7 +68,7 @@ ax.set_ylabel(r"DEC (deg)", fontsize=18.)
 contours = ax.contour(effpb, linestyles="--", levels=[0.2, 0.3], colors=["w", "w"])
 
 # Create the colorbar once before the loop
-img = ax.imshow(cube[0], vmin=-2.e-5, vmax=3.e-5, origin="lower", cmap="inferno")
+img = ax.imshow(cube[0], vmin=-3.e-5, vmax=5.e-5, origin="lower", cmap="inferno")
 colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
 cbar = fig.colorbar(img, cax=colorbar_ax)
 cbar.ax.tick_params(labelsize=14.)

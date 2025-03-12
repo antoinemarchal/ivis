@@ -1,69 +1,109 @@
+import numpy as np
 import shutil
 import os
 from casatools import componentlist
 from casatasks import simobserve, listobs
+import casatasks
+import matplotlib.pyplot as plt
 
-def clear_log_directory():
-    """Clears the logtable directory if it exists to avoid directory conflicts."""
-    log_dir = 'logtable'  # Default log directory
-    if os.path.exists(log_dir):
+def create_component_list(component_list_path, BASE_DIR):
+    """Deletes the component list file if it exists."""
+    filename = os.path.join(BASE_DIR, "sources.cl")
+    if os.path.exists(filename):
         try:
-            shutil.rmtree(log_dir)  # Remove the entire logtable directory
-            print(f"Removed existing logtable directory: {log_dir}")
+            shutil.rmtree(filename)
+            print(f"✅ Deleted component list: {component_list_path}")
         except Exception as e:
-            print(f"Error removing logtable directory: {e}")
-    
-def create_component_list():
+            print(f"❌ Error removing component list: {e}")
+            
     """Creates a CASA component list with known sources."""
-    cl = componentlist()  # Initialize the component list
-    
-    # Add two sources with different flux and positions
-    cl.addcomponent(
-        flux=1.0, fluxunit='Jy', shape='point', freq='1.4GHz',
-        dir='J2000 12h30m00.0s -30d00m00.0s'  # Source 1
-    )
-    cl.addcomponent(
-        flux=0.5, fluxunit='Jy', shape='point', freq='1.4GHz',
-        dir='J2000 12h31m00.0s -30d10m00.0s'  # Source 2
-    )
-    
-    # Save the component list in the default location (current working directory)
-    component_list_path = 'mysources.cl'
-    cl.rename(component_list_path)  # Save the component list file
-    cl.close()  # Close the component list tool
-    
-    return component_list_path  # Return the path to the component list file
-    
-def run_simulation(component_list_path):
+    cl = componentlist()  # Initialize the component list  
+
+    # # Add an extended Gaussian source  
+    # cl.addcomponent(
+    #     flux=1.0, fluxunit='Jy', shape='gaussian', freq='1.4GHz',
+    #     dir='J2000 12h32m00.0s -30d05m00.0s',
+    #     majoraxis='10arcsec', minoraxis='5arcsec', positionangle='45deg'
+    # )
+
+    # HI line parameters
+    nu0 = 1.420405751e9  # HI rest frequency in Hz
+    velocity_width = 10.0  # Total velocity range in km/s
+    velocity_res = 1.0  # Channel resolution in km/s
+    num_channels = 10  # 10 spectral channels
+    c = 3.0e5  # Speed of light in km/s
+
+    # Compute frequency grid (±5 km/s around HI rest frequency)
+    velocities = np.linspace(-5.0, 5.0, num_channels)  
+    frequencies = nu0 * (1 + velocities / c)  
+
+    # Define Gaussian spectral flux profile
+    sigma = velocity_width / 2.355  # Convert FWHM to Gaussian sigma
+    fluxes = np.exp(-0.5 * (velocities / sigma) ** 2)  # Normalized Gaussian
+
+    # Normalize peak flux
+    fluxes *= 1.0  # Peak flux = 1 Jy
+
+    # Add spectral channels as individual components
+    for freq, flux in zip(frequencies, fluxes):
+        cl.addcomponent(
+            flux=flux, fluxunit="Jy", shape="gaussian",
+            freq=f"{freq / 1e9}GHz",  
+            dir="J2000 12h30m00.0s -30d00m00.0s",
+            majoraxis="1arcmin", minoraxis="40arcsec", positionangle="45deg"
+        )
+
+    # Save and close component list  
+    cl.rename(component_list_path)  
+    cl.close()  
+
+    return component_list_path  
+
+def run_simulation(component_list_path, project_name):
     """Runs simobserve to create a synthetic Measurement Set (MS)."""
-    # Ensure the logtable directory is cleared before running the simulation
-    clear_log_directory()
-    
-    # Run the simulation with proper frequency formatting
+
     simobserve(
-        project='mysim',  # Default project name, will create a 'mysim.ms'
-        complist=component_list_path,  # Use the component list file for the sky model
-        incenter='1.4GHz',  # Central frequency as '1.4e9' for 1.4 GHz
-        inwidth='10MHz',  # Bandwidth as '10e6' for 10 MHz
-        totaltime='3600s',  # Total observation time (1 hour)
-        compwidth='8GHz',
-        antennalist='/home/amarchal/Projects/deconv/examples/data/simu/ngvla-revD.spiral.cfg'  # Antenna list
+        complist=component_list_path,
+        project=project_name,
+        incenter="1.420405751 GHz",  # Must be a valid string
+        inwidth="4.735 kHz",  # 1.0 km/s per channel
+        compwidth="47.35kHz",  # Defines total bandwidth (ensures 10 channels)
+        totaltime="3600s",
+        mapsize="2arcmin",
+        # obsmode="int",
+        refdate="2023/01/01",
+        indirection="J2000 12h30m00.0s -30d00m00.0s",  # Forces CASA to treat it as a spectral cube
+        hourangle="0.0h",
+        integration="10s",
+        thermalnoise="",
+        antennalist="/pkg/linux/casa-release-5.4.1-32.el7/data/alma/simmos/vla.d.cfg",  # Pass absolute path for antennalist
     )
-    
-def inspect_ms():
+
+def inspect_ms(project_name, BASE_DIR):
     """Lists the observation summary of the generated MS."""
-    ms_path = 'mysim.ms'  # Default Measurement Set name
+    ms_path = os.path.join(BASE_DIR, project_name, project_name + ".vla.d.ms")  # Ensure correct MS path
+
     try:
-        listobs(ms_path)  # List the MS content and summary
+        listobs(ms_path)  
     except Exception as e:
         print(f"Error: Measurement Set not found. {e}")
-        
+
+
 if __name__ == '__main__':
-    # Step 1: Create the component list
-    component_list_path = create_component_list()
-    # Step 2: Run the simulation with the correct component list path
-    run_simulation(component_list_path)
+    # Define base directory for all output
+    BASE_DIR = "/home/amarchal/Projects/deconv/examples/data/simu"
+    os.makedirs(BASE_DIR, exist_ok=True)  # Ensure the base directory exists
     
-    # Step 3: Inspect the Measurement Set to verify the simulation
-    inspect_ms()
+    # Define paths inside BASE_DIR
+    component_list_path = "sources.cl"
+    project_path = "simu_HI"  # Ensure project is inside BASE_DIR
     
+    # Run simulation steps  
+    create_component_list(component_list_path, BASE_DIR)
+    run_simulation(component_list_path, project_path)
+    inspect_ms(project_path, BASE_DIR)
+
+    # Look at result
+    ms_file = BASE_DIR+"/"+project_path+"/simu_HI.vla.d.ms"
+    casatasks.listobs(ms_file)
+    casatasks.listobs(ms_file, listfile="simu_HI/simu_HI_listobs.txt", overwrite=True)

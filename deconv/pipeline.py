@@ -6,6 +6,7 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from radio_beam import Beam
 import subprocess
 import tarfile
 import concurrent.futures
@@ -17,10 +18,10 @@ from deconv import logger
 
 # Class Pipeline
 class Pipeline:
-    def __init__(self, path_ms, path_beams, path_sd, pathout, target_header, units,
-                 sd, beam_sd, max_its, lambda_sd, lambda_r, positivity, device,
-                 start=0, end=4, step=1, data_processor_workers=12, imager_workers=8,
-                 queue_maxsize=4, uvmin=0, uvmax=7000, extension=".ms", blocks="single", fixms=False):
+    def __init__(self, path_ms, path_beams, path_sd, pathout, target_header, units="Jy/arcsec^2",
+                 max_its=20, lambda_sd=0, lambda_r=1, positivity=False, device="cpu", start=0,
+                 end=4, step=1, data_processor_workers=12, imager_workers=8, queue_maxsize=4,
+                 uvmin=0, uvmax=7000, extension=".ms", blocks="single", fixms=False):
         # Save paths and parameters.
         self.path_ms = path_ms
         self.path_beams = path_beams
@@ -36,7 +37,7 @@ class Pipeline:
         # self.data_processor.untardir(max_workers=6, clear=False) #warning clean=True will clear the .tar files
         # fixms ASKAP data only using Alec's package
         if fixms == True: self.data_processor.fixms()
-        # Continuum subtractin using casatools
+        # Continuum subtraction using casatools
         # XXX fixme
         # Compute effective primary beam - not used in imaging
         # XXX fixme put effpb.py in core.py
@@ -49,12 +50,8 @@ class Pipeline:
         # Get imaging auxiliary data.
         self.pb, self.grid = self.data_processor.read_pb_and_grid("reproj_pb_Dave.fits",
                                                                   "grid_interp_Dave.fits")
-        # Get sd data from path_sd - fixme
-        # sd, beam_sd = data_processor.read_sd()
-
+        # Other user parameters
         self.target_header = target_header
-        self.sd = sd
-        self.beam_sd = beam_sd
         self.max_its = max_its
         self.lambda_sd = lambda_sd
         self.lambda_r = lambda_r
@@ -75,6 +72,12 @@ class Pipeline:
         self.num_channels = len(self.idlist)
         self.num_elements_per_channel = int(np.prod(self.shape))
         self.cube_shape = (self.num_channels, *self.shape)
+        
+        # Get sd data from path_sd - fixme
+        # sd, beam_sd = data_processor.read_sd()
+        # Single-dish data and Beam
+        self.sd = np.zeros(self.shape); #Dummy array for single dish
+        self.beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
 
         # Queue and worker settings.
         self.data_processor_workers = data_processor_workers

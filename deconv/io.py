@@ -10,6 +10,7 @@ from astropy.io import fits
 from scipy import optimize
 from radio_beam import Beam
 from reproject import reproject_interp
+from dataclasses import dataclass
 import subprocess
 import tarfile
 import concurrent.futures
@@ -80,11 +81,11 @@ class DataProcessor:
             logger.warning(f"Invalid directory: {self.path_ms}")
             return
 
-        # Ask user to confirm before starting extraction process
-        confirm = input(f"Do you want to start extracting and possibly delete all .tar files in {self.path_ms}? (y/n): ")
-        if confirm.lower() != 'y':
-            logger.info("Extraction process canceled.")
-            return
+        # # Ask user to confirm before starting extraction process
+        # confirm = input(f"Do you want to start extracting and possibly delete all .tar files in {self.path_ms}? (y/n): ")
+        # if confirm.lower() != 'y':
+        #     logger.info("Extraction process canceled.")
+        #     return
 
         # Get all .tar files, convert Path objects to strings, and sort them
         tar_files = sorted(str(p) for p in Path(self.path_ms).rglob("*.tar"))

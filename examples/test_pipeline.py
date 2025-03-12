@@ -13,7 +13,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb67521/"#sb68329/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb67521/"#sb68329/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -26,22 +26,18 @@ if __name__ == '__main__':
     target_header["CRVAL1"] = cfield.ra.value
     target_header["CRVAL2"] = cfield.dec.value
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
-
-    # Single-dish data and Beam
-    sd = np.zeros(shape); #Dummy array for single dish
-    beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
     
     #____________________________________________________________________________
     # Define separate worker counts
-    data_processor_workers = 12  # Workers for DataProcessor
-    imager_workers = 2           # Workers for the Imager
+    data_processor_workers = 8   # Workers for DataProcessor
+    imager_workers = 1           # Workers for the Imager
     queue_maxsize = 3            # Queue size to balance memory and speed
-    blocks = 'single'            # Single or multiple blocks in path_ms
+    blocks = 'multiple'          # Single or multiple blocks in path_ms
     extension = ".ms"
     fixms = False
 
     # User parameters Imager
-    max_its = 2
+    max_its = 20
     lambda_sd = 0#1
     lambda_r = 20
     device = 0#"cpu" #0 is GPU and "cpu" is CPU
@@ -51,15 +47,16 @@ if __name__ == '__main__':
     uvmax = 7000
 
     # Cube parameters
-    start, end, step = 900, 903, 1
+    start, end, step = 1050, 1100, 1
     filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_arcsec2.fits"
 
     pipeline = Pipeline(
-        path_ms, path_beams, path_sd, pathout,
-        target_header, units, sd, beam_sd, max_its, lambda_sd, lambda_r, positivity, device,
-        start=start, end=end, step=step, data_processor_workers=data_processor_workers,
-        imager_workers=imager_workers, queue_maxsize=queue_maxsize, uvmin=uvmin, uvmax=uvmax,
-        extension=extension, blocks=blocks, fixms=fixms
+        path_ms=path_ms, path_beams=path_beams, path_sd=path_sd, pathout=pathout,
+        target_header=target_header, units=units, max_its=max_its, lambda_sd=lambda_sd,
+        lambda_r=lambda_r, positivity=positivity, device=device, start=start, end=end,
+        step=step, data_processor_workers=data_processor_workers, imager_workers=imager_workers,
+        queue_maxsize=queue_maxsize, uvmin=uvmin, uvmax=uvmax, extension=extension,
+        blocks=blocks, fixms=fixms
     )
     
     pipeline.run()

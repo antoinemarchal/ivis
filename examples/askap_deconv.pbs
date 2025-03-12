@@ -1,6 +1,6 @@
 #!/bin/bash
 #### JOB NAME
-#PBS -N askap_0
+#PBS -N askap_1
 ### Ask for email at job start, end, and if aborted
 #PBS -M antoine.marchal@anu.edu.au
 #PBS -m abe
@@ -20,5 +20,5 @@ source /priv/avatar/amarchal/library/miniforge3/etc/profile.d/conda.sh
 conda activate casacore
 
 # Run script
-python3 test_gaskap_multiproc.py > output.log 2>&1
-
+### python3 test_gaskap_multiproc.py > output.log 2>&1
+python3 untar.py > output.log 2>&1
