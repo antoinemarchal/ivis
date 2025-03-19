@@ -18,10 +18,11 @@ from deconv import logger
 
 # Class Pipeline
 class Pipeline:
-    def __init__(self, path_ms, path_beams, path_sd, pathout, target_header, units="Jy/arcsec^2",
-                 max_its=20, lambda_sd=0, lambda_r=1, positivity=False, device="cpu", start=0,
-                 end=4, step=1, data_processor_workers=12, imager_workers=8, queue_maxsize=4,
-                 uvmin=0, uvmax=7000, extension=".ms", blocks="single", fixms=False):
+    def __init__(self, path_ms, path_beams, path_sd, pathout, target_header, sd, beam_sd,
+                 units="Jy/arcsec^2", max_its=20, lambda_sd=0, lambda_r=1, positivity=False,
+                 device="cpu", start=0, end=4, step=1, data_processor_workers=12,
+                 imager_workers=8, queue_maxsize=4, uvmin=0, uvmax=7000, extension=".ms",
+                 blocks="single", fixms=False, precompute=False):
         # Save paths and parameters.
         self.path_ms = path_ms
         self.path_beams = path_beams
@@ -43,13 +44,17 @@ class Pipeline:
         # XXX fixme put effpb.py in core.py
 
         # pre-compute pb and interpolation grids
-        # self.data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_Dave.fits",
-        #                                         fitsname_grid="grid_interp_Dave.fits") 
-        
+        if precompute == True:
+            logger.info("Precompute primary beam and interpolation grid.")
+            self.data_processor.compute_pb_and_grid(target_header,
+                                                    fitsname_pb="reproj_pb_full.fits",
+                                                    fitsname_grid="grid_interp_full.fits")
+                    
         
         # Get imaging auxiliary data.
-        self.pb, self.grid = self.data_processor.read_pb_and_grid("reproj_pb_Dave.fits",
-                                                                  "grid_interp_Dave.fits")
+        logger.info("Read primary beam and interpolation grid.")
+        self.pb, self.grid = self.data_processor.read_pb_and_grid("reproj_pb_full.fits",
+                                                                  "grid_interp_full.fits")
         # Other user parameters
         self.target_header = target_header
         self.max_its = max_its
@@ -76,8 +81,8 @@ class Pipeline:
         # Get sd data from path_sd - fixme
         # sd, beam_sd = data_processor.read_sd()
         # Single-dish data and Beam
-        self.sd = np.zeros(self.shape); #Dummy array for single dish
-        self.beam_sd = Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
+        self.sd = sd#np.zeros(self.shape); #Dummy array for single dish
+        self.beam_sd = beam_sd#Beam((16*u.arcmin).to(u.deg),(16*u.arcmin).to(u.deg), 1.e-12*u.deg) #must be all in deg
 
         # Queue and worker settings.
         self.data_processor_workers = data_processor_workers

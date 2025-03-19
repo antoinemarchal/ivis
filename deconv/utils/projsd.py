@@ -31,18 +31,22 @@ def get_sd(fitsname):
     cube = SpectralCube.read(fitsname)
 
     # Define the velocity you want
-    target_velocity = np.array([161.36638687]) * u.km / u.s  # Correct way to create a Quantity
+    target_velocity = np.array([133.5180419386242]) * u.km / u.s  # Correct way to create a Quantity
 
     # Interpolate the HI intensity at the exact velocity
     hi_slice = cube.spectral_interpolate(target_velocity)
         
+    #REF WCS INPUT USER
     #REF WCS INPUT USER
     cfield = SkyCoord(ra="1h21m46s", dec="-72d19m26s", frame='icrs')
     filename = "/priv/avatar/amarchal/MPol-dev/examples/workflow/img.fits"
     target_header = fits.open(filename)[0].header
     target_header["CRVAL1"] = cfield.ra.value
     target_header["CRVAL2"] = cfield.dec.value
-    shape = (target_header["NAXIS2"],target_header["NAXIS1"])
+    target_header["CRPIX1"] = 2500
+    target_header["CRPIX2"] = 2500
+    target_header["NAXIS2"] = 5000; target_header["NAXIS1"] = 5000
+    shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
     w = wcs2D(target_header)
     target_header = w.to_header()
@@ -60,6 +64,8 @@ def get_sd(fitsname):
     hdulist = fits.HDUList([hdu0])
     hdulist.writeto(pathout + "reproj_GASS_v.fits", overwrite=True)
 
+    return reproj
+
     
 if __name__ == '__main__':    
     #path data
@@ -70,4 +76,4 @@ if __name__ == '__main__':
     path="/priv/avatar/amarchal/GASS/data/"
     fitsname="GASS_HI_slab_cube_MCs.fit"
 
-    get_sd(path+fitsname)
+    reproj = get_sd(path+fitsname)

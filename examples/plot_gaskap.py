@@ -20,17 +20,17 @@ plt.ion()
 
 #Open data
 # fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0874_to_1079_03_pbmask.fits"
-fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0850_to_0900_01_Jy_arcsec2.fits"
+# fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0900_to_1049_01_Jy_arcsec2.fits"
+# hdu = fits.open(fitsname)
+# hdr = hdu[0].header
+# cube1 = hdu[0].data
+
+fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/SMC/result_chan_1010_to_1010_01_Jy_arcsec2_sb67521.fits"
 hdu = fits.open(fitsname)
 hdr = hdu[0].header
-cube1 = hdu[0].data
+cube = hdu[0].data
 
-fitsname = "/home/amarchal/Projects/deconv/examples/data/ASKAP/result_chan_0900_to_1049_01_Jy_arcsec2.fits"
-hdu = fits.open(fitsname)
-hdr = hdu[0].header
-cube2 = hdu[0].data[1:]
-
-cube = np.concatenate([cube1,cube2[:2],cube2[4:]],0)
+# cube = np.concatenate([cube1,cube2[:2],cube2[4:]],0)
 
 #REF WCS INPUT USER
 cfield = SkyCoord(ra="1h21m46s", dec="-72d19m26s", frame='icrs')
@@ -50,7 +50,23 @@ mask = np.where(effpb > 0.05, 1, np.nan)
 w_img = ml.wcs2D(target_header)
 
 # Path output
-pathout="/home/amarchal/Projects/deconv/examples/data/ASKAP/ASKAP_shared/"
+pathout="/home/amarchal/Projects/deconv/examples/data/ASKAP/plot/"
+
+#PLOT RESULT
+fig = plt.figure(figsize=(10, 10))
+ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
+ax.set_xlabel(r"RA (deg)", fontsize=18.)
+ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+img = ax.imshow(cube[0]*mask, vmin=-3.e-5, vmax=5.e-5, origin="lower", cmap="inferno")
+# ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
+colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+cbar = fig.colorbar(img, cax=colorbar_ax)
+cbar.ax.tick_params(labelsize=14.)
+cbar.set_label(r"$I$ (Jy/arcsec^2)", fontsize=18.)
+plt.savefig(pathout + 'result_chan_1010_to_1010_01_Jy_arcsec2_sb67521.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    
+
+
+stop
 
 # Assuming `cube`, `mask`, `effpb`, and `target_header` are already defined
 w_img = ml.wcs2D(target_header)
@@ -131,17 +147,17 @@ for i in tqdm(np.arange(len(cube))):
 # Close the writer to finalize the video
 writer.close()
 
-    
+stop    
 
-# #PLOT RESULT
-# fig = plt.figure(figsize=(10, 10))
-# ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
-# ax.set_xlabel(r"RA (deg)", fontsize=18.)
-# ax.set_ylabel(r"DEC (deg)", fontsize=18.)
-# img = ax.imshow(cube[140]*mask, vmin=-4, vmax=8, origin="lower", cmap="viridis")
+#PLOT RESULT
+fig = plt.figure(figsize=(10, 10))
+ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
+ax.set_xlabel(r"RA (deg)", fontsize=18.)
+ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+img = ax.imshow(cube[0]*mask, vmin=-4, vmax=8, origin="lower", cmap="inferno")
 # ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
-# colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
-# cbar = fig.colorbar(img, cax=colorbar_ax)
-# cbar.ax.tick_params(labelsize=14.)
-# cbar.set_label(r"$T_b$ (K)", fontsize=18.)
-# plt.savefig(pathout + 'deconv_result_cloud_MeerKAT_GBT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    
+colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+cbar = fig.colorbar(img, cax=colorbar_ax)
+cbar.ax.tick_params(labelsize=14.)
+cbar.set_label(r"$I$ (Jy/arcsec^2)", fontsize=18.)
+plt.savefig(pathout + 'deconv_result_6blocks_2.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    

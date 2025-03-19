@@ -24,7 +24,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb67521/"#sb68329/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb69152/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -43,11 +43,9 @@ if __name__ == '__main__':
     
     #PRE-COMPUTE DATA
     #untardir and fixms
-    data_processor.untardir(max_workers=56, clear=True) #warning clean=True will clear the .tar files
-
+    # data_processor.untardir(max_workers=56, clear=True) #warning clean=True will clear the .tar files
+    data_processor.fixms()
     stop
-    
-    # data_processor.fixms()
     # Continuum subtractin using casatools
     #XXX fixme
     # Compute effective primary beam - not used in imaging

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import subprocess
 import tarfile
 import concurrent.futures
+from tqdm import tqdm as tqdm
 
 import marchalib as ml
 
