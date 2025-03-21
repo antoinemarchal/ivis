@@ -3,6 +3,8 @@ import torch
 import pytorch_finufft
 from torch.fft import fft2 as tfft2
 from tqdm import tqdm as tqdm
+from multiprocessing import Pool
+from joblib import Parallel, delayed
 
 from deconv import logger  # Import the logger
 
@@ -18,13 +20,13 @@ def format_input_tensor(input_tensor):
     return input_tensor_reshape
 
 
-def objective(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, shape, cell_size, grid_array):
+def objective(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, shape, cell_size, grid_array, beam_workers):
     #reshape x into u grid
     u = x.reshape(shape)
     #track operations on u
     u = torch.from_numpy(u).to(device).requires_grad_(True) 
     # L = compute_loss_low_memory(u, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array)
-    L = compute_loss(u, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array)
+    L = compute_loss_Pool(u, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array, beam_workers)
     #compute the gradient
     u_grad = u.grad.cpu().numpy().astype(x.dtype)
 
@@ -118,91 +120,171 @@ def compute_loss(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
 
     return loss_tot.detach().cpu()
 
-#FIXME
-def compute_loss_low_memory(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array):
-    # Move beam to device (only once)
+
+#WORK IN PROGRESS
+def beam_worker(i, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array):
+    idmin = idmina[i]
+    idmax = idmaxa[i]
+    uua = uu[idmin:idmin+idmax]
+    vva = vv[idmin:idmin+idmax]
+    wwa = ww[idmin:idmin+idmax]
+    vis_real = data.real[idmin:idmin+idmax]
+    vis_imag = data.imag[idmin:idmin+idmax]
+    sig = sigma[idmin:idmin+idmax]
+
+    return compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig, pb[i], cell_size, device, grid_array[i])
+
+def batch_worker(batch_indices, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array):
+    total_loss = torch.tensor(0.0)
+    for i in batch_indices:
+        J = beam_worker(i, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array)
+        total_loss += 0.5 * J
+    return total_loss
+
+def compute_loss_Pool(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma,
+                      fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array,
+                      beam_workers=4):
+
     beam = torch.from_numpy(beam).to(device)
-
-    # Initialize total loss
-    loss_tot = torch.zeros(1).to(device)
-
-    # INTERFEROMETER - Joint loop over beams
+    loss_tot = torch.zeros(1, device=device)
     n_beams = len(idmina)
-    for i in np.arange(n_beams):
-        idmin = idmina[i]
-        idmax = idmaxa[i]
 
-        # Slice and move only the necessary data to the device for NuFFT computation
-        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
-        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
-        wwa = torch.from_numpy(ww[idmin:idmin+idmax]).to(device)
-        pb_i = torch.from_numpy(pb[i]).to(device)
-        grid_i = torch.from_numpy(grid_array[i]).to(device)
+    # --- PARALLEL ON CPU WITH BATCHED BEAMS ---
+    if device == "cpu":
+        # Split beam indices into batches
+        beam_indices = np.array_split(np.arange(n_beams), beam_workers)
 
-        # Create points tensor for NuFFT
-        points = torch.zeros((2, len(uua)), device=device)
-        points[0] = -vva
-        points[1] = uua
+        # Parallel execution
+        results = Parallel(n_jobs=beam_workers)(
+            delayed(batch_worker)(
+                batch, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array
+            ) for batch in beam_indices
+        )
 
-        # Reproject field at beam position
-        input_tensor = format_input_tensor(x).float()
-        # Perform interpolation
-        reprojected_tensor = torch.nn.functional.grid_sample(input_tensor, grid_i, mode='bilinear', align_corners=True)
-        # Remove batch and channel dimensions
-        reprojected_tensor = reprojected_tensor.squeeze()
+        for partial_loss in results:
+            loss_tot += partial_loss.to(device)
 
-        # Apply primary beam
-        reproj = reprojected_tensor * pb_i
+    # --- SEQUENTIAL ON GPU ---
+    else:
+        for i in range(n_beams):
+            idmin = idmina[i]
+            idmax = idmaxa[i]
+            uua = uu[idmin:idmin+idmax]
+            vva = vv[idmin:idmin+idmax]
+            wwa = ww[idmin:idmin+idmax]
+            vis_real = data.real[idmin:idmin+idmax]
+            vis_imag = data.imag[idmin:idmin+idmax]
+            sig = sigma[idmin:idmin+idmax]
 
-        # Pack into complex number for NuFFT
-        c = reproj.to(torch.complex64)
+            J = compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig,
+                                 pb[i], cell_size, device, grid_array[i])
+            loss_tot += 0.5 * J
 
-        # Compute visibilities with NuFFT (only transfer the necessary data for this operation)
-        model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+    # --- SINGLE DISH COMPONENT ---
+    fftsd = torch.from_numpy(fftsd).to(device)
+    tapper = torch.from_numpy(tapper).to(device)
+    xfft2 = tfft2(x * tapper)
+    model_sd = cell_size**2 * xfft2 * torch.from_numpy(fftbeam).to(device)
 
-        # Free memory after each iteration
-        del uua, vva, wwa, pb_i, grid_i, points, reprojected_tensor, reproj, c
-        torch.cuda.empty_cache()
+    J2 = torch.nansum((model_sd.real - fftsd.real) ** 2)
+    J22 = torch.nansum((model_sd.imag - fftsd.imag) ** 2)
+    loss_tot += 0.5 * (J2 + J22) * lambda_sd
 
-        # Slice the data for the current beam for the cost function calculation
-        vis_real = torch.from_numpy(data.real[idmin:idmin+idmax]).to(device)
-        vis_imag = torch.from_numpy(data.imag[idmin:idmin+idmax]).to(device)
-        sig = torch.from_numpy(sigma[idmin:idmin+idmax]).to(device)
-
-        # Compute cost (real and imag)
-        J1 = torch.nansum((model_vis.real - vis_real)**2 / sig**2)
-        J11 = torch.nansum((model_vis.imag - vis_imag)**2 / sig**2)
-
-        # Free memory after each iteration
-        del vis_real, vis_imag, sig
-        torch.cuda.empty_cache()
-
-        # Add to total loss
-        loss_tot += 0.5 * (J1 + J11)
-
-    if lambda_sd != 0: 
-        # SINGLE DISH
-        fftsd = torch.from_numpy(fftsd).to(device)
-        tapper = torch.from_numpy(tapper).to(device)
-        # FFT2 of tapper sky image
-        xfft2 = tfft2(x * tapper)
-        # Convolution in Fourier space to apply single dish beam
-        model_sd = cell_size**2 * xfft2 * torch.from_numpy(fftbeam).to(device)
-        # Residual real and imag
-        J2 = torch.nansum((model_sd.real - fftsd.real)**2)
-        J22 = torch.nansum((model_sd.imag - fftsd.imag)**2)
-        # Add to total loss
-        loss_tot += 0.5 * (J2 + J22) * lambda_sd
-
-    if lambda_r != 0:
-        # REGULARIZATION
-        conv = cell_size**2 * xfft2 * torch.from_numpy(fftkernel).to(device)
-        R = torch.nansum(abs(conv)**2)
-        loss_tot += 0.5 * R * lambda_r
+    # --- REGULARIZATION ---
+    conv = cell_size**2 * xfft2 * torch.from_numpy(fftkernel).to(device)
+    R = torch.nansum(abs(conv) ** 2)
+    loss_tot += 0.5 * R * lambda_r
 
     loss_tot.backward(retain_graph=True)
 
     return loss_tot.detach().cpu()
+
+
+# #FIXME
+# def compute_loss_low_memory(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array):
+#     # Move beam to device (only once)
+#     beam = torch.from_numpy(beam).to(device)
+
+#     # Initialize total loss
+#     loss_tot = torch.zeros(1).to(device)
+
+#     # INTERFEROMETER - Joint loop over beams
+#     n_beams = len(idmina)
+#     for i in np.arange(n_beams):
+#         idmin = idmina[i]
+#         idmax = idmaxa[i]
+
+#         # Slice and move only the necessary data to the device for NuFFT computation
+#         uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
+#         vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
+#         wwa = torch.from_numpy(ww[idmin:idmin+idmax]).to(device)
+#         pb_i = torch.from_numpy(pb[i]).to(device)
+#         grid_i = torch.from_numpy(grid_array[i]).to(device)
+
+#         # Create points tensor for NuFFT
+#         points = torch.zeros((2, len(uua)), device=device)
+#         points[0] = -vva
+#         points[1] = uua
+
+#         # Reproject field at beam position
+#         input_tensor = format_input_tensor(x).float()
+#         # Perform interpolation
+#         reprojected_tensor = torch.nn.functional.grid_sample(input_tensor, grid_i, mode='bilinear', align_corners=True)
+#         # Remove batch and channel dimensions
+#         reprojected_tensor = reprojected_tensor.squeeze()
+
+#         # Apply primary beam
+#         reproj = reprojected_tensor * pb_i
+
+#         # Pack into complex number for NuFFT
+#         c = reproj.to(torch.complex64)
+
+#         # Compute visibilities with NuFFT (only transfer the necessary data for this operation)
+#         model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+
+#         # Free memory after each iteration
+#         del uua, vva, wwa, pb_i, grid_i, points, reprojected_tensor, reproj, c
+#         torch.cuda.empty_cache()
+
+#         # Slice the data for the current beam for the cost function calculation
+#         vis_real = torch.from_numpy(data.real[idmin:idmin+idmax]).to(device)
+#         vis_imag = torch.from_numpy(data.imag[idmin:idmin+idmax]).to(device)
+#         sig = torch.from_numpy(sigma[idmin:idmin+idmax]).to(device)
+
+#         # Compute cost (real and imag)
+#         J1 = torch.nansum((model_vis.real - vis_real)**2 / sig**2)
+#         J11 = torch.nansum((model_vis.imag - vis_imag)**2 / sig**2)
+
+#         # Free memory after each iteration
+#         del vis_real, vis_imag, sig
+#         torch.cuda.empty_cache()
+
+#         # Add to total loss
+#         loss_tot += 0.5 * (J1 + J11)
+
+#     if lambda_sd != 0: 
+#         # SINGLE DISH
+#         fftsd = torch.from_numpy(fftsd).to(device)
+#         tapper = torch.from_numpy(tapper).to(device)
+#         # FFT2 of tapper sky image
+#         xfft2 = tfft2(x * tapper)
+#         # Convolution in Fourier space to apply single dish beam
+#         model_sd = cell_size**2 * xfft2 * torch.from_numpy(fftbeam).to(device)
+#         # Residual real and imag
+#         J2 = torch.nansum((model_sd.real - fftsd.real)**2)
+#         J22 = torch.nansum((model_sd.imag - fftsd.imag)**2)
+#         # Add to total loss
+#         loss_tot += 0.5 * (J2 + J22) * lambda_sd
+
+#     if lambda_r != 0:
+#         # REGULARIZATION
+#         conv = cell_size**2 * xfft2 * torch.from_numpy(fftkernel).to(device)
+#         R = torch.nansum(abs(conv)**2)
+#         loss_tot += 0.5 * R * lambda_r
+
+#     loss_tot.backward(retain_graph=True)
+
+#     return loss_tot.detach().cpu()
 
 
 

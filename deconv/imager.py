@@ -27,7 +27,7 @@ from deconv.utils import dunits, dutils, mod_loss
 
 # Imager class    
 class Imager:
-    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, lambda_r, positivity, device):
+    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, lambda_r, positivity, device, beam_workers):
         super(Imager, self).__init__()
         self.vis_data = vis_data
         self.pb = pb
@@ -40,6 +40,7 @@ class Imager:
         self.lambda_sd = lambda_sd
         self.lambda_r = lambda_r
         self.positivity = positivity
+        self.beam_workers = beam_workers
         logger.info("[Initialize Imager        ]")
         logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
 
@@ -50,6 +51,7 @@ class Imager:
         # Check if CUDA is found on the machine and fall back on CPU otherwise
         self.device = self.get_device(device)
         if self.device == 0: logger.info(f"Using GPU device: {torch.cuda.get_device_name(device)}")
+        if self.device == "cpu": logger.info(f"Using {self.beam_workers} workers for beam parallelisation.")
 
 
     @staticmethod
@@ -170,7 +172,7 @@ class Imager:
             beam_f32, fftbeam_f32, data_c64, uu_f32, vv_f32, ww_f32,
             pb_f32, idmin_i32, idmax_i32, self.device, sigma_f32, fftsd_c64,
             tapper_f32, self.lambda_sd, self.lambda_r, fftkernel_f32, shape,
-            cell_size.value, grid_f32
+            cell_size.value, grid_f32, self.beam_workers
         )
         
         options = {

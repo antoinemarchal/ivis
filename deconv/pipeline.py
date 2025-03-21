@@ -21,8 +21,8 @@ class Pipeline:
     def __init__(self, path_ms, path_beams, path_sd, pathout, target_header, sd, beam_sd,
                  units="Jy/arcsec^2", max_its=20, lambda_sd=0, lambda_r=1, positivity=False,
                  device="cpu", start=0, end=4, step=1, data_processor_workers=12,
-                 imager_workers=8, queue_maxsize=4, uvmin=0, uvmax=7000, extension=".ms",
-                 blocks="single", fixms=False, precompute=False):
+                 imager_workers=8, beam_workers=4, queue_maxsize=4, uvmin=0, uvmax=7000,
+                 extension=".ms", blocks="single", fixms=False, precompute=False):
         # Save paths and parameters.
         self.path_ms = path_ms
         self.path_beams = path_beams
@@ -87,6 +87,7 @@ class Pipeline:
         # Queue and worker settings.
         self.data_processor_workers = data_processor_workers
         self.imager_workers = imager_workers
+        self.beam_workers = beam_workers
         self.queue_maxsize = queue_maxsize
 
         # Shared memory for the output cube.
@@ -149,7 +150,8 @@ class Pipeline:
                 lambda_sd=self.lambda_sd,
                 lambda_r=self.lambda_r,
                 positivity=self.positivity,
-                device=self.device
+                device=self.device,
+                beam_workers=self.beam_workers
             )
             try:
                 result = image_processor.process(units=self.units)
