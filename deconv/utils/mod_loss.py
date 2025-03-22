@@ -5,6 +5,7 @@ from torch.fft import fft2 as tfft2
 from tqdm import tqdm as tqdm
 from multiprocessing import Pool
 from joblib import Parallel, delayed
+import gc
 
 from deconv import logger  # Import the logger
 
@@ -122,6 +123,72 @@ def compute_loss(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
 
 
 #WORK IN PROGRESS
+def compute_vis_cuda_batched(x, uu_batch, vv_batch, vis_real_batch, vis_imag_batch,
+                              sigma_batch, pb_batch, grid_batch, cell_size, device,
+                              lengths):
+    """
+    Batched GPU loss computation using FINUFFT.
+    Projects the sky model onto each beam and computes interferometric loss.
+    """
+    B = len(lengths)
+    H, W = pb_batch.shape[1:]
+
+    # Format x and expand for batch reprojection
+    input_tensor = format_input_tensor(x).float().to(device)
+    input_tensor = input_tensor.expand(B, -1, -1, -1)  # [B, 1, H, W]
+
+    # Move batch data to GPU
+    uu_batch = torch.from_numpy(uu_batch).to(device)
+    vv_batch = torch.from_numpy(vv_batch).to(device)
+    vis_real_batch = torch.from_numpy(vis_real_batch).to(device)
+    vis_imag_batch = torch.from_numpy(vis_imag_batch).to(device)
+    sigma_batch = torch.from_numpy(sigma_batch).to(device)
+    pb_batch = torch.from_numpy(pb_batch).to(device)
+    grid_batch = torch.from_numpy(grid_batch).to(device)
+
+    # Handle potential extra grid dimension
+    if grid_batch.ndim == 5 and grid_batch.shape[1] == 1:
+        grid_batch = grid_batch.squeeze(1)
+
+    # Reproject x to each beam's coordinate system
+    reproj = torch.nn.functional.grid_sample(
+        input_tensor, grid_batch, mode='bilinear', align_corners=True
+    )  # [B, 1, H, W]
+    reproj = reproj.squeeze(1) * pb_batch  # [B, H, W]
+
+    losses = []
+
+    for i in range(B):
+        length = lengths[i]
+        if length == 0:
+            continue
+
+        uua = uu_batch[i, :length].reshape(-1)
+        vva = vv_batch[i, :length].reshape(-1)
+        vis_real = vis_real_batch[i, :length]
+        vis_imag = vis_imag_batch[i, :length]
+        sig = sigma_batch[i, :length]
+
+        # Create (2, N) target points
+        points = torch.zeros((2, length), device=device)
+        points[0] = -vva
+        points[1] = uua
+
+        # No flatten: keep c as 2D complex image
+        c = reproj[i].float() + 1j * 0  # shape [H, W], complex
+
+        model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(
+            points, c, isign=1, modeord=0
+        )
+
+        res_real = model_vis.real - vis_real
+        res_imag = model_vis.imag - vis_imag
+        J = torch.nansum((res_real**2 + res_imag**2) / sig**2)
+        losses.append(0.5 * J)
+
+    return torch.stack(losses).sum()
+
+
 def beam_worker(i, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array):
     idmin = idmina[i]
     idmax = idmaxa[i]
@@ -134,6 +201,7 @@ def beam_worker(i, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, de
 
     return compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig, pb[i], cell_size, device, grid_array[i])
 
+
 def batch_worker(batch_indices, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array):
     total_loss = torch.tensor(0.0)
     for i in batch_indices:
@@ -141,26 +209,27 @@ def batch_worker(batch_indices, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, 
         total_loss += 0.5 * J
     return total_loss
 
+
 def compute_loss_Pool(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, sigma,
                       fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size, grid_array,
                       beam_workers=4):
-
+    
     beam = torch.from_numpy(beam).to(device)
     loss_tot = torch.zeros(1, device=device)
     n_beams = len(idmina)
-
+    
     # --- PARALLEL ON CPU WITH BATCHED BEAMS ---
     if device == "cpu":
         # Split beam indices into batches
         beam_indices = np.array_split(np.arange(n_beams), beam_workers)
-
+        
         # Parallel execution
         results = Parallel(n_jobs=beam_workers)(
             delayed(batch_worker)(
                 batch, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array
             ) for batch in beam_indices
         )
-
+        
         for partial_loss in results:
             loss_tot += partial_loss.to(device)
 
@@ -179,6 +248,55 @@ def compute_loss_Pool(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, de
             J = compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig,
                                  pb[i], cell_size, device, grid_array[i])
             loss_tot += 0.5 * J
+            
+    # # --- MINI-BATCHED ON GPU --- No improvement because nufft is not batched, only the interpolation
+    # else:
+    #     max_len = max(idmaxa[i] for i in range(n_beams))
+    #     batch_size = 32
+
+    #     for i in range(0, n_beams, batch_size):
+    #         batch_ids = range(i, min(i + batch_size, n_beams))
+    #         b = len(batch_ids)
+    #         H, W = pb[batch_ids[0]].shape
+
+    #         uu_batch = np.zeros((b, max_len), dtype=np.float32)
+    #         vv_batch = np.zeros((b, max_len), dtype=np.float32)
+    #         vis_real_batch = np.zeros((b, max_len), dtype=np.float32)
+    #         vis_imag_batch = np.zeros((b, max_len), dtype=np.float32)
+    #         sigma_batch = np.zeros((b, max_len), dtype=np.float32)
+    #         pb_batch = np.zeros((b, H, W), dtype=np.float32)
+    #         grid_batch = np.zeros((b, H, W, 2), dtype=np.float32)
+    #         lengths = []
+
+    #         for j, beam_idx in enumerate(batch_ids):
+    #             idmin = idmina[beam_idx]
+    #             idmax = idmaxa[beam_idx]
+    #             length = idmax
+    #             lengths.append(length)
+
+    #             uu_batch[j, :length] = uu[idmin:idmin+idmax]
+    #             vv_batch[j, :length] = vv[idmin:idmin+idmax]
+    #             vis_real_batch[j, :length] = data.real[idmin:idmin+idmax]
+    #             vis_imag_batch[j, :length] = data.imag[idmin:idmin+idmax]
+    #             sigma_batch[j, :length] = sigma[idmin:idmin+idmax]
+
+    #             pb_batch[j] = pb[beam_idx]
+    #             grid_j = grid_array[beam_idx]
+    #             if grid_j.ndim == 3:
+    #                 grid_j = grid_j[np.newaxis, ...]
+    #             elif grid_j.ndim == 5 and grid_j.shape[0] == 1:
+    #                 grid_j = grid_j.squeeze(0)
+
+    #             assert grid_j.shape[:3] == (1, H, W), f"grid[{beam_idx}].shape[:3] != (1, {H}, {W})"
+    #             grid_batch[j] = grid_j
+
+    #         batch_loss = compute_vis_cuda_batched(
+    #             x, uu_batch, vv_batch, vis_real_batch, vis_imag_batch,
+    #             sigma_batch, pb_batch, grid_batch, cell_size, device, lengths
+    #         )
+
+    #         loss_tot += batch_loss
+    #         torch.cuda.empty_cache()
 
     # --- SINGLE DISH COMPONENT ---
     fftsd = torch.from_numpy(fftsd).to(device)

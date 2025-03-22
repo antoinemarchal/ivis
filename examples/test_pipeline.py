@@ -61,10 +61,10 @@ if __name__ == '__main__':
     positivity = False
     units = "Jy/beam"
     uvmin = 0                    
-    uvmax = 9000
+    uvmax = np.inf
 
     # Cube parameters
-    start, end, step = 940, 941, 1
+    start, end, step = 140, 141, 1
     filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_beam_all.fits"
 
     pipeline = Pipeline(
