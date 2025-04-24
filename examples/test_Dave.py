@@ -20,7 +20,7 @@ if __name__ == '__main__':
     print("test 4 SBIDs ASKAP Dave")
     #path data
     # path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/" #directory
-    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/"#scienceData.MS_M345-09A_4/" #directory of measurement sets
+    path_ms = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms_concat/"#scienceData.MS_M345-09A_4/" #directory of measurement sets
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -59,7 +59,7 @@ if __name__ == '__main__':
                                                     target_frequency=None,
                                                     target_channel=0,
                                                     extension=".ms",
-                                                    blocks='multiple',
+                                                    blocks='single',
                                                     max_workers=1)
     stop
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")

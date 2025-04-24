@@ -9,38 +9,42 @@ from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
 
-from deconv.core import DataProcessor, Imager
+from deconv.io import DataProcessor
+from deconv.imager import Imager
+from deconv import logger
 
 import marchalib as ml #remove
 
 plt.ion()
 
 if __name__ == '__main__':    
-    print("test core deconv")
     #path data
     path_ms = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/chan950/" #directory of measurement sets
     path_beams = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/BEAMS/" #directory of primary beams
-    path_holography = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/holography_beams/" #ASKAP 36
     path_sd = "/priv/avatar/amarchal/IMAGING/data/" #path single-dish data
     pathout = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/" #path where data will be packaged and stored
 
     #REF WCS INPUT USER
     filename = "/priv/avatar/amarchal/MPol-dev/examples/workflow/img.fits"
     target_header = fits.open(filename)[0].header
-    
+    shape = (target_header["NAXIS2"], target_header["NAXIS1"])
+       
     #create data processor
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     
     #PRE-COMPUTE DATA
-    # data_processor.package_ms(filename="NPZ/uvdata_test.npz", select_fraction=1, uvmin=0, uvmax=7000)
-    #package data
     # #pre-compute pb and interpolation grids
     # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits") 
     
     #READ DATA
     #read packaged visibilities from "pathout" directory
-    # vis_data = data_processor.read_vis(_npz="NPZ/uvdata_rot4.npz", select_fraction=1)
-    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000, chunks=1.e7)
+    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+                                                    target_frequency=None,
+                                                    target_channel=0,
+                                                    extension=".ms",
+                                                    blocks='single',
+                                                    max_workers=4)
+
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits")
     
     # #read single-dish data from "pathout" directory
@@ -61,23 +65,27 @@ if __name__ == '__main__':
     lambda_r = 20
     device = 0 #0 is GPU and "cpu" is CPU
     positivity = False
-
-    if device == 0: print("GPU:", torch.cuda.get_device_name(0))
+    beam_workers = 1
 
     #create image processor
+    init_params = np.zeros(shape).ravel()
+
     image_processor = Imager(vis_data,      # visibilities
                              pb,            # array of primary beams
                              grid,          # array of interpolation grids
                              sd,            # single dish data in unit of Jy/arcsec^2
                              beam_sd,       # beam of single-dish data in radio_beam format
                              target_header, # header on which to image the data
+                             init_params,   # array to start this optimization with 
                              max_its,       # maximum number of iterations
                              lambda_sd,     # hyper-parameter single-dish
                              lambda_r,      # hyper-parameter regularization
                              positivity,    # impose a positivity constaint
-                             device)        # device: 0 is GPU; "cpu" is CPU
+                             device,        # device: 0 is GPU; "cpu" is CPU
+                             beam_workers
+                             )
     #get image
-    result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+    result = image_processor.process(units="Jy/beam") #"Jy/arcsec^2" or "K"
 
     #write on disk
     hdu0 = fits.PrimaryHDU(result, header=target_header)
