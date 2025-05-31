@@ -133,3 +133,17 @@ if __name__ == '__main__':
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
     plt.savefig(pathout + 'deconv_SMC_nufftt_ASKAP_Parkes.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+
+    #PLOT RESULT    
+    pathout="/priv/avatar/amarchal/ASKAP/IMAGING/plot/"
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
+    ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    img = ax.imshow(sd*mask, vmin=0, vmax=5.e-4, origin="lower", cmap="inferno")
+    ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
+    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    cbar = fig.colorbar(img, cax=colorbar_ax)
+    cbar.ax.tick_params(labelsize=14.)
+    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
+    plt.savefig(pathout + 'deconv_SMC_nufftt_Parkes.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
