@@ -232,9 +232,22 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
     baseline_lengths = np.sqrt((uvw_lambda ** 2).sum(axis=1))  
     
     # Apply UV filtering and flagging (per channel)
-    cross_corr = (flag[..., 0] == False) & (flag[..., -1] == False)  # Keep only unflagged
+    # Get antennas
+    ant1 = ms_table.getcol("ANTENNA1")
+    ant2 = ms_table.getcol("ANTENNA2")
+
+    # Look if autocorr is flagged
+    # # Find indices of auto-correlations
+    # auto_indices = np.where(ant1 != ant2)[0]    
+    # # Loop over and print FLAG status for each auto-correlation
+    # for idx in auto_indices:
+    #     print(f"Auto-correlation baseline {idx}: ANTENNA {ant1[idx]}-{ant2[idx]}, FLAG = {flag[idx]}")
+        
+    # Remove autocorrelations (i.e., antenna1 == antenna2)
+    is_not_autocorr = (ant1 != ant2)
+    unflagged = (flag[..., 0] == False) & (flag[..., -1] == False)  # Keep only unflagged
     valid_baselines = (baseline_lengths >= uvmin) & (baseline_lengths <= uvmax)
-    mask = cross_corr & valid_baselines[:, np.newaxis]  # Match shape
+    mask = unflagged & valid_baselines[:, np.newaxis] & is_not_autocorr[:, np.newaxis] # Match shape
     
     # Apply mask
     uvw_lambda = uvw_lambda[mask[:, 0]]
