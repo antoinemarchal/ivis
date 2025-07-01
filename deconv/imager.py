@@ -192,19 +192,18 @@ class Imager:
             options=options
         )
 
-
         # logger.info(opt_output)        
-        result = np.reshape(opt_output.x, shape)
+        result = np.reshape(opt_output.x, shape) * 2
+        logger.warning("result I multiplied by 2 for ASKAP convention.")
 
         #unit conversion
         if units == "Jy/arcsec^2":
             return result
 
         if units == "Jy/beam":
-            logger.info("assuming a synthesized beam of 3 x cell_size")
+            logger.info("assuming a synthesized beam of 4.2857 x cell_size")
             cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
-            nu = self.vis_data.frequency *1.e9 *u.Hz
-            beam_r = Beam(3*cell_size, 3*cell_size, 1.e-12*u.deg)
+            beam_r = Beam(4.2857*cell_size, 4.2857*cell_size, 1.e-12*u.deg) 
             return result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
 
         elif units == "K":

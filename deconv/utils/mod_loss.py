@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 import pytorch_finufft
@@ -31,7 +32,7 @@ def objective(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, si
     #compute the gradient
     u_grad = u.grad.cpu().numpy().astype(x.dtype)
 
-    logger.info(f"Total cost: {np.format_float_scientific(L.item(), precision=5)}")
+    logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
 
     return L.item(), u_grad.ravel()
 

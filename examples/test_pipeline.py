@@ -5,15 +5,16 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from radio_beam import Beam
+import multiprocessing
 
 from deconv.pipeline import Pipeline
 from deconv import logger
 
 plt.ion()
 
-if __name__ == '__main__':    
+if __name__ == '__main__':
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb68827/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb69152/"
     
     path_beams = "/priv/avatar/amarchal/Projects/deconv/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -44,11 +45,12 @@ if __name__ == '__main__':
     
     #____________________________________________________________________________
     # Define separate worker counts
-    data_processor_workers = 12  # Workers for DataProcessor
+    data_processor_workers = 1   # Workers for DataProcessor
     imager_workers = 1           # Workers for the Imager
-    queue_maxsize = 1            # Queue size to balance memory and speed
+    queue_maxsize = 1            # Queue size to balance memory and speed| warning make sure is large
     beam_workers = 1             # Wrokers for beams only if no GPU (not scaling)
-    blocks = 'single'            # Single or multiple blocks in path_ms
+    blocks = 'multiple'          # Single or multiple blocks in path_ms
+    max_blocks = 1            # Maximum number of blocks used; all if None
     extension = ".ms"
     fixms = False
     precompute = False
@@ -56,25 +58,25 @@ if __name__ == '__main__':
     # User parameters Imager
     max_its = 25
     lambda_sd = 0
-    lambda_r = 20
-    device = 0#"cpu" #0 is GPU and "cpu" is CPU
+    lambda_r = 10
+    device = 0 #0 is GPU and "cpu" is CPU
     positivity = False
-    units = "Jy/beam"
+    units = "Jy/beam" #"Jy/arcsec^2"
     uvmin = 0                    
     uvmax = np.inf
+    write_mode = "live" #or "final"
 
     # Cube parameters
-    start, end, step = 140, 141, 1
-    filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_beam_all.fits"
+    start, end, step = 942, 943, 1
+    filename = f"result_chan_{start:04d}_to_{end-1:04d}_{step:02d}_Jy_beam_nblocks_1.fits"
 
     pipeline = Pipeline(
         path_ms=path_ms, path_beams=path_beams, path_sd=path_sd, pathout=pathout,
-        target_header=target_header, sd=sd, beam_sd=beam_sd, units=units, max_its=max_its,
+        filename=filename, target_header=target_header, sd=sd, beam_sd=beam_sd, units=units, max_its=max_its,
         lambda_sd=lambda_sd, lambda_r=lambda_r, positivity=positivity, device=device,
         start=start, end=end, step=step, data_processor_workers=data_processor_workers,
         imager_workers=imager_workers, beam_workers=beam_workers, queue_maxsize=queue_maxsize, uvmin=uvmin, uvmax=uvmax,
-        extension=extension, blocks=blocks, fixms=fixms, precompute=precompute
+        extension=extension, blocks=blocks, max_blocks=max_blocks, fixms=fixms, precompute=precompute, write_mode=write_mode
     )
     
     pipeline.run()
-    pipeline.write(filename)
