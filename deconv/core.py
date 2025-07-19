@@ -23,7 +23,7 @@ from pathlib import Path
 import marchalib as ml
 
 from deconv import logger
-from deconv.utils import dunits, dutils, dformat, dms2npz, mod_loss, dcasacore, plotms
+# from deconv.utils import dunits, dutils, dformat, dms2npz, mod_loss, dcasacore, plotms
 
 @dataclass #modified from MPol
 class VisData:
