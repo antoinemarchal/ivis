@@ -20,6 +20,9 @@ source /priv/avatar/amarchal/library/miniforge3/etc/profile.d/conda.sh
 conda activate casacore
 
 # Run script
-python3 test_pipeline.py > output.log 2>&1
+# python3 test_pipeline.py > output.log 2>&1
 # python3 test_gaskap_multiproc.py > output.log 2>&1
 # python3 untar.py > output_3.log 2>&1
+
+cd /home/amarchal/Projects/deconv/deconv/utils
+python3 dcvel2.py > output.log 2>&1

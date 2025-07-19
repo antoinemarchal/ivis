@@ -48,5 +48,5 @@ if __name__ == '__main__':
     # Path to Measurement Set
     path_ms = "/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/"
 
-    dcvel2(path_ms, extension=".contsub", extout=".vlsrk", nchan=300, start='-250km/s',
+    dcvel2(path_ms, extension=".contsub", extout=".vlsrk", nchan=150, start='-50km/s',
            width='0.7km/s', restfreq="1.42040575177GHz", max_workers=12)
