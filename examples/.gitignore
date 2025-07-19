@@ -1,5 +1,6 @@
 # Ignore entire directories
 data/
+simu/
 
 # Ignore specific file types
 *.pbs~
