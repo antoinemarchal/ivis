@@ -362,6 +362,7 @@ def readmsl_no_parallel(msl, uvmin, uvmax, target_frequency, target_channel):
     nvis=[]
     beam=[]
     centers=[]
+    frequency=[]
 
     # Log the start of processing
     total_files = len(msl)
@@ -386,6 +387,7 @@ def readmsl_no_parallel(msl, uvmin, uvmax, target_frequency, target_channel):
         nvis.append(len(UU))
         beam.append(np.full(len(UU),k-1)) #beam index should start at 0
         centers.append(c)
+        frequency.append(freq)
 
         # Time taken for this iteration
         iteration_time = time.time() - iteration_start_time
@@ -401,24 +403,25 @@ def readmsl_no_parallel(msl, uvmin, uvmax, target_frequency, target_channel):
     #concatenate all files at the end
     uu = np.concatenate(uu); vv = np.concatenate(vv); ww = np.concatenate(ww)
     sigma = np.concatenate(sigma); data = np.concatenate(data); beam = np.concatenate(beam)
-
+    
     #sort by beam
     sort = np.argsort(beam)
     uu_lam = uu[sort]; vv_lam = vv[sort]; ww_lam = ww[sort]
     sigma = sigma[sort];
     beam = beam[sort];
-    data = data[sort]
+    data = data[sort];
 
     #convert to float32
     uu_lam = np.float32(uu_lam); vv_lam = np.float32(vv_lam); ww_lam = np.float32(ww_lam)
     sigma = np.float32(sigma);
     beam = np.int32(beam);
     data = np.complex64(data)
+    frequency = np.float64(frequency);
     
     # take the complex conjugate
     data = np.conj(data)
 
-    vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, centers, freq/1.e9, vel) #Freq in GHz
+    vis_data = VisData(uu_lam, vv_lam, ww_lam, sigma, data, beam, centers, frequency, vel) #Freq in Hz
 
     return vis_data
 

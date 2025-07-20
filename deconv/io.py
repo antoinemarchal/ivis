@@ -243,6 +243,7 @@ class DataProcessor:
         sigma = np.concatenate([v.sigma for v in vis_data_list])
         data = np.concatenate([v.data for v in vis_data_list])
         beam = np.concatenate([v.beam for v in vis_data_list])
+        frequency = np.concatenate([v.frequency for v in vis_data_list])
         
         # Get the indices that would sort the beam array
         sort_indices = np.argsort(beam)
@@ -254,10 +255,11 @@ class DataProcessor:
         sigma = sigma[sort_indices]
         data = data[sort_indices]
         beam = beam[sort_indices]  # Reorder the beam array using sort_indices
+        frequency = frequency[sort_indices]  # Reorder the beam array using sort_indices
         
         # Keep the first value of coords and frequency (without concatenation)
         coords = vis_data_list[0].coords
-        frequency = vis_data_list[0].frequency
+        # frequency = vis_data_list[0].frequency
         
         return VisData(
             uu=uu, 
