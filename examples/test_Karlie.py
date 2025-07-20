@@ -15,7 +15,7 @@ from astropy.constants import c
 from spectral_cube import SpectralCube
 from numpy.fft import fft2, ifft2, fftshift
 
-from deconv.core import DataVisualizer, DataProcessor
+from deconv.io import DataProcessor
 from deconv.imager import Imager
 
 import marchalib as ml #remove
@@ -69,7 +69,7 @@ if __name__ == '__main__':
     shape = (target_header["NAXIS2"],target_header["NAXIS1"])
     
     #create data processor
-    data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
+    # data_visualizer = DataVisualizer(path_ms, path_beams, path_sd, pathout)
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     
     # Test DataVisualizer
