@@ -14,10 +14,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from casacore.tables import table, taql
 from pathlib import Path
-from daskms import xds_from_table
+# from daskms import xds_from_table
 
 from deconv import logger  # Import the logger
-from deconv.utils import vlsrk_from_ms
+# from deconv.utils import vlsrk_from_ms
 
 @dataclass #modified from MPol
 class VisData:
@@ -30,6 +30,24 @@ class VisData:
     coords: np.ndarray
     frequency: np.ndarray
     velocity: np.ndarray
+
+def phasecenter_casacore(ms):
+    # Open the FIELD subtable
+    field_tab = table(f"{ms}/FIELD")
+
+    # Read the PHASE_DIR column — shape is (1, 1, 2)
+    phase_dir = field_tab.getcol("PHASE_DIR")
+    field_tab.close()
+
+    # Extract RA and Dec in radians
+    ra_rad, dec_rad = phase_dir[0, 0, :]
+
+    # Convert to HMS / DMS strings
+    ra_hms = Angle(ra_rad, unit=u.rad).to_string(unit=u.hourangle, sep=":")
+    dec_dms = Angle(dec_rad, unit=u.rad).to_string(unit=u.deg, sep=":")
+
+    return ra_hms, dec_dms
+
 
 def phasecenter_dask(ms): #FIXME
     # Load the PHASE_DIR column from the FIELD table
@@ -157,7 +175,8 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
         tuple: (Selected frequency, UVW data, Stokes I, SIGMA, Velocity)
     """
     #get phase center
-    ra_hms, dec_dms = phasecenter_dask(ms_path)
+    # ra_hms, dec_dms = phasecenter_dask(ms_path)
+    ra_hms, dec_dms = phasecenter_casacore(ms_path)
 
     # Suppress casacore output when opening tables
     with open(os.devnull, 'w') as devnull:
