@@ -243,15 +243,15 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
     
 
     # Compute Stokes I (XX + YY) / 2
-    # stokes_i = (data[..., 0] + data[..., -1]) * 0.5  
-    if list(corr_types) == [5, 6, 7, 8]:  # XX, XY, YX, YY
-        stokes_i = 0.5 * (data[..., 0] + data[..., 3])
-    elif list(corr_types) == [9, 10, 11, 12]:  # RR, RL, LR, LL
-        stokes_i = 0.5 * (data[..., 0] + data[..., 3])
-    elif list(corr_types) == [1, 2, 3, 4]:  # I, Q, U, V
-        stokes_i = data[..., 0]  # Already I
-    else:
-        raise ValueError(f"Unsupported polarization combination: {corr_types}")    
+    stokes_i = (data[..., 0] + data[..., -1]) * 0.5  
+    # if list(corr_types) == [5, 6, 7, 8]:  # XX, XY, YX, YY
+    #     stokes_i = 0.5 * (data[..., 0] + data[..., 3])
+    # elif list(corr_types) == [9, 10, 11, 12]:  # RR, RL, LR, LL
+    #     stokes_i = 0.5 * (data[..., 0] + data[..., 3])
+    # elif list(corr_types) == [1, 2, 3, 4]:  # I, Q, U, V
+    #     stokes_i = data[..., 0]  # Already I
+    # else:
+    #     raise ValueError(f"Unsupported polarization combination: {corr_types}")    
 
     # Use full sigma values (per channel)
     # Temporarily suppress overflow warnings
