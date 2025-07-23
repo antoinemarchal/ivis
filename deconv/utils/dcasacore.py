@@ -233,9 +233,25 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
     flag = ms_table.getcolslice("FLAG",
                                 blc=[channel_index, 0],
                                 trc=[channel_index, -1])
+
+    # Open the POLARIZATION table to check polarization types
+    pol_table = table(f"{ms_path}/POLARIZATION", readonly=True)
+    corr_types = pol_table.getcol("CORR_TYPE")[0]  # Assume one row; typical for most MS files
+    pol_table.close()
     
+    logger.info(f"Polarization types (CORR_TYPE): {corr_types}")
+    
+
     # Compute Stokes I (XX + YY) / 2
-    stokes_i = (data[..., 0] + data[..., -1]) * 0.5  
+    # stokes_i = (data[..., 0] + data[..., -1]) * 0.5  
+    if list(corr_types) == [5, 6, 7, 8]:  # XX, XY, YX, YY
+        stokes_i = 0.5 * (data[..., 0] + data[..., 3])
+    elif list(corr_types) == [9, 10, 11, 12]:  # RR, RL, LR, LL
+        stokes_i = 0.5 * (data[..., 0] + data[..., 3])
+    elif list(corr_types) == [1, 2, 3, 4]:  # I, Q, U, V
+        stokes_i = data[..., 0]  # Already I
+    else:
+        raise ValueError(f"Unsupported polarization combination: {corr_types}")    
 
     # Use full sigma values (per channel)
     # Temporarily suppress overflow warnings
