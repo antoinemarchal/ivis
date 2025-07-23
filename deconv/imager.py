@@ -209,7 +209,7 @@ class Imager:
         elif units == "K":
             logger.info("assuming a synthesized beam of 3 x cell_size")
             cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
-            nu = self.vis_data.frequency *1.e9 *u.Hz
+            nu = self.vis_data.frequency[0] *1.e9 *u.Hz
             beam_r = Beam(3*cell_size, 3*cell_size, 1.e-12*u.deg)
             result_Jy = result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
             return (result_Jy*u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
