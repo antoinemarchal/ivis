@@ -13,12 +13,22 @@ license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.6"
 
+# leave out torch here
 dependencies = [
     "numpy",
     "scipy",
-    "torch",
     "astropy"
 ]
 
+[project.optional-dependencies]
+torch = ["torch"]
+docs = ["sphinx", "furo"]
+
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/hije"
+
+[project.optional-dependencies]
+docs = [
+    "sphinx",
+    "furo"
+]
