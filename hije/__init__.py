@@ -6,4 +6,4 @@ from . import io
 from . import pipeline
 from . import utils
 
-from .logger import logger  # after everything else
+from .logger import logger
