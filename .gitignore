@@ -6,6 +6,10 @@ docs/*.log
 docs/.DS_Store
 docs/.coverage
 
+# ivis
+ivis/imager_rrl.py
+ivis/utils/mod_loss_rrl.py
+
 # Python artifacts
 __pycache__/
 *.out
