@@ -11,7 +11,7 @@ IViS is designed as a modular framework upon which new deconvolution methods can
 
 .. note::
 
-   In its current implementation, IViS is a generic MEM-like mosaicking framework, but it aims to incorporate arbitrary spectral models in the near future to fully exploit the spectral dimension of the data.
+   In its current implementation, IViS is a generic MEM-like mosaicking framework (with no w-term), but it aims to incorporate arbitrary spectral models in the near future to fully exploit the spectral dimension of the data.
    IViS is very new, and this documentation is in its early stages — it will continue to evolve as the project develops.
 
 Useful resources:
