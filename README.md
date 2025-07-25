@@ -9,7 +9,7 @@
 
 ## Useful Resources
 
-[Documentation](https://HIJE.readthedocs.io)
+[Documentation](https://ivis-dev.readthedocs.io)
 
 > **Acknowledgment**  
 > Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric imaging without mosaicking.
