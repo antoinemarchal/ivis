@@ -71,4 +71,5 @@ autodoc_mock_imports = [
     "deconv",
     "psutil",
     "tqdm",
+    "joblib"
 ]
