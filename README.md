@@ -7,7 +7,7 @@
 
 ## Useful Resources
 
-- [Documentation](https://HIJE.readthedocs.io)
+[![Documentation Status](https://readthedocs.org/projects/hije/badge/?version=latest)](https://hije.readthedocs.io/en/latest/)
 
 > **Acknowledgment**  
 > Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric imaging without mosaicking.
