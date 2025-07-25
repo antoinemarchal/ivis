@@ -22,7 +22,7 @@ from pathlib import Path
 
 import marchalib as ml
 
-from hije import logger
+from hije.logger import logger
 # from hije.utils import dunits, dutils, dformat, dms2npz, mod_loss, dcasacore, plotms
 
 @dataclass #modified from MPol

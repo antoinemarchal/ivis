@@ -18,7 +18,7 @@ from tqdm import tqdm as tqdm
 
 import marchalib as ml
 
-from hije import logger
+from hije.logger import logger
 from hije.utils import dutils, dcasacore
 
 @dataclass #modified from MPol

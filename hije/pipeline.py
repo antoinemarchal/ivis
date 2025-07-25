@@ -15,9 +15,9 @@ import tarfile
 import concurrent.futures
 import multiprocessing
 
+from hije.logger import logger
 from hije.io import DataProcessor#, DataVisualizer
 from hije.imager import Imager
-from hije import logger
 
 # Class Pipeline
 class Pipeline:
