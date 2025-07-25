@@ -40,6 +40,8 @@ html_theme_options = {
     },
 }
 
+html_logo = "_static/ivis_logo.png"
+
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
