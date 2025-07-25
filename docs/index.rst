@@ -51,4 +51,4 @@ API Reference
    :maxdepth: 2
    :caption: API:
 
-   api
+   hije

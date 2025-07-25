@@ -49,10 +49,11 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 html_static_path = ['_static']
 html_show_sourcelink = False
 
-autosummary_generate = True
+autosummary_generate = False
 autodoc_default_options = {
     'members': True,
     'undoc-members': True,
     'show-inheritance': True,
 }
 
+autodoc_mock_imports = ["psutil"]
