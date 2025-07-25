@@ -15,8 +15,8 @@ from astropy.constants import c
 from spectral_cube import SpectralCube
 from numpy.fft import fft2, ifft2, fftshift
 
-from hije.io import DataProcessor
-from hije.imager import Imager
+from ivis.io import DataProcessor
+from ivis.imager import Imager
 
 import marchalib as ml #remove
 
@@ -58,13 +58,13 @@ def wcs2D(hdr):
 if __name__ == '__main__':    
     #path data
     # path_ms = "/priv/myrtle1/gaskap/karlie/meerkat2024/data/fields/original_ms/contsub/split/" #directory of measurement sets
-    path_ms = "/home/amarchal/Projects/hije/examples/data/MeerKAT/original/local/" #directory of measurement sets    
-    path_beams = "/priv/avatar/amarchal/Projects/hije/examples/data/MeerKAT/BEAMS/" #directory of primary beams
+    path_ms = "/home/amarchal/Projects/ivis/examples/data/MeerKAT/original/local/" #directory of measurement sets    
+    path_beams = "/priv/avatar/amarchal/Projects/ivis/examples/data/MeerKAT/BEAMS/" #directory of primary beams
     path_sd = "/priv/myrtle1/gaskap/karlie/meerkat2024/data/fields/original_ms/" #path single-dish data
-    pathout = "/priv/avatar/amarchal/Projects/hije/examples/data/MeerKAT/" #path where data will be packaged and stored
+    pathout = "/priv/avatar/amarchal/Projects/ivis/examples/data/MeerKAT/" #path where data will be packaged and stored
     
     #REF WCS INPUT USER
-    filename = "/priv/avatar/amarchal/Projects/hije/examples/data/MeerKAT/MW-C10_mom0th_NHI.fits"
+    filename = "/priv/avatar/amarchal/Projects/ivis/examples/data/MeerKAT/MW-C10_mom0th_NHI.fits"
     target_header = fits.open(filename)[0].header
     shape = (target_header["NAXIS2"],target_header["NAXIS1"])
     
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits")
 
     #Open SD data
-    fitsname="/home/amarchal/Projects/hije/examples/data/MeerKAT/MW_C10_GBT_0.7kms.fits"
+    fitsname="/home/amarchal/Projects/ivis/examples/data/MeerKAT/MW_C10_GBT_0.7kms.fits"
     hdu_sd = fits.open(fitsname)
     hdr_sd = hdu_sd[0].header
     w_sd = wcs2D(hdr_sd)
@@ -289,13 +289,13 @@ if __name__ == '__main__':
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
-    # plt.savefig(pathout + 'plot/GIF/hije_result_mw_MeerKAT_{:02d}.png'.format(i), format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
-    plt.savefig(pathout + 'plot/GIF/hije_result_cloud_MeerKAT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    # plt.savefig(pathout + 'plot/GIF/ivis_result_mw_MeerKAT_{:02d}.png'.format(i), format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig(pathout + 'plot/GIF/ivis_result_cloud_MeerKAT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
 
     #write on disk
     hdu0 = fits.PrimaryHDU(result, header=target_header)
     hdulist = fits.HDUList([hdu0])
-    hdulist.writeto(pathout + "result_hije.fits", overwrite=True)
+    hdulist.writeto(pathout + "result_ivis.fits", overwrite=True)
     #_____________________________________________________________________________
 
     stop
@@ -313,4 +313,4 @@ if __name__ == '__main__':
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (K)", fontsize=18.)
-    plt.savefig(pathout + 'hije_result_cloud_MeerKAT_GBT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    
+    plt.savefig(pathout + 'ivis_result_cloud_MeerKAT_GBT.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)    

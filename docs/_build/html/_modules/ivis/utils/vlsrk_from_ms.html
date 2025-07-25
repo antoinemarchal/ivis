@@ -1,0 +1,746 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../../../">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><link rel="index" title="Index" href="../../../genindex.html" /><link rel="search" title="Search" href="../../../search.html" />
+
+    <!-- Generated with Sphinx 8.1.3 and Furo 2025.07.19 -->
+        <title>ivis.utils.vlsrk_from_ms - IViS – ivis documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo.css?v=25af2a20" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #e95420;
+  --color-brand-content: #ff6600;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #2b2b2b;
+  --color-code-foreground: #f8f8f2;
+  --color-brand-primary: #ff6600;
+  --color-brand-content: #ffa266;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #2b2b2b;
+  --color-code-foreground: #f8f8f2;
+  --color-brand-primary: #ff6600;
+  --color-brand-content: #ffa266;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../../index.html"><div class="brand">IViS – ivis documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../../index.html">
+  
+  <span class="sidebar-brand-text">IViS – ivis documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">Basics:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/getting_started.html">Getting Started</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API:</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../api.html">HIJE API Reference</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of HIJE API Reference</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../../../generated/ivis.html">ivis</a><input class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle navigation of ivis</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.core.html">ivis.core</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.imager.html">ivis.imager</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.imager_rrl.html">ivis.imager_rrl</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.io.html">ivis.io</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.logger.html">ivis.logger</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../generated/ivis.pipeline.html">ivis.pipeline</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../../generated/ivis.utils.html">ivis.utils</a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle navigation of ivis.utils</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dcasacore.html">ivis.utils.dcasacore</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dcvel2.html">ivis.utils.dcvel2</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.deepcopyms.html">ivis.utils.deepcopyms</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dformat.html">ivis.utils.dformat</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dms2npz.html">ivis.utils.dms2npz</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dunits.html">ivis.utils.dunits</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.dutils.html">ivis.utils.dutils</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.effpb.html">ivis.utils.effpb</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.mod_loss.html">ivis.utils.mod_loss</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.mod_loss_rrl.html">ivis.utils.mod_loss_rrl</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.msconcat.html">ivis.utils.msconcat</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.plotms.html">ivis.utils.plotms</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.process.html">ivis.utils.process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.process_casa.html">ivis.utils.process_casa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.proj_chipass.html">ivis.utils.proj_chipass</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.projsd.html">ivis.utils.projsd</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.read_channel.html">ivis.utils.read_channel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.simu.html">ivis.utils.simu</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.uvcontsub.html">ivis.utils.uvcontsub</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../generated/ivis.utils.vlsrk_from_ms.html">ivis.utils.vlsrk_from_ms</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <h1>Source code for ivis.utils.vlsrk_from_ms</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.coordinates</span><span class="w"> </span><span class="kn">import</span> <span class="n">SkyCoord</span><span class="p">,</span> <span class="n">EarthLocation</span><span class="p">,</span> <span class="n">Angle</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy</span><span class="w"> </span><span class="kn">import</span> <span class="n">constants</span> <span class="k">as</span> <span class="n">const</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.time</span><span class="w"> </span><span class="kn">import</span> <span class="n">Time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">astropy.units</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">u</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">casatools</span><span class="w"> </span><span class="kn">import</span> <span class="n">table</span><span class="p">,</span> <span class="n">msmetadata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">casatools</span><span class="w"> </span><span class="kn">import</span> <span class="n">msmetadata</span><span class="p">,</span> <span class="n">measures</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">casatools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">astropy.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">c</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">deconv</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+
+<span class="c1"># Create an msmetadata object</span>
+<span class="n">msmd</span> <span class="o">=</span> <span class="n">msmetadata</span><span class="p">()</span>
+
+<div class="viewcode-block" id="convert_freq_to_velocity">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.convert_freq_to_velocity">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">convert_freq_to_velocity</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">rest_frequency</span><span class="o">=</span><span class="mf">1420405751.77</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Converts frequency to velocity using the correct radio convention.&quot;&quot;&quot;</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">()</span>
+    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Open the SPECTRAL_WINDOW table within the MS file</span>
+        <span class="n">tb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms_file</span> <span class="o">+</span> <span class="s1">&#39;/SPECTRAL_WINDOW&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error opening SPECTRAL_WINDOW table: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    
+    <span class="c1"># Get observed frequencies (CHAN_FREQ)</span>
+    <span class="k">if</span> <span class="s1">&#39;CHAN_FREQ&#39;</span> <span class="ow">in</span> <span class="n">tb</span><span class="o">.</span><span class="n">colnames</span><span class="p">():</span>
+        <span class="n">chan_freq</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s1">&#39;CHAN_FREQ&#39;</span><span class="p">)</span>  <span class="c1"># Observed frequencies (Hz)</span>
+        
+        <span class="c1"># Convert frequencies to velocities using the radio convention</span>
+        <span class="n">rest_freq_u</span> <span class="o">=</span> <span class="n">rest_frequency</span>  <span class="c1"># Convert rest frequency to astropy units</span>
+        <span class="n">velocities</span> <span class="o">=</span> <span class="p">(</span><span class="n">rest_freq_u</span> <span class="o">-</span> <span class="n">chan_freq</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span><span class="p">)</span> <span class="o">/</span> <span class="n">rest_freq_u</span> <span class="o">*</span> <span class="n">c</span>  <span class="c1"># Using the correct formula</span>
+
+        <span class="c1"># Print observed frequencies, rest frequency, and velocity results</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Observed Frequency (CHAN_FREQ) | Rest Frequency (HI Line) | Velocity (km/s)&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Print only the first and last values</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;First channel: </span><span class="si">{</span><span class="n">chan_freq</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">Hz</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">rest_frequency</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">velocities</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Last channel: </span><span class="si">{</span><span class="n">chan_freq</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">Hz</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">rest_frequency</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">velocities</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Required column &#39;CHAN_FREQ&#39; not found in SPECTRAL_WINDOW table.&quot;</span><span class="p">)</span>
+    
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">velocities</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_spectral_window_info">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_spectral_window_info">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_spectral_window_info</span><span class="p">(</span><span class="n">ms_file</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extracts and prints all information from the SPECTRAL_WINDOW table in the MS file.&quot;&quot;&quot;</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Open the SPECTRAL_WINDOW table within the MS file</span>
+        <span class="n">tb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms_file</span> <span class="o">+</span> <span class="s1">&#39;/SPECTRAL_WINDOW&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error opening SPECTRAL_WINDOW table: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="c1"># Get all column names in the table</span>
+    <span class="n">column_names</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">colnames</span><span class="p">()</span>
+
+    <span class="c1"># Print information for each column</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Spectral Window Table Information:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">col_name</span> <span class="ow">in</span> <span class="n">column_names</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># Get the data for each column</span>
+            <span class="n">column_data</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="n">col_name</span><span class="p">)</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Column: </span><span class="si">{</span><span class="n">col_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Data: </span><span class="si">{</span><span class="n">column_data</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error reading column </span><span class="si">{</span><span class="n">col_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="get_spectral_window_frame">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_spectral_window_frame">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_spectral_window_frame</span><span class="p">(</span><span class="n">ms_file</span><span class="p">):</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Open the SPECTRAL_WINDOW table within the MS file</span>
+        <span class="n">tb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms_file</span> <span class="o">+</span> <span class="s1">&#39;/SPECTRAL_WINDOW&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error opening SPECTRAL_WINDOW table: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="c1"># Check the MEAS_FREQ_REF column for the frame type (reference frame)</span>
+    <span class="k">if</span> <span class="s1">&#39;MEAS_FREQ_REF&#39;</span> <span class="ow">in</span> <span class="n">tb</span><span class="o">.</span><span class="n">colnames</span><span class="p">():</span>
+        <span class="n">meas_freq_ref</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s1">&#39;MEAS_FREQ_REF&#39;</span><span class="p">)</span>  <span class="c1"># Get data from MEAS_FREQ_REF</span>
+ 
+        <span class="c1"># Map frame code to frame type</span>
+        <span class="n">frame_codes</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="mi">0</span><span class="p">:</span> <span class="s2">&quot;TOPO&quot;</span><span class="p">,</span><span class="c1"># (Topocentric)&quot;,</span>
+            <span class="mi">1</span><span class="p">:</span> <span class="s2">&quot;LSRK&quot;</span><span class="p">,</span><span class="c1"># (Local Standard Rest Kinematic)&quot;,</span>
+            <span class="mi">2</span><span class="p">:</span> <span class="s2">&quot;LSRD&quot;</span><span class="p">,</span><span class="c1"># (Local Standard Rest Dynamical)&quot;,</span>
+            <span class="mi">3</span><span class="p">:</span> <span class="s2">&quot;BARY&quot;</span><span class="p">,</span><span class="c1"># (Barycentric)&quot;,</span>
+            <span class="mi">4</span><span class="p">:</span> <span class="s2">&quot;GEO&quot;</span><span class="c1"># (Geocentric)&quot;</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Handle unknown frame by assuming LSRK</span>
+        <span class="n">frame_type</span> <span class="o">=</span> <span class="n">frame_codes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">meas_freq_ref</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;Unknown frame&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">frame_type</span> <span class="o">==</span> <span class="s2">&quot;Unknown frame&quot;</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reference frame type: </span><span class="si">{</span><span class="n">frame_type</span><span class="si">}</span><span class="s2"> (assuming 0:TOPO)&quot;</span><span class="p">)</span>
+            <span class="n">frame_type</span> <span class="o">=</span> <span class="s2">&quot;TOPO&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reference frame type: </span><span class="si">{</span><span class="n">frame_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;MEAS_FREQ_REF column not found in SPECTRAL_WINDOW table.&quot;</span><span class="p">)</span>
+
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">frame_type</span></div>
+
+
+    
+<div class="viewcode-block" id="get_observation_times">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_observation_times">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_observation_times</span><span class="p">(</span><span class="n">msfile</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute the observation start time, end time, duration, and average time from a Measurement Set (MS).</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        msfile (str): Path to the Measurement Set file.</span>
+<span class="sd">    </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple: (start_time_utc, end_time_utc, avg_time_utc, duration_seconds)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Open MS MAIN table</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">(</span><span class="n">msfile</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">time_data</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s2">&quot;TIME&quot;</span><span class="p">)</span>  <span class="c1"># Read TIME column (in MJD seconds)</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>  <span class="c1"># Close the table</span>
+
+    <span class="c1"># Compute start, end, and average times (convert seconds to MJD)</span>
+    <span class="n">start_time_mjd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span> <span class="o">/</span> <span class="mi">86400</span>  
+    <span class="n">end_time_mjd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span> <span class="o">/</span> <span class="mi">86400</span>  
+    <span class="n">avg_time_mjd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span> <span class="o">/</span> <span class="mi">86400</span>  
+
+    <span class="c1"># Convert MJD to UTC</span>
+    <span class="n">start_time_utc</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">start_time_mjd</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;mjd&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">iso</span>
+    <span class="n">end_time_utc</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">end_time_mjd</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;mjd&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">iso</span>
+    <span class="n">avg_time_utc</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">avg_time_mjd</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;mjd&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">iso</span>
+    
+    <span class="c1"># Compute duration</span>
+    <span class="n">duration_seconds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">start_time_utc</span><span class="p">,</span> <span class="n">end_time_utc</span><span class="p">,</span> <span class="n">avg_time_utc</span><span class="p">,</span> <span class="n">duration_seconds</span></div>
+
+
+
+<div class="viewcode-block" id="get_phase_center_from_ms">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_phase_center_from_ms">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_phase_center_from_ms</span><span class="p">(</span><span class="n">ms</span><span class="p">,</span> <span class="n">field_id</span><span class="p">):</span>
+    <span class="c1">#open ms metadata</span>
+    <span class="n">msmd</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span>
+    <span class="n">phase_center</span> <span class="o">=</span> <span class="n">msmd</span><span class="o">.</span><span class="n">phasecenter</span><span class="p">(</span><span class="n">field_id</span><span class="p">)</span>
+
+    <span class="c1"># Extract RA and Dec in radians</span>
+    <span class="n">ra_rad</span> <span class="o">=</span> <span class="n">phase_center</span><span class="p">[</span><span class="s1">&#39;m0&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span>
+    <span class="n">dec_rad</span> <span class="o">=</span> <span class="n">phase_center</span><span class="p">[</span><span class="s1">&#39;m1&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span>
+    
+    <span class="c1"># Convert to hms (RA) and dms (Dec) using Astropy</span>
+    <span class="n">ra_hms</span> <span class="o">=</span> <span class="n">Angle</span><span class="p">(</span><span class="n">ra_rad</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="n">u</span><span class="o">.</span><span class="n">rad</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">unit</span><span class="o">=</span><span class="n">u</span><span class="o">.</span><span class="n">hourangle</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">)</span>
+    <span class="n">dec_dms</span> <span class="o">=</span> <span class="n">Angle</span><span class="p">(</span><span class="n">dec_rad</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="n">u</span><span class="o">.</span><span class="n">rad</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">unit</span><span class="o">=</span><span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">)</span>
+
+    <span class="c1"># print(&quot;phase center: &quot;, ra_hms, dec_dms)</span>
+
+    <span class="k">return</span> <span class="n">ra_rad</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">rad</span><span class="p">,</span> <span class="n">dec_rad</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">rad</span></div>
+
+
+
+<div class="viewcode-block" id="get_askap_location">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_askap_location">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_askap_location</span><span class="p">():</span> <span class="c1">#not used here</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Returns ASKAP location using Astropy&#39;s predefined site.&quot;&quot;&quot;</span>
+    <span class="n">askap_location</span> <span class="o">=</span> <span class="n">EarthLocation</span><span class="o">.</span><span class="n">of_site</span><span class="p">(</span><span class="s1">&#39;askap&#39;</span><span class="p">)</span>  <span class="c1"># Using &#39;askap&#39; directly</span>
+    <span class="k">return</span> <span class="n">askap_location</span></div>
+
+
+
+<div class="viewcode-block" id="get_observation_metadata">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_observation_metadata">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_observation_metadata</span><span class="p">(</span><span class="n">msfile</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Extracts average observation time and ASKAP location from the Measurement Set.</span>
+<span class="sd">    </span>
+<span class="sd">    Args:</span>
+<span class="sd">        msfile (str): Path to the Measurement Set file.</span>
+<span class="sd">    </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        tuple: (avg_obs_time, location)</span>
+<span class="sd">            - avg_obs_time (Time): Average observation time in UTC.</span>
+<span class="sd">            - location (EarthLocation): Geocentric coordinates of ASKAP.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Open MS MAIN table</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">(</span><span class="n">msfile</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">time_data</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s2">&quot;TIME&quot;</span><span class="p">)</span>  <span class="c1"># Read TIME column (in MJD seconds)</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>  <span class="c1"># Close the table</span>
+
+    <span class="n">avg_time_mjd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">time_data</span><span class="p">)</span> <span class="o">/</span> <span class="mi">86400</span>
+    <span class="n">avg_obs_time</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">avg_time_mjd</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;mjd&#39;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Average Observation Time (UTC):&quot;</span><span class="p">,</span> <span class="n">avg_obs_time</span><span class="o">.</span><span class="n">iso</span><span class="p">)</span>  <span class="c1"># Print in ISO format</span>
+
+    <span class="c1"># 🔹 Extract ASKAP Location from ANTENNA Table</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">msfile</span> <span class="o">+</span> <span class="s2">&quot;/ANTENNA&quot;</span><span class="p">)</span>
+    <span class="n">antenna_positions</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s2">&quot;POSITION&quot;</span><span class="p">)</span>  <span class="c1"># X, Y, Z in meters</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    
+    <span class="c1"># Use the first antenna as the reference</span>
+    <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="o">=</span> <span class="n">antenna_positions</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>  
+    <span class="n">location</span> <span class="o">=</span> <span class="n">EarthLocation</span><span class="o">.</span><span class="n">from_geocentric</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">avg_obs_time</span><span class="p">,</span> <span class="n">location</span></div>
+
+
+
+<div class="viewcode-block" id="get_frequency_from_ms">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.get_frequency_from_ms">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_frequency_from_ms</span><span class="p">(</span><span class="n">msfile</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extracts the frequency from the Measurement Set (MS).&quot;&quot;&quot;</span>
+    <span class="n">tb</span> <span class="o">=</span> <span class="n">table</span><span class="p">()</span>
+    
+    <span class="c1"># Extract the spectral window ID (assuming it&#39;s stored in the SPECTRAL_WINDOW table)</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">msfile</span> <span class="o">+</span> <span class="s2">&quot;/SPECTRAL_WINDOW&quot;</span><span class="p">)</span>
+    <span class="n">freq_array</span> <span class="o">=</span> <span class="n">tb</span><span class="o">.</span><span class="n">getcol</span><span class="p">(</span><span class="s2">&quot;CHAN_FREQ&quot;</span><span class="p">)</span><span class="c1">#[0]  # Frequency in Hz for the first channel</span>
+    <span class="n">tb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    
+    <span class="c1"># Return the frequency of the first channel as an astropy Quantity</span>
+    <span class="k">return</span> <span class="n">freq_array</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span></div>
+
+
+
+<div class="viewcode-block" id="calculate_velocity">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.calculate_velocity">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_velocity</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">rest_freq</span><span class="p">,</span> <span class="n">field_id</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Calls get_spectral_window_frame to determine the frame type and computes the corresponding velocity.</span>
+<span class="sd">    Returns the LSRK velocity if frame type is &quot;LSRK&quot;, or computes the velocity assuming &quot;TOPO&quot; frame.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">    ms_file (str): Path to the Measurement Set (MS) file.</span>
+<span class="sd">    rest_freq (Quantity): Rest frequency of the spectral line as an astropy Quantity (e.g., `rest_freq = 1.4e9 * u.Hz`).</span>
+<span class="sd">    field_id (int, optional): Field ID to extract phase center. Default is 0.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">    np.ndarray: A 1D array of velocities in km/s.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">frame_type</span> <span class="o">=</span> <span class="n">get_spectral_window_frame</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>  <span class="c1"># Get frame type from SPECTRAL_WINDOW table</span>
+
+    <span class="k">if</span> <span class="n">frame_type</span> <span class="o">==</span> <span class="s2">&quot;LSRK&quot;</span><span class="p">:</span>
+        <span class="c1"># If frame type is LSRK, use the convert_freq_to_velocity function</span>
+        <span class="k">return</span> <span class="n">convert_freq_to_velocity</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">rest_freq</span><span class="p">)</span>
+    
+    <span class="k">elif</span> <span class="n">frame_type</span> <span class="o">==</span> <span class="s2">&quot;TOPO&quot;</span><span class="p">:</span>
+        <span class="c1"># If frame type is TOPO, use the compute_vlsrk function</span>
+        <span class="n">msmd</span> <span class="o">=</span> <span class="n">msmetadata</span><span class="p">()</span>
+        <span class="n">me</span> <span class="o">=</span> <span class="n">measures</span><span class="p">()</span>
+        <span class="n">msmd</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>
+
+        <span class="c1"># Extract telescope name</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">msmd</span><span class="o">.</span><span class="n">observatorynames</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Get first observatory name</span>
+
+        <span class="c1"># Use existing function to get phase center</span>
+        <span class="n">ra</span><span class="p">,</span> <span class="n">dec</span> <span class="o">=</span> <span class="n">get_phase_center_from_ms</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">field_id</span><span class="p">)</span>
+
+        <span class="c1"># Use existing function to get observation time</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">avg_time_utc</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">get_observation_times</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>
+        <span class="n">obs_time</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">avg_time_utc</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;iso&#39;</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="s1">&#39;utc&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Get telescope location using measures</span>
+        <span class="n">obs_pos</span> <span class="o">=</span> <span class="n">me</span><span class="o">.</span><span class="n">observatory</span><span class="p">(</span><span class="n">telescope</span><span class="p">)</span>
+        <span class="n">observatory</span> <span class="o">=</span> <span class="n">EarthLocation</span><span class="o">.</span><span class="n">from_geocentric</span><span class="p">(</span><span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m0&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">,</span>
+                                                    <span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m1&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">,</span>
+                                                    <span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m2&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">)</span>
+
+        <span class="n">target</span> <span class="o">=</span> <span class="n">SkyCoord</span><span class="p">(</span><span class="n">ra</span><span class="p">,</span> <span class="n">dec</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">),</span> <span class="n">frame</span><span class="o">=</span><span class="s1">&#39;icrs&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Compute velocity correction</span>
+        <span class="n">v_corr</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">radial_velocity_correction</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s1">&#39;barycentric&#39;</span><span class="p">,</span> <span class="n">obstime</span><span class="o">=</span><span class="n">obs_time</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="n">observatory</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">m</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span>
+
+        <span class="c1"># Ensure rest_freq is a Quantity (if not already)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rest_freq</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">Quantity</span><span class="p">):</span>
+            <span class="n">rest_freq</span> <span class="o">=</span> <span class="n">rest_freq</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>  <span class="c1"># Convert to Quantity if needed</span>
+
+        <span class="n">vlsrk_list</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># List to hold velocities for all channels</span>
+
+        <span class="c1"># Iterate over spectral windows</span>
+        <span class="k">for</span> <span class="n">spw</span> <span class="ow">in</span> <span class="n">msmd</span><span class="o">.</span><span class="n">spwsforfield</span><span class="p">(</span><span class="n">msmd</span><span class="o">.</span><span class="n">fieldsforname</span><span class="p">(</span><span class="n">msmd</span><span class="o">.</span><span class="n">fieldnames</span><span class="p">()[</span><span class="mi">0</span><span class="p">])[</span><span class="mi">0</span><span class="p">]):</span>
+            <span class="n">chan_freqs</span> <span class="o">=</span> <span class="n">msmd</span><span class="o">.</span><span class="n">chanfreqs</span><span class="p">(</span><span class="n">spw</span><span class="p">)</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>  <span class="c1"># Extract channel frequencies</span>
+
+            <span class="c1"># Make sure chan_freqs are Quantity objects</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">chan_freqs</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">Quantity</span><span class="p">):</span>
+                <span class="n">chan_freqs</span> <span class="o">=</span> <span class="n">chan_freqs</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>
+
+            <span class="c1"># Compute velocity using radio convention (LSRK)</span>
+            <span class="n">v_lsrk</span> <span class="o">=</span> <span class="n">c</span> <span class="o">*</span> <span class="p">(</span><span class="n">rest_freq</span> <span class="o">-</span> <span class="n">chan_freqs</span><span class="p">)</span> <span class="o">/</span> <span class="n">rest_freq</span> <span class="o">+</span> <span class="n">v_corr</span>  <span class="c1"># Correct velocity formula</span>
+
+            <span class="nb">print</span><span class="p">(</span><span class="n">v_corr</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span><span class="o">/</span><span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">))</span>
+
+            <span class="c1"># Convert to km/s by dividing by 1000 (and keeping the astropy Quantity format)</span>
+            <span class="n">v_lsrk_kms</span> <span class="o">=</span> <span class="n">v_lsrk</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span>  <span class="c1"># Convert velocity to km/s</span>
+
+            <span class="c1"># Append the velocities to the list</span>
+            <span class="n">vlsrk_list</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">v_lsrk_kms</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>  <span class="c1"># .value extracts the underlying numpy array</span>
+
+        <span class="n">msmd</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="c1"># Return the velocities as a numpy array with astropy Quantity in km/s</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">vlsrk_list</span><span class="p">)</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">km</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span>  <span class="c1"># Return as Quantity in km/s</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported frame type: </span><span class="si">{</span><span class="n">frame_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span></div>
+
+
+
+<div class="viewcode-block" id="calculate_velocity_for_single_freq">
+<a class="viewcode-back" href="../../../generated/ivis.utils.vlsrk_from_ms.html#ivis.utils.vlsrk_from_ms.calculate_velocity_for_single_freq">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_velocity_for_single_freq</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">freq</span><span class="p">,</span> <span class="n">rest_freq</span><span class="p">,</span> <span class="n">field_id</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Computes the velocity for a single frequency using the radio convention and considering the frame type.</span>
+
+<span class="sd">    Parameters:</span>
+<span class="sd">    ms_file (str): Path to the Measurement Set (MS) file.</span>
+<span class="sd">    freq (Quantity): The observed frequency in Hz as an astropy Quantity (e.g., `freq = 1.4e9 * u.Hz`).</span>
+<span class="sd">    rest_freq (Quantity): Rest frequency of the spectral line as an astropy Quantity (e.g., `rest_freq = 1.4e9 * u.Hz`).</span>
+<span class="sd">    field_id (int, optional): Field ID to extract phase center. Default is 0.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">    Quantity: The velocity in km/s (astropy Quantity).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">frame_type</span> <span class="o">=</span> <span class="n">get_spectral_window_frame</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>  <span class="c1"># Get frame type from SPECTRAL_WINDOW table</span>
+
+    <span class="k">if</span> <span class="n">frame_type</span> <span class="o">==</span> <span class="s2">&quot;LSRK&quot;</span><span class="p">:</span>
+        <span class="c1"># If frame type is LSRK, use the convert_freq_to_velocity function</span>
+        <span class="k">return</span> <span class="n">convert_freq_to_velocity</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">rest_freq</span><span class="p">)</span>
+    
+    <span class="k">elif</span> <span class="n">frame_type</span> <span class="o">==</span> <span class="s2">&quot;TOPO&quot;</span><span class="p">:</span>
+        <span class="c1"># If frame type is TOPO, calculate velocity manually using observed frequency and radio convention</span>
+        <span class="n">msmd</span> <span class="o">=</span> <span class="n">msmetadata</span><span class="p">()</span>
+        <span class="n">me</span> <span class="o">=</span> <span class="n">measures</span><span class="p">()</span>
+        <span class="n">msmd</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>
+
+        <span class="c1"># Extract telescope name</span>
+        <span class="n">telescope</span> <span class="o">=</span> <span class="n">msmd</span><span class="o">.</span><span class="n">observatorynames</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Get first observatory name</span>
+
+        <span class="c1"># Use existing function to get phase center</span>
+        <span class="n">ra</span><span class="p">,</span> <span class="n">dec</span> <span class="o">=</span> <span class="n">get_phase_center_from_ms</span><span class="p">(</span><span class="n">ms_file</span><span class="p">,</span> <span class="n">field_id</span><span class="p">)</span>
+
+        <span class="c1"># Use existing function to get observation time</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">avg_time_utc</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">get_observation_times</span><span class="p">(</span><span class="n">ms_file</span><span class="p">)</span>
+        <span class="n">obs_time</span> <span class="o">=</span> <span class="n">Time</span><span class="p">(</span><span class="n">avg_time_utc</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;iso&#39;</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="s1">&#39;utc&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Get telescope location using measures</span>
+        <span class="n">obs_pos</span> <span class="o">=</span> <span class="n">me</span><span class="o">.</span><span class="n">observatory</span><span class="p">(</span><span class="n">telescope</span><span class="p">)</span>
+        <span class="n">observatory</span> <span class="o">=</span> <span class="n">EarthLocation</span><span class="o">.</span><span class="n">from_geocentric</span><span class="p">(</span><span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m0&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">,</span>
+                                                    <span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m1&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">,</span>
+                                                    <span class="n">obs_pos</span><span class="p">[</span><span class="s1">&#39;m2&#39;</span><span class="p">][</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="p">)</span>
+
+        <span class="n">target</span> <span class="o">=</span> <span class="n">SkyCoord</span><span class="p">(</span><span class="n">ra</span><span class="p">,</span> <span class="n">dec</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">deg</span><span class="p">),</span> <span class="n">frame</span><span class="o">=</span><span class="s1">&#39;icrs&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Compute velocity correction</span>
+        <span class="n">v_corr</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="n">radial_velocity_correction</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s1">&#39;barycentric&#39;</span><span class="p">,</span> <span class="n">obstime</span><span class="o">=</span><span class="n">obs_time</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="n">observatory</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">m</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span>
+
+        <span class="c1"># Ensure rest_freq is a Quantity (if not already)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rest_freq</span><span class="p">,</span> <span class="n">u</span><span class="o">.</span><span class="n">Quantity</span><span class="p">):</span>
+            <span class="n">rest_freq</span> <span class="o">=</span> <span class="n">rest_freq</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>  <span class="c1"># Convert to Quantity if needed</span>
+
+        <span class="c1"># Calculate the velocity for the given observed frequency using the radio convention</span>
+        <span class="n">velocity</span> <span class="o">=</span> <span class="n">c</span> <span class="o">*</span> <span class="p">(</span><span class="n">rest_freq</span> <span class="o">-</span> <span class="n">freq</span><span class="p">)</span> <span class="o">/</span> <span class="n">rest_freq</span> <span class="o">+</span> <span class="n">v_corr</span>  <span class="c1"># Correct velocity formula</span>
+
+        <span class="c1"># Convert to km/s</span>
+        <span class="n">velocity_kms</span> <span class="o">=</span> <span class="n">velocity</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">km</span> <span class="o">/</span> <span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span>
+
+        <span class="n">msmd</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="c1"># Return the velocity as an astropy Quantity in km/s</span>
+        <span class="k">return</span> <span class="n">velocity_kms</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported frame type: </span><span class="si">{</span><span class="n">frame_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>    
+    <span class="c1"># # Example usage</span>
+    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;/home/amarchal/Projects/deconv/examples/data/ASKAP/msl_fixms/scienceData.MS_M345-09A_4/&quot;</span>
+    <span class="n">msfile</span> <span class="o">=</span> <span class="s2">&quot;scienceData.MS_M345-09A_4.SB68827.MS_M345-09C_4.beam20_SL.dop.1chan.ms&quot;</span>
+
+    <span class="c1"># path=&quot;/home/amarchal/Projects/deconv/examples/data/MeerKAT/msl_cloud/&quot;</span>
+    <span class="c1"># msfile=&quot;MW-C10_1_chan_-155kms.ms&quot;</span>
+    <span class="c1"># path=&quot;/home/amarchal/Projects/deconv/examples/data/MeerKAT/msl_mw/&quot;</span>
+    <span class="c1"># msfile=&quot;MW-C10_1_MW_chan_-32kms.ms&quot;</span>
+    <span class="c1"># path=&quot;/home/amarchal/Projects/deconv/examples/data/ATCA/rg17/msl/&quot;</span>
+    <span class="c1"># msfile=&quot;rg17.2100_2023-10-06.ms&quot;</span>
+
+    <span class="n">path</span><span class="o">=</span><span class="s2">&quot;/home/amarchal/Projects/deconv/examples/data/MeerKAT/original/&quot;</span>
+    <span class="n">msfile</span><span class="o">=</span><span class="s2">&quot;MW-C10_2.ms.contsub&quot;</span>
+
+    <span class="c1"># Print info header</span>
+    <span class="n">frame_type</span> <span class="o">=</span> <span class="n">get_spectral_window_frame</span><span class="p">(</span><span class="n">path</span><span class="o">+</span><span class="n">msfile</span><span class="p">)</span>
+
+    <span class="c1">#Info time</span>
+    <span class="n">start_utc</span><span class="p">,</span> <span class="n">end_utc</span><span class="p">,</span> <span class="n">avg_utc</span><span class="p">,</span> <span class="n">duration</span> <span class="o">=</span> <span class="n">get_observation_times</span><span class="p">(</span><span class="n">path</span><span class="o">+</span><span class="n">msfile</span><span class="p">)</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Observation Start Time (UTC): </span><span class="si">{</span><span class="n">start_utc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Observation End Time (UTC): </span><span class="si">{</span><span class="n">end_utc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Average Observation Time (UTC): </span><span class="si">{</span><span class="n">avg_utc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Observation Duration: </span><span class="si">{</span><span class="n">duration</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds (</span><span class="si">{</span><span class="n">duration</span><span class="o">/</span><span class="mi">3600</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> hours)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    
+    <span class="c1"># Example Usage</span>
+    <span class="n">rest_freq</span> <span class="o">=</span> <span class="mf">1.42040575177e9</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">Hz</span>  <span class="c1"># More precise 21 cm HI line rest frequency    </span>
+    <span class="n">vlsrk</span> <span class="o">=</span> <span class="n">calculate_velocity</span><span class="p">(</span><span class="n">path</span><span class="o">+</span><span class="n">msfile</span><span class="p">,</span> <span class="n">rest_freq</span><span class="p">)</span>
+
+    
+</pre></div>
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          
+          
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2025, Antoine Marchal
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer no-toc">
+      
+      
+      
+    </aside>
+  </div>
+</div><script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

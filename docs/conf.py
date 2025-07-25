@@ -10,8 +10,8 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'HIJE'
-html_title = 'HIJE – hije documentation'
+project = 'IViS'
+html_title = 'IViS – ivis documentation'
 copyright = '2025, Antoine Marchal'
 author = 'Antoine Marchal'
 release = '0.1.0'

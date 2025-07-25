@@ -3,9 +3,9 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hije"
+name = "ivis"
 version = "0.1.0"
-description = "A non-linear optimization approach to joint deconvolution"
+description = "Interferometric Visibility-space Inversion Software"
 authors = [
     { name = "Antoine Marchal", email = "antoine.marchal@anu.edu.au" }
 ]

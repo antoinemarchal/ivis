@@ -1,5 +1,6 @@
 # Sphinx build artifacts
 docs/_build/
+docs/generated/
 docs/.doctrees/
 docs/*.log
 docs/.DS_Store
