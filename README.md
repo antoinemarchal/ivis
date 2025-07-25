@@ -1,6 +1,6 @@
 # IViS - Interferometric Visibility-space Inversion Software
 
-[![Documentation Status](https://readthedocs.org/projects/hije/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
+[![Documentation Status](https://readthedocs.org/projects/ivis-dev/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
 
 **IViS** is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
 
