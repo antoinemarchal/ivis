@@ -1,5 +1,7 @@
 # HIJE — Hyperspectral Imaging using Joint deconvolution for low-brightness diffuse emission lines
 
+[![Documentation Status](https://readthedocs.org/projects/hije/badge/?version=latest)](https://hije.readthedocs.io/en/latest/)
+
 **HIJE** is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
 
 > **Note**  
@@ -7,7 +9,7 @@
 
 ## Useful Resources
 
-[![Documentation Status](https://readthedocs.org/projects/hije/badge/?version=latest)](https://hije.readthedocs.io/en/latest/)
+[Documentation]: https://hije.readthedocs.io/en/latest/
 
 > **Acknowledgment**  
 > Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric imaging without mosaicking.
