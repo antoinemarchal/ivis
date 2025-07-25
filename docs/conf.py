@@ -57,14 +57,16 @@ autodoc_default_options = {
 }
 
 autodoc_mock_imports = [
-    "galpy",
-    "marchalib",
-    "casatools",
-    "casacore",
     "torch",
-    "tqdm",
+    "casacore",
+    "casatools",
+    "casatasks",
+    "reproject",
     "matplotlib",
-    "mpl_toolkits",
+    "marchalib",
+    "pytorch_finufft",
+    "dask",
+    "daskms",
     "radio_beam",
-    "daskms"
+    "deconv",  # if you're importing from your old package
 ]
