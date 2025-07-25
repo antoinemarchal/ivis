@@ -5,6 +5,7 @@ docs/.doctrees/
 docs/*.log
 docs/.DS_Store
 docs/.coverage
+docs/tutorials/.ipynb_checkpoints/
 
 # ivis
 ivis/imager_rrl.py
