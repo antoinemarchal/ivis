@@ -57,12 +57,14 @@ autodoc_default_options = {
 }
 
 autodoc_mock_imports = [
-    "psutil",
-    "torch",
+    "galpy",
+    "marchalib",
     "casatools",
     "casacore",
+    "torch",
     "tqdm",
     "matplotlib",
+    "mpl_toolkits",
     "radio_beam",
-    "deconv"  # if referenced anywhere
+    "daskms"
 ]
