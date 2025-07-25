@@ -11,15 +11,23 @@ authors = [
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.8"
+
 
 dependencies = [
     "numpy",
     "scipy",
-    "astropy",
+    "astropy"
+]
+
+[project.optional-dependencies]
+runtime = [
     "torch",
+    "casacore",
     "matplotlib",
     "pytorch_finufft",
+    "dask",
+    "daskms",
     "reproject",
     "radio_beam",
     "psutil",
@@ -28,12 +36,12 @@ dependencies = [
     "marchalib"
 ]
 
-[project.optional-dependencies]
 docs = [
-     "sphinx",
-     "furo",
-     "sphinx-autodoc-typehints"
-     ]
+    "sphinx",
+    "furo",
+    "myst-nb",
+    "sphinx-autodoc-typehints"
+]
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/ivis"
