@@ -26,9 +26,3 @@ docs = ["sphinx", "furo"]
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/hije"
-
-[project.optional-dependencies]
-docs = [
-    "sphinx",
-    "furo"
-]
