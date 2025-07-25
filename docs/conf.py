@@ -49,7 +49,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 html_static_path = ['_static']
 html_show_sourcelink = False
 
-autosummary_generate = False
+autosummary_generate = True
 autodoc_default_options = {
     'members': True,
     'undoc-members': True,
