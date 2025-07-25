@@ -51,4 +51,4 @@ API Reference
    :maxdepth: 1
    :caption: API:
 
-   HIJE
+   hije
