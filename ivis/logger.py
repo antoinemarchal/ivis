@@ -24,7 +24,7 @@ class CustomFormatter(logging.Formatter):
         return f"[{timestamp_colored}] {COLORS['cyan']}[{record.name}]{COLORS['reset']} {colored_level} {record.getMessage()}"
 
 
-logger = logging.getLogger("HIJE")
+logger = logging.getLogger("IViS")
 logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers():
