@@ -7,12 +7,11 @@ build:
   tools:
     python: "3.10"
 
+
 python:
   install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
-
+    - method: pip		
+    - requirements: docs/requirements.txt
+    
 sphinx:
   configuration: docs/conf.py
