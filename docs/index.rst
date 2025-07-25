@@ -11,7 +11,6 @@ IViS is a fast, GPU-accelerated non-linear deconvolution tool for radio interfer
 
 Useful resources:
 - `Github repository <https://github.com/antoinemarchal/ivis>`_
-- `Documentation <https://ivis.readthedocs.io>`_
 
 .. note::
    
