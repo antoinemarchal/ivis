@@ -1,0 +1,23 @@
+# Sphinx build artifacts
+docs/_build/
+docs/.doctrees/
+docs/*.log
+docs/.DS_Store
+docs/.coverage
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# VSCode or IDE settings
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
