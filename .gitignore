@@ -1,14 +1,30 @@
-# Ignore entire directories
-__pycache__/
-build/
-deconv.egg-info/
+# Sphinx build artifacts
+docs/_build/
+docs/generated/
+docs/.doctrees/
+docs/*.log
+docs/.DS_Store
+docs/.coverage
 
-# Ignore specific file types
+# Python artifacts
+__pycache__/
+*.out
 *.py~
 *.log
 *.tmp
-*.DS_Store
-*.egg-info
-*.out
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
 .gitignore~
 .nfs*
+build/
+dist/
+
+# VSCode or IDE settings
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
