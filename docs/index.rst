@@ -40,6 +40,17 @@ Then install the latest development version of **IViS** directly from GitHub:
    pip install git+https://github.com/antoinemarchal/ivis.git
 
 
+Models
+------
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Forward models:
+
+   models/single
+   models/gmfs
+
+
 Tutorials
 ---------
 
