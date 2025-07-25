@@ -21,7 +21,8 @@ class CustomFormatter(logging.Formatter):
         levelname = record.levelname.lower()
         color = COLORS.get(levelname, COLORS["reset"])
         colored_level = f"{color}[{levelname}]{COLORS['reset']}"
-        return f"[{timestamp_colored}] {COLORS['cyan']}[DECONV]{COLORS['reset']} {colored_level} {record.getMessage()}"
+        return f"[{timestamp_colored}] {COLORS['cyan']}[{record.name}]{COLORS['reset']} {colored_level} {record.getMessage()}"
+
 
 logger = logging.getLogger("HIJE")
 logger.setLevel(logging.DEBUG)
