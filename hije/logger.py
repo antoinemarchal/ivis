@@ -23,7 +23,7 @@ class CustomFormatter(logging.Formatter):
         colored_level = f"{color}[{levelname}]{COLORS['reset']}"
         return f"[{timestamp_colored}] {COLORS['cyan']}[DECONV]{COLORS['reset']} {colored_level} {record.getMessage()}"
 
-logger = logging.getLogger("DECONV")
+logger = logging.getLogger("HIJE")
 logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers():
