@@ -44,11 +44,3 @@ Tutorials
 
    tutorials/getting_started
 
-API Reference
--------------
-
-.. toctree::
-   :maxdepth: 2
-   :caption: API:
-
-   hije
