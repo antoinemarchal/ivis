@@ -76,3 +76,6 @@ autodoc_mock_imports = [
     "tqdm",
     "joblib"
 ]
+
+nb_execution_mode = "off" #Use static notebooks in RTD
+
