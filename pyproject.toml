@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deconv"
+name = "hije"
 version = "0.1.0"
 description = "A non-linear optimization approach to joint deconvolution"
 authors = [
@@ -21,4 +21,4 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/antoinemarchal/deconv"
+Homepage = "https://github.com/antoinemarchal/hije"

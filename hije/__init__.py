@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
 
+__version__ = "0.1.0"
+
 # Define ANSI color codes for log levels and timestamp
 COLORS = {
     "info": "\033[92m",  # Green
