@@ -9,9 +9,9 @@ from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
 
-from deconv.io import DataProcessor
-from deconv.imager import Imager
-from deconv import logger
+from hije.io import DataProcessor
+from hije.imager import Imager
+from hije import logger
 
 import marchalib as ml #remove
 
