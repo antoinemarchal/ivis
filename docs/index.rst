@@ -58,7 +58,7 @@ Tutorials
    :maxdepth: 1
    :caption: Basics:
 
-   tutorials/getting_started
+   tutorials/get_started
 
 API Reference
 -------------

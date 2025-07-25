@@ -13,15 +13,25 @@ license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.6"
 
-# leave out torch here
 dependencies = [
     "numpy",
     "scipy",
     "astropy"
+    "torch",
+    "casacore",
+    "matplotlib",
+    "pytorch_finufft",
+    "dask",
+    "daskms",
+    "reproject",
+    "radio_beam",
+    "psutil",
+    "tqdm",
+    "joblib",
+    "marchalib",
 ]
 
 [project.optional-dependencies]
-torch = ["torch"]
 docs = ["sphinx", "furo", "sphinx-autodoc-typehints"]
 
 [project.urls]
