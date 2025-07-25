@@ -56,4 +56,13 @@ autodoc_default_options = {
     'show-inheritance': True,
 }
 
-autodoc_mock_imports = ["psutil"]
+autodoc_mock_imports = [
+    "psutil",
+    "torch",
+    "casatools",
+    "casacore",
+    "tqdm",
+    "matplotlib",
+    "radio_beam",
+    "deconv"  # if referenced anywhere
+]
