@@ -16,8 +16,8 @@ from casacore.tables import table, taql
 from pathlib import Path
 # from daskms import xds_from_table
 
-from deconv import logger  # Import the logger
-# from deconv.utils import vlsrk_from_ms
+from hije import logger  # Import the logger
+# from hije.utils import vlsrk_from_ms
 
 @dataclass #modified from MPol
 class VisData:

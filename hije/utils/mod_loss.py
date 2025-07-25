@@ -8,7 +8,7 @@ from multiprocessing import Pool
 from joblib import Parallel, delayed
 import gc
 
-from deconv import logger  # Import the logger
+from hije import logger  # Import the logger
 
 def format_input_tensor(input_tensor):
     #ensure the input tensor has 4 dimensions

@@ -22,8 +22,8 @@ from pathlib import Path
 
 import marchalib as ml
 
-from deconv import logger
-from deconv.utils import dunits, dutils, mod_loss
+from hije import logger
+from hije.utils import dunits, dutils, mod_loss
 
 # Imager class    
 class Imager:

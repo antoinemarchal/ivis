@@ -18,8 +18,8 @@ from tqdm import tqdm as tqdm
 
 import marchalib as ml
 
-from deconv import logger
-from deconv.utils import dutils, dcasacore
+from hije import logger
+from hije.utils import dutils, dcasacore
 
 @dataclass #modified from MPol
 class VisData:
