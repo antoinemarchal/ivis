@@ -68,5 +68,7 @@ autodoc_mock_imports = [
     "dask",
     "daskms",
     "radio_beam",
-    "deconv",  # if you're importing from your old package
+    "deconv",
+    "psutil",
+    "tqdm",
 ]

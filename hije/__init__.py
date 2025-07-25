@@ -1,4 +1,8 @@
-__all__ = ["io", "pipeline", "imager", "core"]
+from . import core
+from . import imager
+from . import io
+from . import pipeline
+from . import utils  # if utils is a subpackage
 
 import logging
 from datetime import datetime
