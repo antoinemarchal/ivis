@@ -1,11 +1,17 @@
-deconv
+HIJE
 ======
 
-**deconv** is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
+**HIJE** — Hyperspectral Imaging using Joint deconvolution for low-brightness diffuse emission lines
+
+HIJE is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
+
+.. note::
+
+   In its current implementation, HIJE is a generic MEM-like mosaicking framework, but it aims to incorporate arbitrary spectral models in the near future to fully exploit the spectral dimension of the data.
 
 Useful resources:
-- `Github repository <https://github.com/antoinemarchal/DECONV>`_
-- `Documentation <https://deconv.readthedocs.io>`_
+- `Github repository <https://github.com/antoinemarchal/HIJE>`_
+- `Documentation <https://HIJE.readthedocs.io>`_
 
 .. note::
    
@@ -22,11 +28,11 @@ To get started, we recommend using `mamba` to create a clean environment with `c
    mamba create -n casacore python=3.10 casacore python-casacore
    mamba activate casacore
 
-Then install the latest development version of **DECONV** directly from GitHub:
+Then install the latest development version of **HIJE** directly from GitHub:
 
 .. code-block:: bash
 
-   pip install git+https://github.com/antoinemarchal/DECONV.git
+   pip install git+https://github.com/antoinemarchal/HIJE.git
 
 
 Tutorials
@@ -45,4 +51,4 @@ API Reference
    :maxdepth: 1
    :caption: API:
 
-   deconv
+   HIJE
