@@ -1,4 +1,4 @@
-HIJE API Reference
+IViS API Reference
 ==================
 
 .. autosummary::
