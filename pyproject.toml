@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = ["torch"]
-docs = ["sphinx", "furo"]
+docs = ["sphinx", "furo", "sphinx-autodoc-typehints"]
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/hije"
