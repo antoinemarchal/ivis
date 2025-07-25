@@ -7,7 +7,6 @@
 
 ## Useful Resources
 
-- [GitHub repository](https://github.com/antoinemarchal/HIJE)
 - [Documentation](https://HIJE.readthedocs.io)
 
 > **Acknowledgment**  
