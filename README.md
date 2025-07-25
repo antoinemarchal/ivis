@@ -12,7 +12,7 @@
 [Documentation](https://ivis-dev.readthedocs.io)
 
 > **Acknowledgment**  
-> Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric. In contrast to MPol, IViS includes native support for image-plane mosaicking with DDEs of the Primary Beam. 
+> Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric. In contrast to [MPol](https://github.com/MPoL-dev/MPoL), IViS includes native support for image-plane mosaicking with DDEs of the Primary Beam. 
 
 ## Installation
 
