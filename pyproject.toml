@@ -20,7 +20,7 @@ dependencies = [
     "torch",
     "matplotlib",
     "pytorch_finufft",
-    "finufft==2.4.1",	
+    "finufft==2.3.0",	
     "reproject",
     "radio_beam",
     "psutil",
