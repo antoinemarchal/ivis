@@ -16,35 +16,24 @@
 
 # Installation
 
-To get started, we recommend using [`uv`](https://github.com/astral-sh/uv) to manage packages and `mamba` to create a clean environment with `casacore`.
-
-## 1. Install `mamba` (if not already available)
+To get started, we recommend using [`uv`](https://github.com/astral-sh/uv) to manage packages and `mamba` to create a clean environment with `casacore`:
 
 ```bash
+# Install mamba (if not already available)
 conda install mamba -n base -c conda-forge
-```
 
-## 2. Create the IViS environment
-
-```bash
+# Create the IViS environment
 mamba create -n ivis \
   python=3.10 casacore=3.4.0 python-casacore=3.4.0 gsl=2.6 pip \
   -c conda-forge -c pkgs/main
-```
 
-```bash
 mamba activate ivis
-```
 
-## 3. Install `uv` (if not already available)
-
-```bash
+# Install uv (if not already available)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.cargo/bin:$PATH"  # if needed
-```
 
-## 4. Install IViS and dependencies using `uv`
-
-```bash
+# Install IViS and dependencies using uv
 uv pip install git+https://github.com/antoinemarchal/ivis.git
 ```
+
