@@ -249,7 +249,7 @@ class Imager:
         options = {
             'maxiter': self.max_its,
             'maxfun': int(1e6),
-            'iprint': 1,
+            'iprint': 25,
         }
         
         # Run optimization
@@ -264,8 +264,8 @@ class Imager:
         )
 
         # logger.info(opt_output)        
-        result = np.reshape(opt_output.x, shape) * 2
-        logger.warning("result I multiplied by 2 for ASKAP convention.")
+        result = np.reshape(opt_output.x, shape) #* 2
+        logger.warning("multiply by 2 for ASKAP.")
 
         #unit conversion
         if units == "Jy/arcsec^2":

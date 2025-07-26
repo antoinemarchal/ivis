@@ -32,8 +32,11 @@ class VisData:
     velocity: np.ndarray
 
 def phasecenter_casacore(ms):
-    # Open the FIELD subtable
-    field_tab = table(f"{ms}/FIELD")
+    # Suppress casacore output when opening tables
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            # Open the FIELD subtable
+            field_tab = table(f"{ms}/FIELD")
 
     # Read the PHASE_DIR column — shape is (1, 1, 2)
     phase_dir = field_tab.getcol("PHASE_DIR")
@@ -234,12 +237,12 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
                                 blc=[channel_index, 0],
                                 trc=[channel_index, -1])
 
-    # Open the POLARIZATION table to check polarization types
-    pol_table = table(f"{ms_path}/POLARIZATION", readonly=True)
-    corr_types = pol_table.getcol("CORR_TYPE")[0]  # Assume one row; typical for most MS files
-    pol_table.close()
+    # # Open the POLARIZATION table to check polarization types
+    # pol_table = table(f"{ms_path}/POLARIZATION", readonly=True)
+    # corr_types = pol_table.getcol("CORR_TYPE")[0]  # Assume one row; typical for most MS files
+    # pol_table.close()
     
-    logger.info(f"Polarization types (CORR_TYPE): {corr_types}")
+    # logger.info(f"Polarization types (CORR_TYPE): {corr_types}")
     
 
     # Compute Stokes I (XX + YY) / 2
