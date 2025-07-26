@@ -14,14 +14,37 @@
 > **Acknowledgment**  
 > Parts of this code were inspired by the [MPol](https://github.com/MPoL-dev/MPoL) package, which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric. In contrast to MPol, IViS includes native support for image-plane mosaicking with DDEs of the Primary Beam. 
 
-## Installation
+# Installation
 
-We recommend using [`mamba`](https://mamba.readthedocs.io) to create a clean environment with `casacore`:
+To get started, we recommend using [`uv`](https://github.com/astral-sh/uv) to manage packages and `mamba` to create a clean environment with `casacore`.
+
+## 1. Install `mamba` (if not already available)
 
 ```bash
-mamba create -n casacore python=3.10 casacore python-casacore
-mamba activate casacore
+conda install mamba -n base -c conda-forge
 ```
+
+## 2. Create the IViS environment
+
 ```bash
-pip install git+https://github.com/antoinemarchal/ivis.git
+mamba create -n ivis \
+  python=3.10 casacore=3.4.0 python-casacore=3.4.0 gsl=2.6 pip \
+  -c conda-forge -c pkgs/main
+```
+
+```bash
+mamba activate ivis
+```
+
+## 3. Install `uv` (if not already available)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.cargo/bin:$PATH"  # if needed
+```
+
+## 4. Install IViS and dependencies using `uv`
+
+```bash
+uv pip install git+https://github.com/antoinemarchal/ivis.git
 ```
