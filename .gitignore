@@ -6,7 +6,7 @@ docs/*.log
 docs/.DS_Store
 docs/.coverage
 docs/tutorials/.ipynb_checkpoints/
-docs/tutorials/get_started.ipynb
+# docs/tutorials/get_started.ipynb
 
 # ivis
 ivis/imager_rrl.py

@@ -32,7 +32,8 @@ dependencies = [
 docs = [
      "sphinx",
      "furo",
-     "sphinx-autodoc-typehints"
+     "sphinx-autodoc-typehints",
+     "myst-nb"
      ]
 
 [project.urls]
