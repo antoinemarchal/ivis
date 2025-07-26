@@ -1,4 +1,21 @@
-# ivis/logger.py
+"""
+Logging utility for the IViS pipeline.
+
+This module defines a custom colorized logger for terminal output, used
+throughout the IViS codebase to provide informative, timestamped log messages.
+
+Classes
+-------
+CustomFormatter
+    A logging formatter that injects UTC timestamps and color codes for
+    different log levels.
+
+Attributes
+----------
+logger : logging.Logger
+    A preconfigured logger named "IViS" with the `CustomFormatter` attached.
+"""
+
 import logging
 from datetime import datetime
 
