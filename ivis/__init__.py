@@ -1,5 +1,5 @@
 """
-IViS software.
+IViS — Interferometric Visibility-space Inversion Software,
 """
 __version__ = "0.1.0"
 
