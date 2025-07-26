@@ -1,6 +1,5 @@
 """
 This subpackage contains utility modules used by IViS.
-==========
 
 Modules
 -------
