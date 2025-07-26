@@ -52,7 +52,7 @@ class Imager:
     hdr : dict
         FITS header containing WCS and shape information.
     init_params : ndarray
-        Initial parameters (flattened model image).
+        Initial parameters (not flattened).
     max_its : int
         Maximum number of iterations for the optimizer.
     lambda_sd : float
