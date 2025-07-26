@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+Imager module for joint deconvolution using GPU-accelerated optimization.
+
+This module provides the `Imager` class which performs non-linear
+optimization combining interferometric and single-dish data.
+
+Author: Antoine Marchal
+"""
+
 import os
 import glob
 import sys
@@ -25,6 +34,39 @@ from ivis.utils import dunits, dutils, mod_loss
 
 # Imager class    
 class Imager:
+    """
+    A GPU-accelerated imager for joint deconvolution of interferometric and single-dish data.
+
+    Parameters
+    ----------
+    vis_data : object
+        Visibility data structure containing uvw coordinates, visibilities, and beam info.
+    pb : ndarray
+        Primary beam model array.
+    grid : ndarray
+        Grid array for SIN projection evaluation.
+    sd : ndarray
+        Single-dish map used for zero-spacing constraint.
+    beam_sd : radio_beam.Beam
+        Beam object for the single-dish map.
+    hdr : dict
+        FITS header containing WCS and shape information.
+    init_params : ndarray
+        Initial parameters (flattened model image).
+    max_its : int
+        Maximum number of iterations for the optimizer.
+    lambda_sd : float
+        Regularization strength for the single-dish constraint.
+    lambda_r : float
+        Regularization strength for the spatial prior (e.g., Laplacian).
+    positivity : bool
+        Whether to enforce a positivity constraint during optimization.
+    device : int or str
+        Device to use: 0 for GPU, 'cpu' for CPU.
+    beam_workers : int
+        Number of workers for parallel beam convolution.
+    """
+        
     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, lambda_r, positivity, device, beam_workers):
         super(Imager, self).__init__()
         self.vis_data = vis_data
@@ -54,6 +96,19 @@ class Imager:
 
     @staticmethod
     def get_device(user_device):
+        """
+        Selects the appropriate compute device (CPU or GPU) based on availability and user request.
+
+        Parameters
+        ----------
+        user_device : int or str
+            0 to request GPU, otherwise uses CPU.
+
+        Returns
+        -------
+        torch.device
+            The selected torch device.
+        """
         if user_device == 0:  # User requested GPU
             try:
                 if torch.cuda.is_available():
@@ -73,11 +128,14 @@ class Imager:
 
     def process_beam_positions(self):
         """
-        Computes the first and last occurrence indices of each beam in self.vis_data.beam.
-        
-        Returns:
-        idmin (np.ndarray): Array of first occurrence indices for each beam.
-        idmax (np.ndarray): Array of last occurrence indices for each beam.
+        Determines the first and last indices for each beam in the visibility dataset.
+
+        Returns
+        -------
+        idmin : ndarray of int
+            First occurrence index for each beam.
+        idmax : ndarray of int
+            Last occurrence index (exclusive upper bound) for each beam.
         """
         # nb = len(self.vis_data.coords)
         # idmin = np.zeros(nb); idmax = np.zeros(nb)
@@ -106,6 +164,21 @@ class Imager:
 
 
     def process(self, units, disk=False):
+        """
+        Runs the imaging optimization pipeline and returns a restored image in the requested unit.
+
+        Parameters
+        ----------
+        units : str
+            Output unit. Must be one of: 'Jy/arcsec^2', 'Jy/beam', or 'K'.
+        disk : bool, optional
+            If True, writes intermediate results to disk (currently unused).
+
+        Returns
+        -------
+        result : ndarray
+            Restored image in the requested unit.
+        """
         #Image parameters
         cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])

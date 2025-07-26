@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+"""
+Data I/O and preprocessing utilities for visibility and beam data.
+
+This module defines the VisData dataclass and the DataProcessor class for
+handling Measurement Sets, extracting tar archives, and preparing input
+for imaging in the IViS pipeline.
+"""
+
 import os
 import glob
 import sys
@@ -21,6 +29,7 @@ from ivis.utils import dutils, dcasacore
 
 @dataclass #modified from MPol
 class VisData:
+    """Container for visibility data used in the imaging pipeline."""
     uu: np.ndarray
     vv: np.ndarray
     ww: np.ndarray
@@ -32,6 +41,22 @@ class VisData:
 
 # DataProcessor class    
 class DataProcessor:
+    """
+    Handles loading, extraction, and preprocessing of measurement set data,
+    as well as beam grid reprojection.
+
+    Parameters
+    ----------
+    path_ms : str
+        Path to measurement sets (.ms or tar archives).
+    path_beams : str
+        Path to beam FITS files.
+    path_sd : str
+        Path to single-dish FITS file (optional, can be empty).
+    pathout : str
+        Output directory for processed primary beams and grids.
+    """
+        
     def __init__(self, path_ms, path_beams, path_sd, pathout):
         super(DataProcessor, self).__init__()
         self.path_ms = path_ms
@@ -41,7 +66,10 @@ class DataProcessor:
         logger.info("[Initialize DataProcessor ]")
         
 
-    def fixms(self): #fixme ran in parallel 
+    def fixms(self): #fixme ran in parallel
+        """
+        Applies `fix_ms_dir` to all .ms files in the input path.
+        """
         #get msl from path
         msl = sorted(glob.glob(self.path_ms+"*.ms"))
         # Apply fix_ms_dir to each MS file
@@ -53,7 +81,21 @@ class DataProcessor:
 
 
     def extract_tar(self, tar_file, clear=False):
-        """Extracts a .tar file and optionally deletes the .tar file after extraction"""
+        """
+        Extracts a .tar file to its directory and optionally deletes it.
+
+        Parameters
+        ----------
+        tar_file : str
+            Path to .tar archive.
+        clear : bool, optional
+            Whether to delete the archive after extraction.
+
+        Returns
+        -------
+        str
+            Path to the processed .tar file.
+        """
         output_dir = os.path.dirname(tar_file)  # Extract in the same directory
         logger.info(f"Starting extraction: {tar_file}")
 
@@ -75,7 +117,16 @@ class DataProcessor:
 
 
     def untardir(self, max_workers=4, clear=False):
-        """Recursively extracts all .tar files in the given directory and subdirectories in sorted order"""
+        """
+        Recursively extracts all .tar files in `path_ms` using multithreading.
+
+        Parameters
+        ----------
+        max_workers : int
+            Number of threads for parallel extraction.
+        clear : bool
+            Whether to delete the archives after extraction.
+        """
         if not os.path.isdir(self.path_ms):
             logger.warning(f"Invalid directory: {self.path_ms}")
             return
@@ -114,6 +165,33 @@ class DataProcessor:
             max_workers=1,
             max_blocks=None  # <-- new parameter
     ):
+        """
+        Reads visibilities from Measurement Sets in 'single' or 'multiple' block mode.
+
+        Parameters
+        ----------
+        uvmin, uvmax : float
+            Minimum and maximum baseline lengths in lambda.
+        chunks : float
+            Unused placeholder for chunk size.
+        target_frequency : float or None
+            Target frequency for selecting channels.
+        target_channel : int
+            Index of the desired frequency channel.
+        extension : str
+            File extension to filter MS files.
+        blocks : {'single', 'multiple'}
+            Whether to process a flat list or nested directory structure.
+        max_workers : int
+            Number of workers for parallel loading.
+        max_blocks : int or None
+            Optional limit on number of blocks when using 'multiple' mode.
+
+        Returns
+        -------
+        VisData
+            Concatenated visibility dataset.
+        """
         if blocks == 'single':
             logger.info("Processing single scheduling block.")
             
@@ -232,8 +310,19 @@ class DataProcessor:
 
     @staticmethod
     def concatenate_vis_data(vis_data_list):
-        """Concatenates a list of VisData objects along the first axis and sorts all arrays based on the beam array, keeping coords and frequency as they are."""
-        
+        """
+        Concatenates a list of VisData objects into one sorted by beam index.
+
+        Parameters
+        ----------
+        vis_data_list : list of VisData
+            List of visibility datasets to merge.
+
+        Returns
+        -------
+        VisData
+            Combined and beam-sorted visibility data.
+        """    
         # Concatenate all arrays (except for coords and frequency)
         uu = np.concatenate([v.uu for v in vis_data_list])
         vv = np.concatenate([v.vv for v in vis_data_list])
@@ -272,6 +361,18 @@ class DataProcessor:
 
 
     def compute_pb_and_grid(self, hdr, fitsname_pb=None, fitsname_grid=None):
+        """
+        Reprojects and interpolates primary beams onto a common WCS grid.
+
+        Parameters
+        ----------
+        hdr : dict
+            FITS header of target WCS.
+        fitsname_pb : str
+            Filename to store the reprojected primary beams.
+        fitsname_grid : str
+            Filename to store the interpolation grids.
+        """
         #shape image
         shape_img = (hdr["NAXIS1"],hdr["NAXIS2"])
         input_shape = (1,1,shape_img[0],shape_img[1])        
@@ -354,6 +455,21 @@ class DataProcessor:
 
 
     def read_pb_and_grid(self, fitsname_pb, fitsname_grid):
+        """
+        Loads precomputed primary beams and interpolation grids from disk.
+
+        Parameters
+        ----------
+        fitsname_pb : str
+            Filename of the primary beam FITS.
+        fitsname_grid : str
+            Filename of the grid FITS.
+
+        Returns
+        -------
+        tuple of np.ndarray
+            (primary beam array, interpolation grid array)
+        """
         #read pre-computed pb
         hdu_grid = fits.open(self.pathout + fitsname_grid)
         #read pre-computed grid                
@@ -363,6 +479,14 @@ class DataProcessor:
 
 
     def read_sd(self):
+        """
+        Stub for reading single-dish data.
+
+        Returns
+        -------
+        tuple
+            (sd = 0, beam_sd = 0)
+        """
         sd = 0; beam_sd = 0
         
         return sd, beam_sd
