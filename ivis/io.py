@@ -16,8 +16,6 @@ import tarfile
 import concurrent.futures
 from tqdm import tqdm as tqdm
 
-import marchalib as ml
-
 from ivis.logger import logger
 from ivis.utils import dutils, dcasacore
 
@@ -305,7 +303,7 @@ class DataProcessor:
             hdr_pb = hdu_pb[0].header
             pb = hdu_pb[0].data
             shape = (hdr_pb["NAXIS2"],hdr_pb["NAXIS1"])
-            w_pb = ml.wcs2D(hdr_pb)
+            w_pb = dutils.wcs2D(hdr_pb)
             input_header = w_pb.to_header()
 
             if round(ratio) != 1:
@@ -318,14 +316,14 @@ class DataProcessor:
                 hdr_pb["CRPIX2"] = int(hdr_pb["NAXIS2"] / 2)
             
                 #Reproj
-                w_pb = ml.wcs2D(hdr_pb)
+                w_pb = dutils.wcs2D(hdr_pb)
                 target_header = w_pb.to_header()
                 reproj, footprint = reproject_interp((pb,input_header), target_header, shape_out)
                 reproj[reproj != reproj] = 0. #make sure NaN to 0 
                 reproj_pb[i] = reproj
                 
-                wcs_in = ml.wcs2D(hdr)
-                wcs_out = ml.wcs2D(hdr_pb)
+                wcs_in = dutils.wcs2D(hdr)
+                wcs_out = dutils.wcs2D(hdr_pb)
                 
                 #Reshape tensor and get grid
                 grid = dutils.get_grid(input_shape, wcs_in, wcs_out, shape_out)
@@ -335,8 +333,8 @@ class DataProcessor:
                 target_header = hdr
                 reproj_pb[i] = pb
 
-                wcs_in = ml.wcs2D(hdr)
-                wcs_out = ml.wcs2D(hdr_pb)
+                wcs_in = dutils.wcs2D(hdr)
+                wcs_out = dutils.wcs2D(hdr_pb)
                 
                 #Reshape tensor and get grid
                 grid = dutils.get_grid(input_shape, wcs_in, wcs_out, shape)

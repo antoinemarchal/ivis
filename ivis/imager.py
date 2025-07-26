@@ -20,8 +20,6 @@ import tarfile
 import concurrent.futures
 from pathlib import Path
 
-import marchalib as ml
-
 from ivis.logger import logger
 from ivis.utils import dunits, dutils, mod_loss
 
@@ -112,7 +110,7 @@ class Imager:
         cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
         #tapper for apodization
-        tapper = ml.edges.apodize(0.98, shape)
+        tapper = dutils.apodize(0.98, shape)
         
         #Convert lambda to radian per pixel
         uu_radpix = dunits._lambda_to_radpix(self.vis_data.uu, cell_size)

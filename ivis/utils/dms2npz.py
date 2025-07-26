@@ -16,8 +16,6 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy import wcs
 
-import marchalib as ml
-
 from deconv.utils import process_casa
 
 msmd = casatools.msmetadata()

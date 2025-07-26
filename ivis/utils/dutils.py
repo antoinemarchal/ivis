@@ -1,7 +1,66 @@
 import numpy as np
 import torch
 from astropy.wcs.utils import pixel_to_pixel
-from astropy.wcs import WCS
+from astropy import wcs
+
+
+def wcs2D(hdr):
+    w = wcs.WCS(naxis=2)
+    w.wcs.crpix = [hdr['CRPIX1'], hdr['CRPIX2']]
+    w.wcs.cdelt = np.array([hdr['CDELT1'], hdr['CDELT2']])
+    w.wcs.crval = [hdr['CRVAL1'], hdr['CRVAL2']]
+    w.wcs.ctype = [hdr['CTYPE1'], hdr['CTYPE2']]
+    return w
+
+
+def apodize(radius, shape):
+    """
+    from JF Robitaille package.
+    Create edges apodization tapper
+    
+    Parameters
+    ----------
+    nx, ny : integers
+    size of the tapper
+    radius : float
+    radius must be lower than 1 and greater than 0.
+    
+    Returns
+    -------
+    
+    tapper : numpy array ready to multiply on your image
+    to apodize edges
+    """
+    ny = shape[0]
+    nx = shape[1]
+
+    if (radius >= 1) or (radius <= 0.):
+        print('Error: radius must be lower than 1 and greater than 0.')
+        return
+        
+    ni = np.fix(radius*nx)
+    dni = int(nx-ni)
+    nj = np.fix(radius*ny)
+    dnj = int(ny-nj)
+    
+    tap1d_x = np.ones(nx)
+    tap1d_y = np.ones(ny)
+    
+    tap1d_x[0:dni] = (np.cos(3. * np.pi/2. + np.pi/2.* (1.* np.arange(dni)/(dni-1)) ))
+    tap1d_x[nx-dni:] = (np.cos(0. + np.pi/2. * (1.* np.arange(dni)/(dni-1)) ))
+    tap1d_y[0:dnj] = (np.cos(3. * np.pi/2. + np.pi/2. * (1.* np.arange( dnj )/(dnj-1)) ))
+    tap1d_y[ny-dnj:] = (np.cos(0. + np.pi/2. * (1.* np.arange(dnj)/(dnj-1)) ))
+    
+    tapper = np.zeros((ny, nx))
+    
+    for i in range(nx):
+        tapper[:,i] = tap1d_y
+                        
+    for i in range(ny):
+        tapper[i,:] = tapper[i,:] * tap1d_x
+        
+    return tapper
+
 
 def ROHSA_kernel():
     return np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]]) / 4.

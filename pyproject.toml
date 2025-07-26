@@ -26,7 +26,6 @@ dependencies = [
     "psutil",
     "tqdm",
     "joblib",
-    "marchalib"
 ]
 
 [project.optional-dependencies]
