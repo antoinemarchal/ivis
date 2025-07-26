@@ -4,3 +4,4 @@ myst-nb
 sphinx-autodoc-typehints
 numpy
 astropy
+scipy
