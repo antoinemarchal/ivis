@@ -29,6 +29,7 @@ Installation
 To get started, we recommend using `uv` to manage packages and `mamba` to create a clean environment with `casacore`:
 
 .. code-block:: bash
+
    curl -LsSf https://astral.sh/uv/install.sh | sh
    export PATH="$HOME/.cargo/bin:$PATH"  # if not already in PATH
    uv --version
@@ -36,10 +37,22 @@ To get started, we recommend using `uv` to manage packages and `mamba` to create
 .. code-block:: bash
 
    mamba create -n ivis \
-   python=3.10 casacore=3.4.0 python-casacore=3.4.0 gsl=2.6 pip \
-   -c conda-forge -c pkgs/main
+     python=3.10 casacore=3.4.0 python-casacore=3.4.0 gsl=2.6 pip \
+     -c conda-forge -c pkgs/main
+
+Then activate the environment:
+
+.. code-block:: bash
 
    mamba activate ivis
+
+.. note::
+
+   To delete an environment:
+
+   .. code-block:: bash
+
+      mamba env remove -n ivis
 
 Then install the latest development version of **IViS** directly from GitHub:
 

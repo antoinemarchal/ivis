@@ -18,8 +18,6 @@ from numpy.fft import fft2, ifft2, fftshift
 from ivis.io import DataProcessor
 from ivis.imager import Imager
 
-import marchalib as ml #remove
-
 plt.ion()
 
 def gauss_beam(sigma, shape, cx, cy, FWHM=False):
