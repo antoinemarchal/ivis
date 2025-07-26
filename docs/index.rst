@@ -23,6 +23,7 @@ Useful resources:
    which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric imaging.
    In contrast to `MPol <https://github.com/MPoL-dev/MPoL>`_, IViS includes native support for image-plane mosaicking with DDEs of the Primary Beam.
 
+
 Installation
 ------------
 
@@ -83,3 +84,8 @@ API Reference
    :caption: API:
 
    api
+
+.. note::
+
+   If you use **IViS**, please cite our work and reference the
+   `IViS GitHub repository <https://github.com/antoinemarchal/ivis>`_.

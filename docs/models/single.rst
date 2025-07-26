@@ -1,4 +1,4 @@
-Simple Frequency Model
+Single Frequency Model
 ======================
 
 This page walks you through the Single Frequency model implemented in IViS.
