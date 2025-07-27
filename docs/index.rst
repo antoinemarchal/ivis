@@ -56,8 +56,15 @@ To get started, we recommend using ``uv`` to manage packages and ``mamba`` to cr
 
       mamba env remove -n ivis
 
-Models
-------
+Documentation
+-------------
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+   workflow
+
 
 .. toctree::
    :maxdepth: 1
@@ -66,13 +73,9 @@ Models
    models/single
    models/gmfs
 
-
-Tutorials
----------
-
 .. toctree::
    :maxdepth: 1
-   :caption: Basics:
+   :caption: Basics Tutorials:
 
    tutorials/get_started
 
