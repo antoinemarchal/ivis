@@ -79,9 +79,6 @@ Documentation
 
    tutorials/get_started
 
-API Reference
--------------
-
 .. toctree::
    :maxdepth: 1
    :caption: API:
