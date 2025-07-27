@@ -5,6 +5,9 @@ build:
   tools:
     python: "3.10"
 
+system:
+  apt_packages:
+    - graphviz
 
 python:
   install:
