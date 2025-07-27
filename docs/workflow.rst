@@ -31,11 +31,7 @@ Workflow
    The final image cube is written to disk in physical units such as <code>Jy/beam</code>, <code>Jy/arcsec^2</code>, or <code>K</code>. This workflow supports <span style="color:#4db6ac;">GPU acceleration</span> and is designed to scale to large mosaics.
    </p>
 
-.. raw:: html
-
-   <p style="color:#aaaaaa; text-align: justify;">
-   The flowchart below summarizes the key modules and their data flow.
-   </p>
+The flowchart below summarizes the key modules and their data flow.
 
 .. graphviz::
 

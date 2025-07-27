@@ -1,13 +1,18 @@
 IViS
-======
+====
 
 **IViS** — Interferometric Visibility-space Inversion Software
 
-IViS is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
+.. raw:: html
 
-Because of its intrinsic framework based on a regularized criterion, IViS — like MEM — is better suited for diffuse emission rather than point sources, whose flux tends to be spread by the regularizer. IViS was developed in the context of imaging H I spectral line data from the ASKAP and MeerKAT instruments.
+   <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
-IViS is designed as a modular framework upon which new deconvolution methods can be built.
+   IViS is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
+
+   Because of its intrinsic framework based on a regularized criterion, IViS — like MEM — is better suited for diffuse emission rather than point sources, whose flux tends to be spread by the regularizer. IViS was developed in the context of imaging H I spectral line data from the ASKAP and MeerKAT instruments.
+
+   IViS is designed as a modular framework upon which new deconvolution methods can be built.
+   </div>
 
 .. note::
 
@@ -22,7 +27,6 @@ Useful resources:
    Parts of this code were inspired by the `MPol <https://github.com/MPoL-dev/MPoL>`_ package,
    which implements a Regularized Maximum Likelihood (RML) framework for radio interferometric imaging.
    In contrast to `MPol <https://github.com/MPoL-dev/MPoL>`_, IViS includes native support for image-plane mosaicking with DDEs of the Primary Beam.
-
 
 Installation
 ------------
@@ -88,6 +92,4 @@ Documentation
 .. note::
 
    If you use **IViS**, please cite our work and reference the
-   `IViS GitHub repository <https://github.com/antoinemarchal/ivis>`_.
-
-   
+   `IViS GitHub repository <https://github.com/antoinemarchal/ivis>`_. This work will be published either in Joss or an astrophysical journal soon.
