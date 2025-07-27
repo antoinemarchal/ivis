@@ -5,13 +5,13 @@ build:
   tools:
     python: "3.10"
 
-system:
-  apt_packages:
-    - graphviz
-
 python:
   install:
     - requirements: docs/requirements.txt
     
 sphinx:
   configuration: docs/conf.py
+
+system:
+  apt_packages:
+    - graphviz
