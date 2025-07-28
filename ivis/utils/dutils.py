@@ -2,7 +2,8 @@ import numpy as np
 import torch
 from astropy.wcs.utils import pixel_to_pixel
 from astropy import wcs
-
+from astropy.modeling import models, fitting
+import matplotlib.pyplot as plt
 
 def wcs2D(hdr):
     w = wcs.WCS(naxis=2)
@@ -93,19 +94,6 @@ def ROHSA_bounds(data_shape, lb_amp, ub_amp):
     
     return np.column_stack((bounds_inf.ravel(), bounds_sup.ravel()))
 
-# def ROHSA_bounds(data_shape, lb_amp, ub_amp):
-#     bounds_inf = np.zeros(data_shape)
-#     bounds_sup = np.zeros(data_shape)
-
-#     bounds_a = [lb_amp, ub_amp]
-
-#     bounds_inf[:,:] = bounds_a[0]
-#     bounds_sup[:,:] = bounds_a[1]
-
-#     bounds = [(bounds_inf.ravel()[i], bounds_sup.ravel()[i]) for i in np.arange(len(bounds_sup.ravel()))]
-                 
-#     return np.array(bounds)
-
 
 def gauss_beam(sigma, shape, FWHM=False):
     ny, nx = shape
@@ -173,3 +161,90 @@ def format_input_tensor(input_tensor):
         
     return input_tensor_reshape
 
+
+def fit_elliptical_gaussian(cutout, pixel_scale_arcsec=1.0):
+    """
+    Fit elliptical Gaussian to image cutout and return flux, Bmaj, Bmin in arcsec.
+
+    Parameters
+    ----------
+    cutout : 2D ndarray
+        Image array containing a single source, in units of Jy/arcsec^2.
+    pixel_scale_arcsec : float
+        Pixel size in arcsec/pixel.
+
+    Returns
+    -------
+    flux : float
+        Integrated flux in Jy.
+    Bmaj : float
+        FWHM of major axis in arcsec.
+    Bmin : float
+        FWHM of minor axis in arcsec.
+    theta : float
+        Position angle in degrees (CCW from +x).
+    """
+    y, x = np.mgrid[:cutout.shape[0], :cutout.shape[1]]
+
+    # Initial guess: symmetric Gaussian at center
+    amp_guess = np.max(cutout)
+    x0 = cutout.shape[1] / 2
+    y0 = cutout.shape[0] / 2
+    sigma_guess = 1.5
+
+    gauss_init = models.Gaussian2D(
+        amplitude=amp_guess,
+        x_mean=x0,
+        y_mean=y0,
+        x_stddev=sigma_guess,
+        y_stddev=sigma_guess,
+        theta=0.0
+    )
+
+    fitter = fitting.LevMarLSQFitter()
+    fitted = fitter(gauss_init, x, y, cutout)
+
+    # Extract fit parameters
+    sigma_x = fitted.x_stddev.value  # in pixels
+    sigma_y = fitted.y_stddev.value  # in pixels
+    theta = np.rad2deg(fitted.theta.value)  # radians → degrees
+
+    # Convert sigma to arcsec
+    sigma_x_arcsec = sigma_x * pixel_scale_arcsec
+    sigma_y_arcsec = sigma_y * pixel_scale_arcsec
+
+    # Convert to FWHM (FWHM = 2.3548 * sigma)
+    FWHM_x = 2.3548 * sigma_x_arcsec
+    FWHM_y = 2.3548 * sigma_y_arcsec
+
+    # Integrated flux in Jy = amp (Jy/arcsec²) × 2πσxσy [in arcsec²]
+    flux = fitted.amplitude.value * 2 * np.pi * sigma_x_arcsec * sigma_y_arcsec
+
+    # Ensure Bmaj ≥ Bmin
+    if FWHM_x >= FWHM_y:
+        Bmaj, Bmin = FWHM_x, FWHM_y
+    else:
+        Bmaj, Bmin = FWHM_y, FWHM_x
+        theta += 90.0  # adjust PA if axes swapped
+
+    # Plot input and fitted model
+    model_data = fitted(x, y)
+
+    plt.figure(figsize=(10, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.imshow(cutout, origin='lower', cmap='inferno')
+    plt.colorbar(label='Jy/arcsec$^{2}$')
+    plt.title('Input Cutout')
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(cutout, origin='lower', cmap='inferno')
+    plt.contour(model_data, levels=5, colors='white', linewidths=1)
+    plt.colorbar(label='Jy/arcsec²')
+    plt.title('Fitted Gaussian Contours')
+
+    plt.suptitle(f"Flux = {flux:.3f} Jy   Bmaj = {Bmaj:.2f}\"   Bmin = {Bmin:.2f}\"   PA = {theta:.1f}°")
+    plt.tight_layout()
+    plt.show()
+
+    return flux, Bmaj, Bmin, theta

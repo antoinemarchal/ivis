@@ -163,6 +163,40 @@ class Imager:
         return idmin, idmax
 
 
+    def forward_model(self):
+        # Image parameters
+        cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+        shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
+        
+        # Convert λ to radians per pixel
+        uu_radpix = dunits._lambda_to_radpix(self.vis_data.uu, cell_size)
+        vv_radpix = dunits._lambda_to_radpix(self.vis_data.vv, cell_size)
+        ww_radpix = dunits._lambda_to_radpix(self.vis_data.ww, cell_size)
+        
+        # Get beam slice indices
+        idmin, idmax = self.process_beam_positions()
+        
+        # Ensure pb and grid have native byte order for PyTorch compatibility
+        pb_native = np.asarray(self.pb, dtype=np.float32)
+        grid_native = np.asarray(self.grid, dtype=np.float32)
+        
+        # Compute model visibilities
+        model_vis = mod_loss.single_frequency_model(
+            x=self.init_params,
+            data=self.vis_data.data,
+            uu=uu_radpix,
+            vv=vv_radpix,
+            pb=pb_native,
+            idmina=idmin,
+            idmaxa=idmax,
+            device=self.device,
+            cell_size=cell_size.value,
+            grid_array=grid_native,
+        )
+        
+        return model_vis
+    
+
     def process(self, units, disk=False):
         """
         Runs the imaging optimization pipeline and returns a restored image in the requested unit.

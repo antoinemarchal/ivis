@@ -37,6 +37,49 @@ def objective(x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device, si
     return L.item(), u_grad.ravel()
 
 
+def single_frequency_model(x, data, uu, vv, pb, idmina, idmaxa, device, cell_size, grid_array):
+    # model_vis has same length as uu, and is complex64
+    model_vis = torch.zeros(len(uu), dtype=torch.complex64, device=device)
+
+    if not torch.is_tensor(x):
+        x = torch.from_numpy(x).to(device)
+    else:
+        x = x.to(device)
+
+    # INTERFEROMETER - JOINT loop over beams
+    n_beams = len(idmina)
+    for i in range(n_beams):
+        idmin = idmina[i]
+        idmax = idmaxa[i]
+
+        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
+        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
+
+        pba = torch.from_numpy(pb[i]).to(device)
+        grid = torch.from_numpy(grid_array[i]).to(device)
+
+        # move points to device
+        points = torch.stack([-vva, uua], dim=0)
+
+        # reproject field at beam position
+        input_tensor = format_input_tensor(x).float().to(device)
+        reprojected_tensor = torch.nn.functional.grid_sample(
+            input_tensor, grid, mode='bilinear', align_corners=True
+        ).squeeze()
+
+        # apply primary beam
+        reproj = reprojected_tensor * pba
+
+        # pack into complex number
+        c = reproj.to(torch.complex64)
+
+        # compute visibilities with NuFFT
+        vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+        model_vis[idmin:idmin+idmax] = vis
+
+    return model_vis.detach().cpu().numpy()
+
+
 def compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig, pb, cell_size, device, grid):
     #move data to device
     uua = torch.from_numpy(uua).to(device)
