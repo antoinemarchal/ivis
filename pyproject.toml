@@ -34,6 +34,7 @@ docs = [
      "furo",
      "sphinx-autodoc-typehints",
      "myst-nb",
+     "myst_parser",
      "sphinx.ext.graphviz"
      ]
 
