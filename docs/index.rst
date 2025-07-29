@@ -83,6 +83,7 @@ Documentation
 
    tutorials/get_started
    tutorials/effective_beam
+   tutorials/noise
 
 .. toctree::
    :maxdepth: 1
