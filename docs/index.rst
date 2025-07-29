@@ -82,6 +82,7 @@ Documentation
    :caption: Basics Tutorials:
 
    tutorials/get_started
+   tutorials/effective_beam
 
 .. toctree::
    :maxdepth: 1
