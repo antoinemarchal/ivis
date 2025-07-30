@@ -18,7 +18,7 @@ Interferometric Data Model
 
    <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
-The visibility measured between antennas at positions :math:`\mathbf{r}_i` and :math:`\mathbf{r}_j` is:
+The visibility measured between antennas at positions :math:`\mathbf{r}_i` and :math:`\mathbf{r}_j` is
 
 .. raw:: html
 
@@ -32,7 +32,7 @@ The visibility measured between antennas at positions :math:`\mathbf{r}_i` and :
 
    <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
-Each beam :math:`k` models visibilities as:
+To model the set of visibilities for each beam :math:`k`, we first reproject a local field from the global sky model :math:`I(r)` using an orthographic SIN projection. The header of each primary beam in ``BEAMS`` defines the local projection.
 
 .. raw:: html
 
@@ -40,15 +40,20 @@ Each beam :math:`k` models visibilities as:
 
 .. math::
 
-    \tilde{V}_k(I'_k; u, v, w) = \iint A_k(\ell, m) \, I'_k(\ell, m) \, \frac{e^{-2\pi i [u\ell + v m + w(\sqrt{1 - \ell^2 - m^2} - 1)]}}{\sqrt{1 - \ell^2 - m^2}} \, d\ell \, dm \tag{3}
-
-.. math::
-
-    \tilde{V}_k(I'_k; u, v) \approx \iint A_k(\ell, m) \, I'_k(\ell, m) \, e^{-2\pi i [u\ell + v m]} \, d\ell \, dm \tag{4}
-
-.. math::
-
     I'_k(\ell, m) \xleftarrow{\text{SIN projection}} I(r) \tag{5}
+
+.. raw:: html
+
+   <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
+
+This is the step where mosaicking is natively handled. The starting coordinate system of the sky image (i.e., the WCS of :math:`I(r)`) is entirely arbitrary — it can be Cartesian, HEALPix, or any valid projection. What matters is that each beam is reprojected consistently into its own local frame before forward modeling.
+
+.. raw:: html
+
+   </div>
+
+After projection, the local image is multiplied by the known primary beam :math:`A_k(\ell, m)`.  
+This step naturally incorporates the direction-dependent effect (DDE) of the primary beam.
 
 .. math::
 
@@ -58,19 +63,36 @@ Each beam :math:`k` models visibilities as:
 
    <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
-This is the step where mosaicking is natively handled: the global sky model :math:`I(r)` is reprojected into the local coordinate frame of each beam :math:`k`, using an orthographic SIN projection.
-
-The starting coordinate system of the sky image (i.e., the WCS of :math:`I(r)`) is entirely arbitrary — it can be Cartesian, HEALPix, or any valid projection.
-What matters is that each beam is reprojected consistently into its own local frame before forward modeling.
-
-This approach enables joint imaging of multiple overlapping fields in a natural and consistent way.
-
-A non-uniform FFT (NuFFT) is used to evaluate model visibilities at irregular :math:`(u,v)` coordinates — a process often referred to as degridding. This avoids the need to interpolate the data onto a regular grid and circumvents gridding artifacts, while enabling fast computation. This concept is not new and was implemented in the MPol package, developed by Ian Czekala, which I learned about during a presentation at the NRAO 2024 workshop on synthesis imaging for radio interferometry. 
+For each beam :math:`k`, the model visibilities are obtained using the interferometric measurement equation:
 
 .. raw:: html
 
    </div>
 
+.. math::
+
+    \tilde{V}_k(I'_k; u, v, w) = \iint A_k(\ell, m) \, I'_k(\ell, m) \, \frac{e^{-2\pi i [u\ell + v m + w(\sqrt{1 - \ell^2 - m^2} - 1)]}}{\sqrt{1 - \ell^2 - m^2}} \, d\ell \, dm \tag{3}
+
+Under the small-angle approximation, this simplifies to:
+
+.. math::
+
+    \tilde{V}_k(I'_k; u, v) \approx \iint A_k(\ell, m) \, I'_k(\ell, m) \, e^{-2\pi i [u\ell + v m]} \, d\ell \, dm \tag{4}
+
+.. raw:: html
+
+   <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
+
+A non-uniform FFT (NuFFT, using the fiNuFFT implementation) is used to evaluate model visibilities at irregular :math:`(u,v)` coordinates — a process often referred to as *degridding*.  
+This avoids interpolation onto a regular grid and circumvents gridding artifacts, while enabling fast computation.
+
+This concept is not new and was implemented in the MPol package developed by Ian Czekala, which I learned about during a presentation at the NRAO 2024 workshop on synthesis imaging for radio interferometry.
+
+.. raw:: html
+
+   </div>
+
+   
 Cost Function
 -------------
 

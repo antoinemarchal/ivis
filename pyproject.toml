@@ -26,6 +26,7 @@ dependencies = [
     "psutil",
     "tqdm",
     "joblib",
+    "pywph"
 ]
 
 [project.optional-dependencies]
