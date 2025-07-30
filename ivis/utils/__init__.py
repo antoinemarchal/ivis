@@ -9,4 +9,4 @@ Modules
 
 """
 
-__all__ = ["dunits", "dformat", "mod_loss"]
+__all__ = ["dunits", "dformat", "mod_loss", "fourier"]

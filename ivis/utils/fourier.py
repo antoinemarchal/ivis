@@ -36,12 +36,33 @@ Functions
 - ``depad(input, fact)``
     Crops a previously padded 2D image, removing the borders added by ``padding``.
 
-Author: Taken from JF Robitaille package
+Author: Adapted from JF Robitaille package by Antoine Marchal (mostly added docstrings for RTD). 
 """
 
 import numpy as np
 
 def powspec(image, reso=1, autocorr=False, **kwargs):
+    """
+    Compute the azimuthally averaged 1D power spectrum or autocorrelation of a 2D image.
+
+    Parameters
+    ----------
+    image : ndarray
+        Input 2D image.
+    reso : float, optional
+        Pixel size in spatial units (e.g. arcmin).
+    autocorr : bool, optional
+        If True, return the autocorrelation function instead of the power spectrum.
+    im2 : ndarray, optional (passed via kwargs)
+        Second image for computing the cross-spectrum.
+
+    Returns
+    -------
+    tab_k : ndarray
+        Radial spatial frequency values.
+    spec_k : ndarray
+        Azimuthally averaged power spectrum.
+    """
     na = float(image.shape[1])
     nb = float(image.shape[0])
     nf = np.max(np.array([na, nb]))
@@ -103,6 +124,19 @@ def powspec(image, reso=1, autocorr=False, **kwargs):
     return tab_k, spec_k
 
 def kgrid(image):
+    """
+    Compute the 2D spatial frequency grid (radius only) for a given image.
+
+    Parameters
+    ----------
+    image : ndarray
+        Input 2D image.
+
+    Returns
+    -------
+    kmat : ndarray
+        2D array of radial spatial frequencies (normalized).
+    """
     na = float(image.shape[1])
     nb = float(image.shape[0])
     x, y = np.meshgrid(np.arange(na), np.arange(nb))
@@ -120,6 +154,23 @@ def kgrid(image):
     return np.sqrt(x ** 2 + y ** 2)
 
 def cross_spec(image, image2, reso=1):
+    """
+    Compute the 1D cross power spectrum between two 2D images.
+
+    Parameters
+    ----------
+    image : ndarray
+        First 2D image.
+    image2 : ndarray
+        Second 2D image.
+    reso : float, optional
+        Pixel size in spatial units (e.g. arcmin).
+
+    Returns
+    -------
+    spec_k : ndarray
+        Azimuthally averaged cross power spectrum.
+    """
     na = float(image.shape[1])
     nb = float(image.shape[0])
     nf = np.max(np.array([na, nb]))
@@ -164,6 +215,21 @@ def cross_spec(image, image2, reso=1):
     return kpow[1:np.size(hval) - 1]
 
 def apodize_1d(radius, shape):
+    """
+    Create a 1D cosine taper window for edge apodization.
+
+    Parameters
+    ----------
+    radius : float
+        Fractional taper width (0 < radius < 1).
+    shape : int
+        Total length of the 1D array.
+
+    Returns
+    -------
+    tap1d_x : ndarray
+        1D tapering function.
+    """
     if not (0 < radius < 1):
         raise ValueError("radius must be between 0 and 1")
 
@@ -178,6 +244,21 @@ def apodize_1d(radius, shape):
     return tap1d_x
 
 def apodize(radius, shape):
+    """
+    Create a 2D cosine taper window for edge apodization.
+
+    Parameters
+    ----------
+    radius : float
+        Fractional taper width (0 < radius < 1).
+    shape : tuple of int
+        Shape of the 2D image (ny, nx).
+
+    Returns
+    -------
+    tapper : ndarray
+        2D tapering function.
+    """
     if not (0 < radius < 1):
         raise ValueError("radius must be between 0 and 1")
 
@@ -196,6 +277,21 @@ def apodize(radius, shape):
     return np.outer(tap1d_y, tap1d_x)
 
 def padding(input, fact):
+    """
+    Pad a 2D image by a given fractional amount with zeros.
+
+    Parameters
+    ----------
+    input : ndarray
+        Original 2D image.
+    fact : float
+        Padding fraction (e.g. 0.2 adds 20% on each side).
+
+    Returns
+    -------
+    output : ndarray
+        Padded image.
+    """
     y, x = int(input.shape[0] * (1. + fact)), int(input.shape[1] * (1. + fact))
     width = input.shape[1]
     height = input.shape[0]
@@ -208,6 +304,21 @@ def padding(input, fact):
     return output
 
 def depad(input, fact):
+    """
+    Crop a padded 2D image to its original size.
+
+    Parameters
+    ----------
+    input : ndarray
+        Padded 2D image.
+    fact : float
+        Padding fraction used during padding.
+
+    Returns
+    -------
+    output : ndarray
+        Cropped image matching original dimensions.
+    """
     y, x = int(input.shape[0] / (1. + fact)) + 1, int(input.shape[1] / (1. + fact)) + 1
     width = input.shape[1]
     height = input.shape[0]

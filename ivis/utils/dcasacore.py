@@ -1,4 +1,24 @@
-#amarchal 10/24
+# -*- coding: utf-8 -*-
+"""
+Measurement Set I/O Utilities
+-----------------------------
+
+This module provides tools for extracting and filtering visibility data from
+radio interferometric Measurement Sets (MS), either in serial or parallel mode.
+It supports both `casacore.tables` and optional `dask-ms` backends.
+
+Functions
+---------
+- ``phasecenter_casacore(ms)``
+- ``read_channel_casacore(...)``
+- ``readmsl(...)`` / ``readmsl_no_parallel(...)``
+
+Returned data are stored in a `VisData` dataclass containing visibility coordinates,
+data, noise estimates, beam indices, and sky positions.
+
+Author: Antoine Marchal
+"""
+
 import os
 import glob
 import time
@@ -32,6 +52,7 @@ class VisData:
     velocity: np.ndarray
 
 def phasecenter_casacore(ms):
+    """Extracts the phase center (RA/Dec) from the FIELD table of a Measurement Set."""
     # Suppress casacore output when opening tables
     with open(os.devnull, 'w') as devnull:
         with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
@@ -53,6 +74,7 @@ def phasecenter_casacore(ms):
 
 
 def phasecenter_dask(ms): #FIXME
+    """(Dask version) Extracts the phase center from FIELD table of MS using dask-ms."""
     # Load the PHASE_DIR column from the FIELD table
     field_xds = xds_from_table(f"{ms}::FIELD", columns=["PHASE_DIR"])
     
@@ -71,7 +93,8 @@ def phasecenter_dask(ms): #FIXME
     return ra_hms, dec_dms
 
 
-def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
+def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency):
+    """(Obsolete) Reads a single channel from an MS using dask-ms and filters baselines."""
     ms_path = Path(ms_path)
 
     #get phase center
@@ -144,7 +167,7 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
         
     UVW_lambda = UVW_lambda.compute().data
 
-    #Keep cross correlation and filter flagged baselines
+    # Keep cross correlation and filter flagged baselines
     ANTENNA1 = msds_with_coords.ANTENNA1
     ANTENNA2 = msds_with_coords.ANTENNA2
     xc = np.where((ANTENNA1 != ANTENNA2) & (FLAG[...,0] == False) & (FLAG[...,-1] == False) & (baseline_lengths >= uvmin) & (baseline_lengths <= uvmax))[0]
@@ -165,17 +188,35 @@ def readms_dask(ms_path, uvmin, uvmax, chunks, target_frequency): #obsolete
 
 def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channel):
     """
-    Reads a specific channel from the MS file using casacore.tables,
-    selected by frequency, without loading the entire dataset.
-        
-    Args:
-        ms_path (str): Path to the Measurement Set.
-        uvmin (float): Minimum baseline length.
-        uvmax (float): Maximum baseline length.
-        target_frequency.value (float): The target frequency in Hz.
-        
-    Returns:
-        tuple: (Selected frequency, UVW data, Stokes I, SIGMA, Velocity)
+    Read a single frequency channel from a Measurement Set using casacore.tables.
+    
+    Parameters
+    ----------
+    ms_path : str
+        Path to the Measurement Set directory.
+    uvmin : float
+        Minimum baseline length in wavelengths.
+    uvmax : float
+        Maximum baseline length in wavelengths.
+    target_frequency : Quantity
+        Target frequency (in Hz).
+    target_channel : int
+        Index of the desired frequency channel.
+
+    Returns
+    -------
+    freq : float
+        Extracted channel frequency (Hz).
+    vel : Quantity
+        Computed velocity in the LSRK frame.
+    uvw_lambda : ndarray
+        (N, 3) array of baseline vectors in units of lambda.
+    sigma_i : ndarray
+        Estimated noise.
+    stokes_i : ndarray
+        Stokes I visibilities.
+    ra_hms, dec_dms : str
+        RA/Dec of phase center in HMS/DMS string format.
     """
     #get phase center
     # ra_hms, dec_dms = phasecenter_dask(ms_path)
