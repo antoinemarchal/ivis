@@ -65,7 +65,7 @@ What matters is that each beam is reprojected consistently into its own local fr
 
 This approach enables joint imaging of multiple overlapping fields in a natural and consistent way.
 
-A non-uniform FFT (NuFFT) is used to evaluate model visibilities at irregular :math:`(u,v)` coordinates — a process often referred to as degridding. This avoids the need to interpolate the data onto a regular grid and circumvents gridding artifacts, while enabling fast computation.
+A non-uniform FFT (NuFFT) is used to evaluate model visibilities at irregular :math:`(u,v)` coordinates — a process often referred to as degridding. This avoids the need to interpolate the data onto a regular grid and circumvents gridding artifacts, while enabling fast computation. This concept is not new and was implemented in the MPol package, developed by Ian Czekala, which I learned about during a presentation at the NRAO 2024 workshop on synthesis imaging for radio interferometry. 
 
 .. raw:: html
 
@@ -74,51 +74,98 @@ A non-uniform FFT (NuFFT) is used to evaluate model visibilities at irregular :m
 Cost Function
 -------------
 
+The residual visibilities for each beam k is
+
 .. math::
 
     L_{1,k}(I'_k) = \tilde{V}_k(I'_k) - V_k \tag{7}
+
+and the estimated parameter map :math:`I(r)` is defined as the minimizer of a cost function that includes the sum of the squares of the residual
 
 .. math::
 
     J_k(I'_k) = \frac{1}{2} \sum_{u,v} \left( \frac{L_{1,k}(I'_k)}{\Sigma_{1,k}} \right)^2 \tag{8}
 
-.. math::
-
-    Q(I) = \sum_k J_k(I'_k) \tag{9}
+summed over the N beams
 
 .. math::
 
-    d = \begin{bmatrix}
-        0 & -1 & 0 \\
-        -1 & 4 & -1 \\
-        0 & -1 & 0
-    \end{bmatrix}
+    J(I) = \sum_k^N J_k(I'_k) \tag{9}
+
+where :math:`\Sigma_{1,k}` is the standard deviation of the noise, provided in the measurement set of beam :math:`k` in column ``SIGMA``. This sum over the :math:`k` beams is what makes the deconvolution “joint”. 
+
+
+.. math::
+
+    Q(I) = J(I) + \lambda_r R(I)
+
+The total cost function is a regularized non-linear least-square criterion, and the minimizer is
+
+.. math::
+
+    \hat{I}(r) = \arg \min_I Q(I) \tag{15}
+
+.. raw:: html
+
+   <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
+
+Here, :math:`\lambda_r` is a tunable hyperparameter that controls the strength of the regularization.
+It balances data fidelity and any statistical prior that can be introduce in to cost function such as, e.g., smoothness of the reconstructed image.
+This very general form is what we hope will make IViS a modular sofware where anyone can design their own cost function. 
+
+In IViS base layer, the regularization term :math:`R(I)` is a Laplacian filter, which penalizes local pixel-to-pixel variations in the image intensity.
+This encourages spatial smoothness and suppresses small-scale noise, especially in diffuse emission regions.
+Unlike the Maximum Entropy Method (MEM), this approach does not maximize an entropy functional — instead, it imposes smoothness via a quadratic penalty.
+In this case, 
+
+.. raw:: html
+
+   </div>
 
 .. math::
 
     R(I) = \frac{1}{2} \| D I(r) \|_2^2 \tag{13}
 
 .. math::
-
-    Q_{\text{tot}}(I) = Q(I) + \lambda_r R(I) \tag{14'}
-
-.. math::
-
-    \hat{I}(r) = \arg \min_I Q_{\text{tot}}(I) \tag{15}
+      
+    d = \begin{bmatrix}
+        0 & -1 & 0 \\
+        -1 & 4 & -1 \\
+        0 & -1 & 0
+    \end{bmatrix}
 
 .. raw:: html
 
    <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
-Here, :math:`\lambda_r` is a tunable hyperparameter that controls the strength of the spatial regularization.
-It balances data fidelity with smoothness in the reconstructed image.
-The regularization term :math:`R(I)` is based on a Laplacian filter, which penalizes local pixel-to-pixel variations in the image intensity.
-This encourages spatial smoothness and suppresses small-scale noise, especially in diffuse emission regions.
-Unlike maximum entropy methods, this approach does not maximize an entropy functional — instead, it imposes smoothness via a quadratic penalty that is simple, effective, and differentiable.
+where :math:`D` is the matrix that performs the convolution with the kernel :math:`d`.
 
 .. raw:: html
 
    </div>
+
+Adding single dish data
+-----------------------
+To natively build the short spacing correction into IViS, we added the second data fidelity term. This idea was first introduced by Stanimirivic et al 2002. 
+
+.. math::
+
+    L_2(I) = \tilde{T_b}(I) - T_b
+
+and :math:`I(r)` is defined as the minimizer of a cost function that is the sum of :math:`Q(I)` and
+
+.. math::
+
+    K(I) = \frac{1}{2} \left\| L_2(I) \right\|_{\Sigma_2}^2
+
+where :math:`\Sigma_2` is the standard deviation of the noise in the single-dish data, usually measured from empty channel maps where no signal is detected. 
+
+.. math::
+
+    Q_{\mathrm{tot}}(\mathbf{I}) = Q(\mathbf{I}) + \lambda K(\mathbf{I}) + \lambda_r R(\mathbf{I})
+
+where a new yper-parameter is introduced to tune the balance between the three terms. 
+
 
 Optimization Strategy
 ---------------------
