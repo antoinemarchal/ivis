@@ -14,45 +14,13 @@ from scipy.ndimage import zoom
 from ivis.io import DataProcessor
 from ivis.imager import Imager
 from ivis.logger import logger
-from ivis.utils import dutils, mod_loss
+from ivis.utils import dutils, mod_loss, fourier
 
 plt.ion()
 
-def insert_elliptical_gaussian_source(shape, cell_size, flux_jy=1.0,
-                                      fwhm_maj_arcsec=15.0, fwhm_min_arcsec=7.5,
-                                      pa_deg=0.0, center=None):
-    ny, nx = shape
-    y, x = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
-
-    # Set center
-    if center is None:
-        cy, cx = ny // 2, nx // 2
-    else:
-        cy, cx = center
-
-    # Convert FWHM to sigma in pixels
-    sigma_maj_pix = (fwhm_maj_arcsec / 2.3548) / cell_size
-    sigma_min_pix = (fwhm_min_arcsec / 2.3548) / cell_size
-    theta_rad = np.deg2rad(pa_deg)
-
-    # Rotate coordinate grid
-    dx = x - cx
-    dy = y - cy
-    dx_rot = dx * np.cos(theta_rad) + dy * np.sin(theta_rad)
-    dy_rot = -dx * np.sin(theta_rad) + dy * np.cos(theta_rad)
-
-    # Elliptical 2D Gaussian (unit integral)
-    gaussian = np.exp(-0.5 * ((dx_rot / sigma_maj_pix)**2 + (dy_rot / sigma_min_pix)**2))
-    gaussian /= np.sum(gaussian) * cell_size**2  # now in Jy/arcsec²
-
-    # Scale to desired flux
-    sky_model = gaussian * flux_jy
-    return sky_model.astype(np.float32)
-
-
 path_ms = "/Users/antoine/Desktop/ivis_data/msl_mw/" #directory of measurement sets    
 path_beams = "/Users/antoine/Desktop/ivis_data/BEAMS/" #directory of primary beams
-path_sd = "/Users/antoine/Desktop/ivis_data/" #path single-dish data
+path_sd = None #path single-dish data
 pathout = "/Users/antoine/Desktop/ivis_data/" #path where data will be packaged and stored
 
 # path_ms = "/Users/antoine/Desktop/ivis_data_1beam/msl_mw/" #directory of measurement sets    
@@ -94,16 +62,16 @@ cell_size = (np.abs(target_header["CDELT2"]) *u.deg).to(u.arcsec).value
 sky_model = np.zeros(shape, dtype=np.float32)
 sky_model[shape[0] // 2, shape[1] // 2] = 1.0 / (cell_size ** 2)  # Jy / arcsec^2
 
-#Gaussian model
+# #Gaussian model
 
-sky_model = insert_elliptical_gaussian_source(
-    shape=shape,
-    cell_size=6.0,
-    flux_jy=20.0,
-    fwhm_maj_arcsec=60.0,
-    fwhm_min_arcsec=30.0,
-    pa_deg=45.0
-)
+# sky_model = insert_elliptical_gaussian_source(
+#     shape=shape,
+#     cell_size=6.0,
+#     flux_jy=20.0,
+#     fwhm_maj_arcsec=60.0,
+#     fwhm_min_arcsec=30.0,
+#     pa_deg=45.0
+# )
 
 #fBms model
 
@@ -122,6 +90,9 @@ zoom_y = ny / ny0
 zoom_x = nx / nx0
 # Resample with interpolation
 sky_model = zoom(fractal, (zoom_y, zoom_x), order=3)  # cubic interpolation
+
+#FIXME
+sky_model = np.zeros(shape)
 
 #Model visibilities with IVis forward single frequency model
 image_processor = Imager(vis_data,      # visibilities
@@ -154,9 +125,9 @@ vis_data.data = model_vis + noise
 init_params = np.zeros(shape, dtype=np.float32)
 
 #user parameters
-max_its = 40
+max_its = 20
 lambda_sd = 0
-lambda_r = 10
+lambda_r = 1
 device = 0#"cpu" #0 is GPU and "cpu" is CPU
 positivity = False
 
@@ -219,4 +190,11 @@ cutout = result[cy - zoom:cy + zoom + 1, cx - zoom:cx + zoom + 1]
 plt.imshow(cutout, origin="lower", vmin=0, vmax=1.e-2)
 
 flux, Bmaj, Bmin, theta = dutils.fit_elliptical_gaussian(cutout, pixel_scale_arcsec=cell_size)
+
+#test fourier module
+tapper = fourier.apodize(0.97, shape)
+
+field_zm = result - np.mean(result)
+field_zm_apod = field_zm * tapper
+ks, sps1d = fourier.powspec(field_zm_apod, reso=(target_header["CDELT2"]*u.deg).to(u.arcmin).value)
 

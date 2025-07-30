@@ -162,6 +162,38 @@ def format_input_tensor(input_tensor):
     return input_tensor_reshape
 
 
+def insert_elliptical_gaussian_source(shape, cell_size, flux_jy=1.0,
+                                      fwhm_maj_arcsec=15.0, fwhm_min_arcsec=7.5,
+                                      pa_deg=0.0, center=None):
+    ny, nx = shape
+    y, x = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
+
+    # Set center
+    if center is None:
+        cy, cx = ny // 2, nx // 2
+    else:
+        cy, cx = center
+
+    # Convert FWHM to sigma in pixels
+    sigma_maj_pix = (fwhm_maj_arcsec / 2.3548) / cell_size
+    sigma_min_pix = (fwhm_min_arcsec / 2.3548) / cell_size
+    theta_rad = np.deg2rad(pa_deg)
+
+    # Rotate coordinate grid
+    dx = x - cx
+    dy = y - cy
+    dx_rot = dx * np.cos(theta_rad) + dy * np.sin(theta_rad)
+    dy_rot = -dx * np.sin(theta_rad) + dy * np.cos(theta_rad)
+
+    # Elliptical 2D Gaussian (unit integral)
+    gaussian = np.exp(-0.5 * ((dx_rot / sigma_maj_pix)**2 + (dy_rot / sigma_min_pix)**2))
+    gaussian /= np.sum(gaussian) * cell_size**2  # now in Jy/arcsec²
+
+    # Scale to desired flux
+    sky_model = gaussian * flux_jy
+    return sky_model.astype(np.float32)
+
+
 def fit_elliptical_gaussian(cutout, pixel_scale_arcsec=1.0):
     """
     Fit elliptical Gaussian to image cutout and return flux, Bmaj, Bmin in arcsec.
