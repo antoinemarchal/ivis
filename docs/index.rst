@@ -1,7 +1,7 @@
 IViS
 ====
 
-**IViS** — Interferometric Visibility-space Inversion Software
+**IViS** — Interferometric Visibility-domain Inversion Software
 
 .. raw:: html
 
