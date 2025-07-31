@@ -7,6 +7,7 @@ docs/.DS_Store
 docs/.coverage
 docs/tutorials/.ipynb_checkpoints/
 docs/tutorials/data_tutorials
+docs/tutorials/wph_noise.ipynb
 
 # ivis
 ivis/imager_rrl.py

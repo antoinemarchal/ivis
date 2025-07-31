@@ -87,6 +87,12 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: Advanced Tutorials:
+
+   tutorials/wph_noise
+
+.. toctree::
+   :maxdepth: 1
    :caption: API:
 
    api
