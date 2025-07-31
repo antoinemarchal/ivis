@@ -1,4 +1,4 @@
-# IViS - Interferometric Visibility-space Inversion Software
+# IViS - Interferometric Visibility-domain Inversion Software
 
 [![Documentation Status](https://readthedocs.org/projects/ivis-dev/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
 
