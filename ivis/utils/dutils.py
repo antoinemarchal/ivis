@@ -1,3 +1,46 @@
+# -*- coding: utf-8 -*-
+"""
+===================================
+Utility Functions for IViS Imaging
+===================================
+
+This module provides a collection of utility functions used in IViS
+for radio interferometric reconstruction, model fitting, and image-domain operations.
+
+It includes tools for:
+
+- WCS construction and reprojection using `astropy.wcs`
+- Edge apodization (cosine taper) for windowing
+- Construction of Laplacian kernels for regularization
+- Synthetic Gaussian beam generation and injection
+- Coordinate grid generation for PyTorch-based warping
+- Elliptical Gaussian fitting for beam or source characterization
+
+Functions
+---------
+- wcs2D: Build a 2D WCS object from a FITS header.
+- apodize: Create a cosine taper for edge apodization.
+- ROHSA_kernel: Return a discrete Laplacian kernel used in ROHSA.
+- laplacian: Create a Laplacian kernel padded into a full-size map.
+- ROHSA_bounds: Generate lower and upper parameter bounds.
+- gauss_beam: Generate a normalized 2D Gaussian kernel.
+- get_grid: Generate a sampling grid for torch.nn.functional.grid_sample.
+- format_input_tensor: Reshape tensors for compatibility with PyTorch ops.
+- insert_elliptical_gaussian_source: Inject an elliptical Gaussian model into an image.
+- fit_elliptical_gaussian: Fit an elliptical Gaussian and visualize the result.
+
+Dependencies
+------------
+- numpy
+- torch
+- matplotlib
+- astropy
+
+Author
+------
+Antoine Marchal, 2024–2025
+"""
+
 import numpy as np
 import torch
 from astropy.wcs.utils import pixel_to_pixel
@@ -6,6 +49,19 @@ from astropy.modeling import models, fitting
 import matplotlib.pyplot as plt
 
 def wcs2D(hdr):
+    """
+    Construct a 2D WCS object from a FITS header.
+
+    Parameters
+    ----------
+    hdr : dict-like
+        FITS header containing WCS keywords.
+
+    Returns
+    -------
+    w : astropy.wcs.WCS
+        2D WCS object.
+    """
     w = wcs.WCS(naxis=2)
     w.wcs.crpix = [hdr['CRPIX1'], hdr['CRPIX2']]
     w.wcs.cdelt = np.array([hdr['CDELT1'], hdr['CDELT2']])
@@ -64,10 +120,31 @@ def apodize(radius, shape):
 
 
 def ROHSA_kernel():
+    """
+    Return a Laplacian-like kernel used in ROHSA.
+
+    Returns
+    -------
+    kernel : ndarray
+        3x3 Laplacian kernel normalized by 1/4.
+    """
     return np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]]) / 4.
 
 
 def laplacian(shape):
+    """
+    Construct a 2D Laplacian kernel map for convolution in Fourier space.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the output Laplacian map (ny, nx).
+
+    Returns
+    -------
+    kernel_map : ndarray
+        Laplacian kernel zero-padded in a map of the given shape.
+    """
     ny, nx = shape
     X=np.arange(nx)
     Y=np.arange(ny)
@@ -89,6 +166,23 @@ def laplacian(shape):
 
 
 def ROHSA_bounds(data_shape, lb_amp, ub_amp):
+    """
+    Create lower and upper bounds arrays for ROHSA optimization.
+
+    Parameters
+    ----------
+    data_shape : tuple
+        Shape of the model parameter array.
+    lb_amp : float
+        Lower bound for amplitude.
+    ub_amp : float
+        Upper bound for amplitude.
+
+    Returns
+    -------
+    bounds : ndarray
+        Array of shape (N, 2), with N = np.prod(data_shape), where each row is (lower, upper).
+    """
     bounds_inf = np.full(data_shape, lb_amp)
     bounds_sup = np.full(data_shape, ub_amp)
     
@@ -96,6 +190,23 @@ def ROHSA_bounds(data_shape, lb_amp, ub_amp):
 
 
 def gauss_beam(sigma, shape, FWHM=False):
+    """
+    Generate a circular symmetric 2D Gaussian kernel.
+
+    Parameters
+    ----------
+    sigma : float
+        Standard deviation of the Gaussian in pixels (or FWHM if `FWHM=True`).
+    shape : tuple
+        Shape of the output map (ny, nx).
+    FWHM : bool, optional
+        If True, `sigma` is interpreted as FWHM. Default is False.
+
+    Returns
+    -------
+    gauss : ndarray
+        2D normalized Gaussian array.
+    """
     ny, nx = shape
     X=np.arange(nx)
     Y=np.arange(ny)
@@ -123,6 +234,25 @@ def gauss_beam(sigma, shape, FWHM=False):
 
 
 def get_grid(shape_input_tensor, wcs_in, wcs_out, shape_out):
+    """
+    Create a normalized sampling grid for spatial reprojecting in PyTorch.
+
+    Parameters
+    ----------
+    shape_input_tensor : tuple
+        Shape of the input tensor: (B, C, H_in, W_in).
+    wcs_in : astropy.wcs.WCS
+        WCS of the input image.
+    wcs_out : astropy.wcs.WCS
+        Target WCS for output grid.
+    shape_out : tuple
+        Shape of the output image (H_out, W_out).
+
+    Returns
+    -------
+    grid : torch.Tensor
+        Grid of shape (1, H_out, W_out, 2) normalized to [-1, 1].
+    """
     # Generate the output grid coordinates
     x_out, y_out = torch.meshgrid(
         torch.arange(shape_out[1], dtype=torch.float32), #FIXME
@@ -153,6 +283,19 @@ def get_grid(shape_input_tensor, wcs_in, wcs_out, shape_out):
 
 
 def format_input_tensor(input_tensor):
+    """
+    Format a 2D or 3D input tensor into a 4D tensor for grid sampling.
+
+    Parameters
+    ----------
+    input_tensor : torch.Tensor
+        Tensor of shape (H, W) or (C, H, W).
+
+    Returns
+    -------
+    input_tensor_reshape : torch.Tensor
+        Tensor of shape (1, C, H, W).
+    """
     # Ensure the input tensor has 4 dimensions
     if input_tensor.dim() == 2:  # If shape is [H_in, W_in]
         input_tensor_reshape = input_tensor.unsqueeze(0).unsqueeze(0)  # Add batch and channel dims
@@ -165,6 +308,31 @@ def format_input_tensor(input_tensor):
 def insert_elliptical_gaussian_source(shape, cell_size, flux_jy=1.0,
                                       fwhm_maj_arcsec=15.0, fwhm_min_arcsec=7.5,
                                       pa_deg=0.0, center=None):
+    """
+    Generate a sky model with an elliptical Gaussian source.
+
+    Parameters
+    ----------
+    shape : tuple
+        Output image shape (ny, nx).
+    cell_size : float
+        Pixel size in arcsec.
+    flux_jy : float, optional
+        Total integrated flux of the source in Jy. Default is 1.0.
+    fwhm_maj_arcsec : float, optional
+        FWHM of the major axis in arcsec. Default is 15.0.
+    fwhm_min_arcsec : float, optional
+        FWHM of the minor axis in arcsec. Default is 7.5.
+    pa_deg : float, optional
+        Position angle in degrees (counter-clockwise from x-axis). Default is 0.0.
+    center : tuple, optional
+        Pixel coordinates of the source center (y, x). Default is center of image.
+
+    Returns
+    -------
+    sky_model : ndarray
+        2D image array (float32) in units of Jy/pixel.
+    """
     ny, nx = shape
     y, x = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
 
