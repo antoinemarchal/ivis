@@ -12,6 +12,7 @@ from tqdm import tqdm as tqdm
 from ivis.io import DataProcessor
 from ivis.imager import Imager
 from ivis import logger
+from ivis.models import ClassicIViS
 
 import marchalib as ml #remove
 
@@ -85,7 +86,8 @@ if __name__ == '__main__':
                              beam_workers
                              )
     #get image
-    result = image_processor.process(units="Jy/beam") #"Jy/arcsec^2" or "K"
+    model = ClassicIViS()
+    result = image_processor.process(model=model, units="Jy/beam") #"Jy/arcsec^2" or "K"
 
     #write on disk
     hdu0 = fits.PrimaryHDU(result, header=target_header)

@@ -17,6 +17,7 @@ from numpy.fft import fft2, ifft2, fftshift
 
 from ivis.io import DataProcessor
 from ivis.imager import Imager
+from ivis.models import ClassicIViS
 
 plt.ion()
 
@@ -170,7 +171,8 @@ if __name__ == '__main__':
                                  device,        # device: 0 is GPU; "cpu" is CPU
                                  beam_workers)
         #get image
-        result = image_processor.process(units="K") #"Jy/arcsec^2" or "K"
+        model = ClassicIViS()
+        result = image_processor.process(model=model, units="K") #"Jy/arcsec^2" or "K"
         # Move to cube
         result = result / 2 #Remove ASKAP convention
         
