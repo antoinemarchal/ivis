@@ -4,25 +4,25 @@ Workflow
 .. raw:: html
 
    <p style="color:#dddddd; font-size: 16px; line-height: 1.6; text-align: justify;">
-   The IViS imaging pipeline performs non-linear joint deconvolution of interferometric and single-dish data using a regularized optimization approach.
+   The IViS imaging pipeline performs non-linear joint deconvolution of interferometric and optional single-dish data using a regularized optimization approach.
    </p>
 
 .. raw:: html
 
    <p style="color:#dddddd; text-align: justify;">
-   At the top level, a controller script (e.g., <code style="color:#5c6bc0;">pipeline.py</code>) instantiates a <code style="color:#ffb74d;">DataProcessor</code>, which loads visibilities from calibrated Measurement Sets (<code>.ms</code>), reprojects <code style="color:#ba68c8;">primary beam</code> models, and optionally includes a <code style="color:#9575cd;">single-dish</code> map.
+   At the top level, a controller script (e.g., <code style="color:#5c6bc0;">pipeline.py</code>) instantiates a <code style="color:#ffb74d;">DataProcessor</code>, which loads visibilities from calibrated Measurement Sets (<code>.ms</code>) and reprojects <code style="color:#ba68c8;">primary beam</code> models. A single-dish map may also be provided for hybrid deconvolution.
    </p>
 
 .. raw:: html
 
    <p style="color:#dddddd; text-align: justify;">
-   These inputs are assembled into a <code style="color:#ff8a65;">VisData</code> structure and interpolation grids, then passed to the <code style="color:#4fc3f7;">Imager</code>. The <code style="color:#4fc3f7;">Imager</code> constructs a model of the sky brightness and simulates visibilities using a forward operator that incorporates beam effects and Fourier transforms.
+   These inputs are assembled into a <code style="color:#ff8a65;">VisData</code> structure and interpolation grids, then passed to the <code style="color:#4fc3f7;">Imager</code>. A <code style="color:#fbc02d;">model class</code> is chosen in the pipeline script and passed explicitly to the <code>Imager.process()</code> method.
    </p>
 
 .. raw:: html
 
    <p style="color:#dddddd; text-align: justify;">
-   It evaluates a loss function via <code style="color:#f06292;">mod_loss.objective()</code>, combining residuals and optional priors (such as Laplacian spatial regularization or single-dish consistency). Optimization is performed using the <code style="color:#ffcc80;">L-BFGS-B</code> algorithm from <code style="color:#f5f5f5;">scipy.optimize</code>.
+   The model’s <code style="color:#fbc02d;">forward()</code> method simulates visibilities given image parameters, and the <code style="color:#fbc02d;">loss()</code> method defines the cost function and gradient. Optimization is performed using the <code style="color:#ffcc80;">L-BFGS-B</code> algorithm from <code style="color:#f5f5f5;">scipy.optimize</code>.
    </p>
 
 .. raw:: html
@@ -51,13 +51,12 @@ The flowchart below summarizes the key modules and their data flow.
            fillcolor="#1e1e1e"
        ];
 
-       PIPELINE  [label="Runs DataProcessor\nand Imager", shape=box3d, color="#5c6bc0"];
+       PIPELINE  [label="Runs DataProcessor,\nselects model,\ncalls Imager", shape=box3d, color="#5c6bc0"];
        DATAPROC  [label="DataProcessor\n(ivis.io.data_processor)", color="#ffb74d"];
        VISDATA   [label="VisData\n(dataclass)", color="#ff8a65"];
        PBGRID    [label="compute_pb_and_grid()", color="#ba68c8"];
-       SD        [label="read_sd()", color="#9575cd"];
        IMAGER    [label="Imager\n(ivis.imager)\n(uses L-BFGS-B)", color="#4fc3f7"];
-       MODLOSS   [label="mod_loss.objective()\n(ivis.utils.mod_loss)", color="#f06292"];
+       MODEL     [label="ClassicIViS or other\n(ivis.models)", color="#fbc02d"];
        IMAGE     [label="Optimized Image Cube\n(saved to disk)", color="#b0bec5"];
 
        subgraph cluster_pipeline {
@@ -75,14 +74,12 @@ The flowchart below summarizes the key modules and their data flow.
        ];
 
        PIPELINE -> DATAPROC [label="calls"];
-       PIPELINE -> IMAGER [label="calls"];
+       PIPELINE -> MODEL [label="selects model"];
+       PIPELINE -> IMAGER [label="passes model + data"];
        DATAPROC -> VISDATA [label="returns"];
        DATAPROC -> PBGRID [label="generates"];
-       DATAPROC -> SD [label="reads"];
        VISDATA -> IMAGER [label="input visibilities"];
        PBGRID -> IMAGER [label="input PB + Grid"];
-       SD -> IMAGER [label="input SD map"];
-       IMAGER -> MODLOSS [label="calls"];
-       MODLOSS -> IMAGER [label="returns ∇loss"];
+       MODEL -> IMAGER [label="provides loss/forward"];
        IMAGER -> IMAGE [label="writes"];
    }

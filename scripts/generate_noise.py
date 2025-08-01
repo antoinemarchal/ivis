@@ -14,6 +14,8 @@ from ivis.imager import Imager
 from ivis.logger import logger
 from ivis.utils import dutils, mod_loss, fourier
 
+from ivis.models import ClassicIViS
+
 path_ms = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
 path_beams = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
 path_sd = None #path single-dish data
@@ -64,7 +66,7 @@ image_processor = Imager(vis_data,      # visibilities
                          0,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
 
-model_vis =  image_processor.forward_model()
+model_vis =  image_processor.forward_model(model=ClassicIViS())
 
 #user parameters
 max_its = 20
@@ -75,11 +77,12 @@ positivity = False #Set to False because noise fluctuates around 0
 
 logger.info("This might take a few minutes if using a CPU...")
 
-n_noise = 20 #number of noise realisations 
+n_noise = 1 #number of noise realisations 
 noise_cube = np.zeros((n_noise,shape[0],shape[1]))
 for i in tqdm(np.arange(n_noise)):
     #Add noise
     fact=1 #Scale the noise.ipynbe with this if needed
+    # np.random.seed(42) #FIXME
     noise_real = np.random.normal(loc=0.0, scale=vis_data.sigma*fact)
     noise_imag = np.random.normal(loc=0.0, scale=vis_data.sigma*fact)
     noise = noise_real + 1j * noise_imag
@@ -104,9 +107,15 @@ for i in tqdm(np.arange(n_noise)):
                          positivity,    # impose a positivity constaint
                          device,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
-    #get image
-    noise_cube[i] = image_processor.process(units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
+    # Get model
+    model = ClassicIViS()
+    
+    #get image
+    noise_cube[i] = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+
+stop
+    
 #Save on disk
 hdu = fits.PrimaryHDU(noise_cube)
 hdu.writeto(pathout+"noise_cube.fits", overwrite=True)

@@ -30,7 +30,7 @@ import concurrent.futures
 from pathlib import Path
 
 from ivis.logger import logger
-from ivis.utils import dunits, dutils, mod_loss
+from ivis.utils import dunits, dutils
 
 # Imager class    
 class Imager:
@@ -163,7 +163,35 @@ class Imager:
         return idmin, idmax
 
 
-    def forward_model(self):
+    def forward_model(self, model):
+        """
+        Compute model visibilities from an input image using the provided model's forward operator.
+
+        Parameters
+        ----------
+        model : object
+            A model instance (e.g., ClassicIViS) that implements a `.forward(...)` method
+            to simulate visibilities from image-domain parameters.
+
+        Returns
+        -------
+        model_vis : np.ndarray
+            Complex model visibilities, one per (u,v) coordinate in the data.
+
+        Raises
+        ------
+        ValueError
+            If no model is provided.
+
+        Notes
+        -----
+        - Converts spatial frequencies to units of radians per pixel based on image header.
+        - Uses internal primary beam and interpolation grid arrays.
+        - Forwards all necessary inputs to the model's `forward` method.
+        """
+        if model is None:
+            raise ValueError("You must pass a model instance to `forward_model()`.")
+
         # Image parameters
         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
@@ -171,17 +199,16 @@ class Imager:
         # Convert λ to radians per pixel
         uu_radpix = dunits._lambda_to_radpix(self.vis_data.uu, cell_size)
         vv_radpix = dunits._lambda_to_radpix(self.vis_data.vv, cell_size)
-        ww_radpix = dunits._lambda_to_radpix(self.vis_data.ww, cell_size)
+        ww_radpix = dunits._lambda_to_radpix(self.vis_data.ww, cell_size)  # if needed
         
         # Get beam slice indices
         idmin, idmax = self.process_beam_positions()
         
-        # Ensure pb and grid have native byte order for PyTorch compatibility
+        # Native arrays
         pb_native = np.asarray(self.pb, dtype=np.float32)
         grid_native = np.asarray(self.grid, dtype=np.float32)
         
-        # Compute model visibilities
-        model_vis = mod_loss.single_frequency_model(
+        return model.forward(
             x=self.init_params,
             data=self.vis_data.data,
             uu=uu_radpix,
@@ -191,18 +218,18 @@ class Imager:
             idmaxa=idmax,
             device=self.device,
             cell_size=cell_size.value,
-            grid_array=grid_native,
+            grid_array=grid_native
         )
-        
-        return model_vis
     
 
-    def process(self, units, disk=False):
+    def process(self, model=None, units="Jy/arcsec^2", disk=False):
         """
         Runs the imaging optimization pipeline and returns a restored image in the requested unit.
 
         Parameters
         ----------
+        model : object
+            An imaging model instance implementing a `.loss(x, ...)` method compatible with scipy.optimize.minimize.
         units : str
             Output unit. Must be one of: 'Jy/arcsec^2', 'Jy/beam', or 'K'.
         disk : bool, optional
@@ -286,9 +313,18 @@ class Imager:
             'iprint': 25,
         }
         
+        if model is None:
+            logger.error("You must pass a model instance (e.g., ClassicIViS) to `process()`.")
+            raise ValueError("Missing model input.")
+
+        if not hasattr(model, 'loss'):
+            logger.error("Provided model does not implement a `.loss(x, ...)` method compatible with scipy.optimize.minimize.")
+            raise TypeError("Invalid model type.")
+
         # Run optimization
         opt_output = optimize.minimize(
-            mod_loss.objective, params_f32,
+            model.loss,
+            params_f32,
             args=opt_args,
             jac=True,
             tol=1.e-8,
