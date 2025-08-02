@@ -16,13 +16,13 @@ from ivis.utils import dutils, mod_loss, fourier
 
 from ivis.models import ClassicIViS
 
-path_ms = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
-path_beams = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
+path_ms = "../docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
+path_beams = "../docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
 path_sd = None #path single-dish data
-pathout = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/" #path where data will be packaged and stored
+pathout = "../docs/tutorials/data_tutorials/ivis_data/" #path where data will be packaged and stored
 
 #REF WCS INPUT USER
-filename = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/MW-C10_mom0th_NHI.fits"
+filename = "../docs/tutorials/data_tutorials/ivis_data/MW-C10_mom0th_NHI.fits"
 target_header = fits.open(filename)[0].header
 shape = (target_header["NAXIS2"],target_header["NAXIS1"])
     

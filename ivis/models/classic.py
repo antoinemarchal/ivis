@@ -99,8 +99,8 @@ class ClassicIViS(BaseModel):
         for i in range(n_beams):
             idmin = idmina[i]
             idmax = idmaxa[i]
-            uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
-            vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
+            uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device, dtype=torch.float32)
+            vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device, dtype=torch.float32)
             pba = torch.from_numpy(pb[i]).to(device)
             grid = torch.from_numpy(grid_array[i]).to(device)
 
