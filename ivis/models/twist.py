@@ -1,3 +1,4 @@
+#work in progress
 import os
 import numpy as np
 import torch
@@ -11,12 +12,9 @@ from ivis.models.base import BaseModel
 from ivis.models.utils.tensor_ops import format_input_tensor
 from ivis.models.utils.gpu import print_gpu_memory
 
-class ClassicIViS(BaseModel):
+class TWiSTModel(BaseModel):
     """
-    Classic IViS imaging model using visibility-domain loss and regularization.
-
-    This class implements a forward operator and a loss function suitable for
-    optimization via L-BFGS-B. The model supports CPU and GPU backends.
+    fixme
     """
         
     def __init__(self):
@@ -49,7 +47,7 @@ class ClassicIViS(BaseModel):
         u = x.reshape(shape)
         u = torch.from_numpy(u).to(device).requires_grad_(True)
 
-        L = self.compute_loss_Pool(
+        L = self.compute_loss(
             u, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa,
             device, sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel,
             cell_size, grid_array, beam_workers, verbose=False
@@ -116,8 +114,7 @@ class ClassicIViS(BaseModel):
 
         return model_vis.detach().cpu().numpy()
 
-
-    def compute_loss_Pool(
+    def compute_loss(
         self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
         sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
         grid_array, beam_workers=4, verbose=False
@@ -175,35 +172,25 @@ class ClassicIViS(BaseModel):
         loss_scalar = 0.0
         n_beams = len(idmina)
 
-        if device == "cpu":
-            beam_indices = np.array_split(np.arange(n_beams), beam_workers)
-            results = Parallel(n_jobs=beam_workers)(
-                delayed(self.batch_worker)(
-                    batch, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size, device, grid_array
-                ) for batch in beam_indices
-            )
-            for partial_loss in results:
-                loss_scalar += partial_loss.item()
-        else:
-            for i in range(n_beams):
-                idmin = idmina[i]
-                idmax = idmaxa[i]
-                uua = uu[idmin:idmin+idmax]
-                vva = vv[idmin:idmin+idmax]
-                wwa = ww[idmin:idmin+idmax]
-                vis_real = data.real[idmin:idmin+idmax]
-                vis_imag = data.imag[idmin:idmin+idmax]
-                sig = sigma[idmin:idmin+idmax]
-
-                J = self.compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig,
-                                          pb[i], cell_size, device, grid_array[i])
-                L = 0.5 * J
-                L.backward(retain_graph=True)
-                loss_scalar += L.item()
-
-                torch.cuda.empty_cache()
-                if verbose:
-                    self.print_gpu_memory(device)
+        for i in range(n_beams):
+            idmin = idmina[i]
+            idmax = idmaxa[i]
+            uua = uu[idmin:idmin+idmax]
+            vva = vv[idmin:idmin+idmax]
+            wwa = ww[idmin:idmin+idmax]
+            vis_real = data.real[idmin:idmin+idmax]
+            vis_imag = data.imag[idmin:idmin+idmax]
+            sig = sigma[idmin:idmin+idmax]
+            
+            J = self.compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig,
+                                      pb[i], cell_size, device, grid_array[i])
+            L = 0.5 * J
+            L.backward(retain_graph=True)
+            loss_scalar += L.item()
+            
+            torch.cuda.empty_cache()
+            if verbose:
+                self.print_gpu_memory(device)
 
         fftsd_torch = torch.from_numpy(fftsd).to(device)
         fftbeam_torch = torch.from_numpy(fftbeam).to(device)
@@ -277,58 +264,3 @@ class ClassicIViS(BaseModel):
         J11 = torch.nansum((model_vis.imag - vis_imag)**2 / sig**2)
 
         return J1 + J11
-
-    def batch_worker(self, batch_indices, x, uu, vv, ww, data, sigma, pb, idmina, idmaxa, cell_size,
-                     device, grid_array):
-        """
-        Evaluate the total loss for a batch of beams (CPU-parallelized variant).
-        
-        Parameters
-        ----------
-        batch_indices : list[int]
-            Indices of beams to evaluate.
-        x : torch.Tensor
-            Current image tensor.
-        uu, vv, ww : np.ndarray
-            UVW coordinates.
-        data : np.ndarray
-            Complex visibilities.
-        sigma : np.ndarray
-            Visibility weights.
-        pb : list[np.ndarray]
-            Primary beam per pointing.
-        idmina, idmaxa : list[int]
-            Start and size for each beam's visibilities.
-        cell_size : float
-            Pixel size in arcsec.
-        device : str
-            Device string ("cpu" expected).
-        grid_array : list[np.ndarray]
-            Interpolation grid per beam.
-        
-        Returns
-        -------
-        total_loss : torch.Tensor
-            Sum of chi-squared losses across all selected beams.
-        """
-        total_loss = torch.tensor(0.0)
-        for i in batch_indices:
-            J = self.compute_vis_cuda(
-                x,
-                uu[idmina[i]:idmina[i]+idmaxa[i]],
-                vv[idmina[i]:idmina[i]+idmaxa[i]],
-                ww[idmina[i]:idmina[i]+idmaxa[i]],
-                data.real[idmina[i]:idmina[i]+idmaxa[i]],
-                data.imag[idmina[i]:idmina[i]+idmaxa[i]],
-                sigma[idmina[i]:idmina[i]+idmaxa[i]],
-                pb[i],
-                cell_size,
-                device,
-                grid_array[i]
-            )
-            total_loss += 0.5 * J
-        return total_loss
-
-
-
-

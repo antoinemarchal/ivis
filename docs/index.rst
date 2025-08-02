@@ -76,6 +76,7 @@ Documentation
 
    models/single
    models/gmfs
+   models/twist
 
 .. toctree::
    :maxdepth: 1

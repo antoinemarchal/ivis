@@ -1,4 +1,4 @@
-Single Frequency Model (ClassicIViS)
+ClassicIViS (Single Frequency Model)
 ====================================
 
 .. raw:: html
