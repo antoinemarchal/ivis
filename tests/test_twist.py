@@ -18,6 +18,8 @@ from ivis.utils import dutils, mod_loss, fourier
 
 from ivis.models import ClassicIViS, TWiSTModel
 
+plt.ion()
+
 path_ms = "../docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
 path_beams = "../docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
 path_sd = None #path single-dish data
@@ -62,8 +64,9 @@ L = 4 # number of angles
 pbc = False # periodic boundary conditions
 dn = 5 # number of translations
 # wph_model = ["S11","S00","S01","Cphase","C01","C00","L"] # list of WPH coefficients
-wph_model = ["S11"] # list of WPH coefficients
-logger.warning("Only using S11.")
+wph_model = ["S11","S00","S01"] # list of WPH coefficients
+# wph_model = ["S11"] # list of WPH coefficients
+# logger.warning("Only using S11.")
 # get operator
 wph_op = pw.WPHOp(M, N, J, L=L, dn=dn, device=device)
 wph_op.load_model(wph_model)
@@ -93,4 +96,50 @@ std = torch.stack(coeffs_list_cpu).std(dim=0)
 
 print(mu.shape, std.shape)
 
+#user parameters
+max_its = 20
+lambda_sd = 0
+lambda_r = 1
+device = 0#"cpu" #0 is GPU and "cpu" is CPU
+positivity = False
 
+#init parameters
+init_params = np.zeros((2,shape[0],shape[1]))
+
+# create image processor
+image_processor = Imager(vis_data,      # visibilities
+                         pb,            # array of primary beams
+                         grid,          # array of interpolation grids
+                         sd,            # single dish data in unit of Jy/arcsec^2
+                         beam_sd,       # beam of single-dish data in radio_beam format
+                         target_header, # header on which to image the data
+                         init_params[0],   # init array of parameters
+                         max_its,       # maximum number of iterations
+                         lambda_sd,     # hyper-parameter single-dish
+                         lambda_r,      # hyper-parameter regularization
+                         positivity,    # impose a positivity constaint
+                         device,        # device: 0 is GPU; "cpu" is CPU
+                         beam_workers=1)
+# choose model
+model = ClassicIViS()
+# get image
+# init_params[0] = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+
+# create image processor
+image_processor = Imager(vis_data,      # visibilities
+                         pb,            # array of primary beams
+                         grid,          # array of interpolation grids
+                         sd,            # single dish data in unit of Jy/arcsec^2
+                         beam_sd,       # beam of single-dish data in radio_beam format
+                         target_header, # header on which to image the data
+                         init_params,   # init array of parameters
+                         200,       # maximum number of iterations
+                         lambda_sd,     # hyper-parameter single-dish
+                         lambda_r,      # hyper-parameter regularization
+                         positivity,    # impose a positivity constaint
+                         device,        # device: 0 is GPU; "cpu" is CPU
+                         beam_workers=1)
+# choose model
+model = TWiSTModel(wph_op, mu, std, 1)
+# get image
+result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"

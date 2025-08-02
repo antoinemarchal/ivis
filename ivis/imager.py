@@ -270,10 +270,11 @@ class Imager:
         idmin, idmax = self.process_beam_positions()
 
         #define bounds for optimisation
+        param_shape = self.init_params.shape  # (H, W) or (2, H, W)
         if self.positivity == False:
-            bounds = dutils.ROHSA_bounds(data_shape=shape, lb_amp=-np.inf, ub_amp=np.inf)
+            bounds = dutils.ROHSA_bounds(data_shape=param_shape, lb_amp=-np.inf, ub_amp=np.inf)
         else:
-            bounds = dutils.ROHSA_bounds(data_shape=shape, lb_amp=0, ub_amp=np.inf)
+            bounds = dutils.ROHSA_bounds(data_shape=param_shape, lb_amp=0, ub_amp=np.inf)
             
         # Use gradient-descent to minimise cost
         logger.info('Starting optimisation (using LBFGS-B)')
@@ -334,7 +335,7 @@ class Imager:
         )
 
         # logger.info(opt_output)        
-        result = np.reshape(opt_output.x, shape) #* 2
+        result = np.reshape(opt_output.x, self.init_params.shape) #* 2
         logger.warning("multiply by 2 for ASKAP.")
 
         #unit conversion

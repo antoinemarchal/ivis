@@ -1,6 +1,7 @@
 #work in progress
 import os
 import numpy as np
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 import pytorch_finufft
 from torch.fft import fft2 as tfft2
@@ -17,8 +18,11 @@ class TWiSTModel(BaseModel):
     fixme
     """
         
-    def __init__(self):
-        pass
+    def __init__(self, wph_op, mu, sig, lambda_wph):
+        self.wph_op = wph_op
+        self.mu = mu
+        self.sig = sig
+        self.lambda_wph = lambda_wph
 
     def loss(self, x, *args):
         """
@@ -44,7 +48,7 @@ class TWiSTModel(BaseModel):
             cell_size, grid_array, beam_workers
         ) = args
 
-        u = x.reshape(shape)
+        u = x.reshape((2,shape[0],shape[1]))
         u = torch.from_numpy(u).to(device).requires_grad_(True)
 
         L = self.compute_loss(
@@ -166,11 +170,22 @@ class TWiSTModel(BaseModel):
         if x.grad is not None:
             x.grad.zero_()
 
+        x1 = x[0]; x2 = x[1]
+
         beam = torch.from_numpy(beam).to(device)
         tapper = torch.from_numpy(tapper).to(device)
 
         loss_scalar = 0.0
         n_beams = len(idmina)
+
+        #WPH
+        x_in = x2 /1.e-5 * tapper  #FIXME NORM
+        x_formatted = x_in.unsqueeze(0).unsqueeze(0) 
+        coeffs = self.wph_op.apply(x_formatted.to(device, dtype=torch.float32), norm=None, pbc=False)
+        residual = (coeffs - self.mu.to(coeffs.device)) / self.sig.to(coeffs.device) 
+        Lwph = 0.5 * torch.sum(torch.abs(residual) ** 2) * self.lambda_wph  # real scalar
+        Lwph.backward(retain_graph=True)
+        loss_scalar += Lwph.item()
 
         for i in range(n_beams):
             idmin = idmina[i]
@@ -182,7 +197,7 @@ class TWiSTModel(BaseModel):
             vis_imag = data.imag[idmin:idmin+idmax]
             sig = sigma[idmin:idmin+idmax]
             
-            J = self.compute_vis_cuda(x, uua, vva, wwa, vis_real, vis_imag, sig,
+            J = self.compute_vis_cuda(x1+x2, uua, vva, wwa, vis_real, vis_imag, sig,
                                       pb[i], cell_size, device, grid_array[i])
             L = 0.5 * J
             L.backward(retain_graph=True)
@@ -192,9 +207,10 @@ class TWiSTModel(BaseModel):
             if verbose:
                 self.print_gpu_memory(device)
 
+        # Single dish
         fftsd_torch = torch.from_numpy(fftsd).to(device)
         fftbeam_torch = torch.from_numpy(fftbeam).to(device)
-        xfft2 = tfft2(x * tapper)
+        xfft2 = tfft2(x1 * tapper)
         model_sd = cell_size**2 * xfft2 * fftbeam_torch
         J2 = torch.nansum((model_sd.real - fftsd_torch.real) ** 2)
         J22 = torch.nansum((model_sd.imag - fftsd_torch.imag) ** 2)
@@ -202,14 +218,23 @@ class TWiSTModel(BaseModel):
         Lsd.backward(retain_graph=True)
         loss_scalar += Lsd.item()
 
+        #regularization on x1
         fftkernel_torch = torch.from_numpy(fftkernel).to(device)
-        xfft2 = tfft2(x * tapper)
+        xfft2 = tfft2(x1 * tapper)
         conv = cell_size**2 * xfft2 * fftkernel_torch
         R = torch.nansum(abs(conv) ** 2)
         Lr = 0.5 * R * lambda_r
         Lr.backward()
         loss_scalar += Lr.item()
 
+        #regularization on x2
+        xfft2 = tfft2(x2 * tapper)
+        conv = cell_size**2 * xfft2 * fftkernel_torch
+        R = torch.nansum(abs(conv) ** 2)
+        Lr = 0.5 * R * lambda_r
+        Lr.backward()
+        loss_scalar += Lr.item()
+        
         if verbose:
             print_gpu_memory(device)
 
