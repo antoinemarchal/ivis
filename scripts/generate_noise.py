@@ -36,6 +36,9 @@ logger.disabled = False
 
 pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits")
 
+#put pb at 1 for pre-PB response
+pb = np.full(pb.shape, 1)
+
 #Dummy sd array
 sd = np.zeros(shape)
 #Dummy Beam sd
@@ -77,7 +80,7 @@ positivity = False #Set to False because noise fluctuates around 0
 
 logger.info("This might take a few minutes if using a CPU...")
 
-n_noise = 1 #number of noise realisations 
+n_noise = 20 #number of noise realisations 
 noise_cube = np.zeros((n_noise,shape[0],shape[1]))
 for i in tqdm(np.arange(n_noise)):
     #Add noise
@@ -112,9 +115,7 @@ for i in tqdm(np.arange(n_noise)):
     model = ClassicIViS()
     
     #get image
-    noise_cube[i] = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
-
-stop
+    noise_cube[i] = image_processor.process(model=model, units="Jy/arcsec^2") 
     
 #Save on disk
 hdu = fits.PrimaryHDU(noise_cube)
