@@ -17,11 +17,15 @@ class TWiSTModel(BaseModel):
     fixme
     """
         
-    def __init__(self, wph_op, noise_cube, coeffs, lambda_wph):
+    def __init__(self, wph_op, lambda_wph, pbc, mu, sig, sigma_n):
         self.wph_op = wph_op
-        self.noise_cube = noise_cube.astype(np.float32)  # (R, H, W), stay on CPU as NumPy
-        self.coeff_ref = coeffs.cpu().to(dtype=torch.complex64)  # shape (1, 1, X)
+        # self.noise_cube = noise_cube.astype(np.float32)  # (R, H, W), stay on CPU as NumPy
+        # self.coeff_ref = coeff_ref.cpu().to(dtype=torch.complex64)  # shape (1, 1, X)
         self.lambda_wph = lambda_wph
+        self.pbc = pbc
+        self.mu = mu
+        self.sig = sig
+        self.sigma_n = sigma_n
 
     def loss(self, x, *args):
         """
@@ -117,7 +121,7 @@ class TWiSTModel(BaseModel):
 
         return model_vis.detach().cpu().numpy()
 
-
+    
     def compute_loss(
             self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
             sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
@@ -136,44 +140,49 @@ class TWiSTModel(BaseModel):
         tapper = torch.from_numpy(tapper).to(device)
         
         loss_scalar = torch.tensor(0.0, device=device)
-        
+
+        # ------------------------
+        # ---- Enforce hard power constraint on x2 (noise map)
+        # ------------------------
+        with torch.no_grad():
+            power = torch.mean(x2 ** 2)
+            scaling = self.sigma_n / (torch.sqrt(power) + 1e-12)
+            x2.mul_(torch.clamp(scaling, min=0.5, max=2.0))
+            
         # ------------------------
         # ---- WPH Loss ---------
         # ------------------------
+        x_in = x2 / 1.e-5 #FIXME ATTENTION
+        x_formatted = x_in.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)
         
-        x_in = x1*1.e5  # We want gradients w.r.t. x1
-        idx = torch.randint(0, self.noise_cube.shape[0], (1,)).item()
-        N_j = torch.from_numpy(self.noise_cube[idx]).to(device)
-        x_noisy = (x_in + N_j).unsqueeze(0).unsqueeze(0)  # No detach!
+        mu_flat = self.mu.squeeze().to(device, dtype=torch.complex64)
+        sig_flat = self.sig.squeeze().to(device, dtype=torch.complex64)
         
-        # WPH call — pass in x_noisy directly
-        u, nb_chunks = self.wph_op.preconfigure(x_noisy, requires_grad=True, pbc=False)
-        Lwph_total = torch.tensor(0.0, device=device)
+        u, nb_chunks = self.wph_op.preconfigure(x_formatted, requires_grad=True, pbc=self.pbc)
+        Lwph = 0.0
         
         for chunk_id in range(nb_chunks):
-            coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=False)
-            coeffs_ref_chunk = self.coeff_ref[0, 0, indices].to(device)
+            coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=self.pbc)
 
-            # Explicitly convert to complex
-            coeffs_chunk = coeffs_chunk.to(torch.complex64)
-            coeffs_ref_chunk = coeffs_ref_chunk.to(torch.complex64)
+            mu_real = mu_flat[indices].real
+            mu_imag = mu_flat[indices].imag
+            sig_real = sig_flat[indices].real
+            sig_imag = sig_flat[indices].imag
 
-            residual_real = coeffs_chunk.real - coeffs_ref_chunk.real
-            residual_imag = coeffs_chunk.imag - coeffs_ref_chunk.imag
+            eps = 1e-6
+            residual_real = (torch.real(coeffs_chunk) - mu_real) #/ (sig_real + eps)
+            residual_imag = (torch.imag(coeffs_chunk) - mu_imag) #/ (sig_imag + eps)
+            
             residual = torch.cat([residual_real, residual_imag])
             
-            L = 0.5 * residual.pow(2).sum() * self.lambda_wph
+            L = 0.5 * torch.sum(residual ** 2) * self.lambda_wph
             L.backward(retain_graph=True)
-            Lwph_total += L.item()
+            Lwph += L.item()
             
-            del coeffs_chunk, residual, indices, coeffs_ref_chunk
+            del coeffs_chunk, residual_real, residual_imag, residual, indices
             torch.cuda.empty_cache()
-        
-        loss_scalar += Lwph_total
-        
-        if verbose:
-            print_gpu_memory(device)
-
+            
+        loss_scalar += Lwph
         
         # -------------------------------
         # ---- Beam χ² vis loss --------
@@ -187,7 +196,7 @@ class TWiSTModel(BaseModel):
             vis_imag = data.imag[idmin:idmin+idmax]
             sig_i = sigma[idmin:idmin+idmax]
             
-            J = self.compute_vis_cuda(x1, uua, vva, wwa, vis_real, vis_imag, sig_i,
+            J = self.compute_vis_cuda(x1, x2, uua, vva, wwa, vis_real, vis_imag, sig_i,
                                       pb[i], cell_size, device, grid_array[i])
             L = 0.5 * J
             L.backward(retain_graph=True)  # <---- explicitly keeping retain_graph=True
@@ -233,7 +242,7 @@ class TWiSTModel(BaseModel):
             print_gpu_memory(device)
             
         return loss_scalar
-
+    
     # def compute_loss(
     #         self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
     #         sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
@@ -256,30 +265,40 @@ class TWiSTModel(BaseModel):
     #     # ------------------------
     #     # ---- WPH Loss ---------
     #     # ------------------------
-    #     x_in = x2 / 1.e-5 * tapper #ATTENTION
-    #     x_formatted = x_in.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)
         
-    #     mu_flat = self.mu.squeeze().to(device, dtype=torch.float32)
-    #     sig_flat = self.sig.squeeze().to(device, dtype=torch.float32)
+    #     x_in = x1*1.e5  # We want gradients w.r.t. x1
+    #     idx = torch.randint(0, self.noise_cube.shape[0], (1,)).item()
+    #     N_j = torch.from_numpy(self.noise_cube[idx]).to(device)
+    #     x_noisy = (x_in + N_j).unsqueeze(0).unsqueeze(0)  # No detach!
         
-    #     u, nb_chunks = self.wph_op.preconfigure(x_formatted, requires_grad=True, pbc=False)
-    #     Lwph = 0.0
+    #     # WPH call — pass in x_noisy directly
+    #     u, nb_chunks = self.wph_op.preconfigure(x_noisy, requires_grad=True, pbc=False)
+    #     Lwph_total = torch.tensor(0.0, device=device)
         
     #     for chunk_id in range(nb_chunks):
     #         coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=False)
-            
-    #         residual_real = (torch.real(coeffs_chunk) - mu_flat[indices]) / sig_flat[indices]
-    #         residual_imag = (torch.imag(coeffs_chunk) - mu_flat[indices]) / sig_flat[indices]
+    #         coeffs_ref_chunk = self.coeff_ref[0, 0, indices].to(device)
+
+    #         # Explicitly convert to complex
+    #         coeffs_chunk = coeffs_chunk.to(torch.complex64)
+    #         coeffs_ref_chunk = coeffs_ref_chunk.to(torch.complex64)
+
+    #         residual_real = coeffs_chunk.real - coeffs_ref_chunk.real
+    #         residual_imag = coeffs_chunk.imag - coeffs_ref_chunk.imag
     #         residual = torch.cat([residual_real, residual_imag])
             
-    #         L = 0.5 * torch.sum(residual ** 2) * self.lambda_wph
+    #         L = 0.5 * residual.pow(2).sum() * self.lambda_wph
     #         L.backward(retain_graph=True)
-    #         Lwph += L.item()
+    #         Lwph_total += L.item()
             
-    #         del coeffs_chunk, residual_real, residual_imag, residual, indices
+    #         del coeffs_chunk, residual, indices, coeffs_ref_chunk
     #         torch.cuda.empty_cache()
-            
-    #     loss_scalar += Lwph
+        
+    #     loss_scalar += Lwph_total
+        
+    #     if verbose:
+    #         print_gpu_memory(device)
+
         
     #     # -------------------------------
     #     # ---- Beam χ² vis loss --------
@@ -293,7 +312,7 @@ class TWiSTModel(BaseModel):
     #         vis_imag = data.imag[idmin:idmin+idmax]
     #         sig_i = sigma[idmin:idmin+idmax]
             
-    #         J = self.compute_vis_cuda(x1 + x2, uua, vva, wwa, vis_real, vis_imag, sig_i,
+    #         J = self.compute_vis_cuda(x1, uua, vva, wwa, vis_real, vis_imag, sig_i,
     #                                   pb[i], cell_size, device, grid_array[i])
     #         L = 0.5 * J
     #         L.backward(retain_graph=True)  # <---- explicitly keeping retain_graph=True
@@ -340,7 +359,7 @@ class TWiSTModel(BaseModel):
             
     #     return loss_scalar
 
-    def compute_vis_cuda(self, x, uua, vva, wwa, vis_real, vis_imag, sig, pb, cell_size, device, grid):
+    def compute_vis_cuda(self, x1, x2, uua, vva, wwa, vis_real, vis_imag, sig, pb, cell_size, device, grid):
         """
         Compute visibility-domain chi-squared loss for a single beam using NUFFT on GPU.
         
@@ -379,11 +398,21 @@ class TWiSTModel(BaseModel):
         grid = torch.from_numpy(grid).to(device)
 
         points = torch.stack([-vva, uua], dim=0).to(device)
-        input_tensor = format_input_tensor(x).float()
-        reprojected_tensor = torch.nn.functional.grid_sample(input_tensor, grid, mode='bilinear', align_corners=True).squeeze()
-        reproj = reprojected_tensor * pb
+        input_tensor_1 = format_input_tensor(x1).float()
+        reprojected_tensor_1 = torch.nn.functional.grid_sample(input_tensor_1, grid, mode='bilinear', align_corners=True).squeeze()
+        input_tensor_2 = format_input_tensor(x2).float()
+        reprojected_tensor_2 = torch.nn.functional.grid_sample(input_tensor_2, grid, mode='bilinear', align_corners=True).squeeze()
+
+        reproj = reprojected_tensor_1 * pb 
+        reproj2 = reprojected_tensor_2 * pb
+
         c = reproj.to(torch.complex64)
-        model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+        model_vis1 = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+
+        c2 = reproj2.to(torch.complex64)
+        model_vis2 = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c2, isign=1, modeord=0)
+
+        model_vis = model_vis1 + model_vis2
 
         J1 = torch.nansum((model_vis.real - vis_real)**2 / sig**2)
         J11 = torch.nansum((model_vis.imag - vis_imag)**2 / sig**2)
