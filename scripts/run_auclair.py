@@ -63,7 +63,7 @@ Mn = 20
 path = "/home/amarchal/Projects/ivis/docs/tutorials/data_tutorials/ivis_data/"
 
 d = fits.open(path+"image.fits")[0].data
-noise = fits.open(path+"noise_cube.fits")[0].data
+noise = fits.open(path+"noise_cube.fits")[0].data * np.sqrt(0.0936) #Scaling the noise
 
 center_y, center_x = d.shape[0] // 2, d.shape[1] // 2
 
@@ -83,11 +83,11 @@ noise = noise[:,start_y:end_y, start_x:end_x].astype(np.float64)
 M, N = np.shape(d) # map size
 J = int(np.log2(min(M,N)))-2 # number of scales
 L = 4 # number of angles
-pbc = False # periodic boundary conditions
+pbc = True # periodic boundary conditions
 dn = 5 # number of translations
 wph_model = ["S11","S00","S01","Cphase","C01","C00","L"] # list of WPH coefficients
 
-style = 'JMD'#'JMD'
+style = 'BR'#'JMD'
 method = 'L-BFGS-B'
 n_epoch_init = 3
 n_epoch = 5
@@ -142,7 +142,7 @@ for i in range(n_epoch_init):
     # Reshaping of the running map s_tilde0.
     s_tilde0 = s_tilde0.reshape((N, N)).astype(np.float64)
     print("Epoch "+str(i+1)+" done !")
-    
+
 # Initialization of evaluation count.
 eval_cnt = 0
 # Initialization of the running map s_tilde.
