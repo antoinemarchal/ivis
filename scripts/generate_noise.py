@@ -36,8 +36,8 @@ logger.disabled = False
 
 pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits")
 
-#put pb at 1 for pre-PB response
-pb = np.full(pb.shape, 1)
+# #put pb at 1 for pre-PB response
+# pb = np.full(pb.shape, 1)
 
 #Dummy sd array
 sd = np.zeros(shape)

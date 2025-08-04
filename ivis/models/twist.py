@@ -1,7 +1,6 @@
 #work in progress
 import os
 import numpy as np
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 import pytorch_finufft
 from torch.fft import fft2 as tfft2
@@ -18,10 +17,10 @@ class TWiSTModel(BaseModel):
     fixme
     """
         
-    def __init__(self, wph_op, mu, sig, lambda_wph):
+    def __init__(self, wph_op, noise_cube, coeffs, lambda_wph):
         self.wph_op = wph_op
-        self.mu = mu
-        self.sig = sig
+        self.noise_cube = noise_cube.astype(np.float32)  # (R, H, W), stay on CPU as NumPy
+        self.coeff_ref = coeffs.cpu().to(dtype=torch.complex64)  # shape (1, 1, X)
         self.lambda_wph = lambda_wph
 
     def loss(self, x, *args):
@@ -118,127 +117,228 @@ class TWiSTModel(BaseModel):
 
         return model_vis.detach().cpu().numpy()
 
+
     def compute_loss(
-        self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
-        sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
-        grid_array, beam_workers=4, verbose=False
+            self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
+            sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
+            grid_array, beam_workers=4, verbose=False
     ):
-        """
-        Compute full imaging loss: χ² visibility + single-dish + regularization.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Sky image tensor with gradients.
-        beam : np.ndarray
-            Gaussian restoring beam (not used directly).
-        fftbeam : np.ndarray
-            Beam FFT for SD regularization.
-        data : np.ndarray
-            Complex visibilities.
-        uu, vv, ww : np.ndarray
-            UVW coordinates.
-        pb, grid_array : list of np.ndarray
-            Beam and grid per pointing.
-        idmina, idmaxa : list of int
-            Visibility slices per beam.
-        sigma : np.ndarray
-            Per-visibility standard deviations.
-        fftsd : np.ndarray
-            FFT of SD image.
-        tapper : np.ndarray
-            Image tapering window.
-        lambda_sd : float
-            Weight of SD consistency term.
-        lambda_r : float
-            Weight of regularization term.
-        fftkernel : np.ndarray
-            FFT kernel for image regularization.
-        cell_size : float
-            Pixel size in arcsec.
-        device : str
-            "cpu" or "cuda".
-        beam_workers : int
-            Number of parallel CPU threads.
-
-        Returns
-        -------
-        loss_scalar : torch.Tensor
-            Scalar loss with gradients.
-        """
         x.requires_grad_(True)
         if x.grad is not None:
             x.grad.zero_()
-
-        x1 = x[0]; x2 = x[1]
-
+            
+        # Split maps
+        x1 = x[0]
+        x2 = x[1]
+        
+        # Move to device
         beam = torch.from_numpy(beam).to(device)
         tapper = torch.from_numpy(tapper).to(device)
+        
+        loss_scalar = torch.tensor(0.0, device=device)
+        
+        # ------------------------
+        # ---- WPH Loss ---------
+        # ------------------------
+        
+        x_in = x1*1.e5  # We want gradients w.r.t. x1
+        idx = torch.randint(0, self.noise_cube.shape[0], (1,)).item()
+        N_j = torch.from_numpy(self.noise_cube[idx]).to(device)
+        x_noisy = (x_in + N_j).unsqueeze(0).unsqueeze(0)  # No detach!
+        
+        # WPH call — pass in x_noisy directly
+        u, nb_chunks = self.wph_op.preconfigure(x_noisy, requires_grad=True, pbc=False)
+        Lwph_total = torch.tensor(0.0, device=device)
+        
+        for chunk_id in range(nb_chunks):
+            coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=False)
+            coeffs_ref_chunk = self.coeff_ref[0, 0, indices].to(device)
 
-        loss_scalar = 0.0
-        n_beams = len(idmina)
+            # Explicitly convert to complex
+            coeffs_chunk = coeffs_chunk.to(torch.complex64)
+            coeffs_ref_chunk = coeffs_ref_chunk.to(torch.complex64)
 
-        #WPH
-        x_in = x2 /1.e-5 * tapper  #FIXME NORM
-        x_formatted = x_in.unsqueeze(0).unsqueeze(0) 
-        coeffs = self.wph_op.apply(x_formatted.to(device, dtype=torch.float32), norm=None, pbc=False)
-        residual = (coeffs - self.mu.to(coeffs.device)) / self.sig.to(coeffs.device) 
-        Lwph = 0.5 * torch.sum(torch.abs(residual) ** 2) * self.lambda_wph  # real scalar
-        Lwph.backward(retain_graph=True)
-        loss_scalar += Lwph.item()
+            residual_real = coeffs_chunk.real - coeffs_ref_chunk.real
+            residual_imag = coeffs_chunk.imag - coeffs_ref_chunk.imag
+            residual = torch.cat([residual_real, residual_imag])
+            
+            L = 0.5 * residual.pow(2).sum() * self.lambda_wph
+            L.backward(retain_graph=True)
+            Lwph_total += L.item()
+            
+            del coeffs_chunk, residual, indices, coeffs_ref_chunk
+            torch.cuda.empty_cache()
+        
+        loss_scalar += Lwph_total
+        
+        if verbose:
+            print_gpu_memory(device)
 
-        for i in range(n_beams):
-            idmin = idmina[i]
-            idmax = idmaxa[i]
+        
+        # -------------------------------
+        # ---- Beam χ² vis loss --------
+        # -------------------------------
+        for i in range(len(idmina)):
+            idmin, idmax = idmina[i], idmaxa[i]
             uua = uu[idmin:idmin+idmax]
             vva = vv[idmin:idmin+idmax]
             wwa = ww[idmin:idmin+idmax]
             vis_real = data.real[idmin:idmin+idmax]
             vis_imag = data.imag[idmin:idmin+idmax]
-            sig = sigma[idmin:idmin+idmax]
+            sig_i = sigma[idmin:idmin+idmax]
             
-            J = self.compute_vis_cuda(x1+x2, uua, vva, wwa, vis_real, vis_imag, sig,
+            J = self.compute_vis_cuda(x1, uua, vva, wwa, vis_real, vis_imag, sig_i,
                                       pb[i], cell_size, device, grid_array[i])
             L = 0.5 * J
-            L.backward(retain_graph=True)
+            L.backward(retain_graph=True)  # <---- explicitly keeping retain_graph=True
             loss_scalar += L.item()
             
             torch.cuda.empty_cache()
             if verbose:
-                self.print_gpu_memory(device)
-
-        # Single dish
+                print_gpu_memory(device)
+                
+        # ----------------------------
+        # ---- Single Dish loss ------
+        # ----------------------------
         fftsd_torch = torch.from_numpy(fftsd).to(device)
         fftbeam_torch = torch.from_numpy(fftbeam).to(device)
         xfft2 = tfft2(x1 * tapper)
         model_sd = cell_size**2 * xfft2 * fftbeam_torch
-        J2 = torch.nansum((model_sd.real - fftsd_torch.real) ** 2)
-        J22 = torch.nansum((model_sd.imag - fftsd_torch.imag) ** 2)
-        Lsd = 0.5 * (J2 + J22) * lambda_sd
-        Lsd.backward(retain_graph=True)
-        loss_scalar += Lsd.item()
-
-        #regularization on x1
-        fftkernel_torch = torch.from_numpy(fftkernel).to(device)
-        xfft2 = tfft2(x1 * tapper)
-        conv = cell_size**2 * xfft2 * fftkernel_torch
-        R = torch.nansum(abs(conv) ** 2)
-        Lr = 0.5 * R * lambda_r
-        Lr.backward()
-        loss_scalar += Lr.item()
-
-        #regularization on x2
-        xfft2 = tfft2(x2 * tapper)
-        conv = cell_size**2 * xfft2 * fftkernel_torch
-        R = torch.nansum(abs(conv) ** 2)
-        Lr = 0.5 * R * lambda_r
-        Lr.backward()
-        loss_scalar += Lr.item()
         
+        diff_real = model_sd.real - fftsd_torch.real
+        diff_imag = model_sd.imag - fftsd_torch.imag
+        Lsd = 0.5 * (torch.sum(diff_real**2) + torch.sum(diff_imag**2)) * lambda_sd
+        Lsd.backward(retain_graph=True)  # Optional — still kept if needed
+        loss_scalar += Lsd.item()
+        
+        del xfft2, model_sd, fftsd_torch, fftbeam_torch, diff_real, diff_imag
+        torch.cuda.empty_cache()
+        
+        # ----------------------------
+        # ---- Regularization --------
+        # ----------------------------
+        fftkernel_torch = torch.from_numpy(fftkernel).to(device)
+        for xreg in [x1, x2]:
+            xfft2 = tfft2(xreg * tapper)
+            conv = cell_size**2 * xfft2 * fftkernel_torch
+            Lr = 0.5 * torch.sum(torch.abs(conv) ** 2) * lambda_r
+            Lr.backward(retain_graph=False)  # Final term: no retain
+            loss_scalar += Lr.item()
+            
+            del xfft2, conv
+            torch.cuda.empty_cache()
+            
+        del fftkernel_torch
         if verbose:
             print_gpu_memory(device)
+            
+        return loss_scalar
 
-        return torch.tensor(loss_scalar)
+    # def compute_loss(
+    #         self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
+    #         sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
+    #         grid_array, beam_workers=4, verbose=False
+    # ):
+    #     x.requires_grad_(True)
+    #     if x.grad is not None:
+    #         x.grad.zero_()
+            
+    #     # Split maps
+    #     x1 = x[0]
+    #     x2 = x[1]
+        
+    #     # Move to device
+    #     beam = torch.from_numpy(beam).to(device)
+    #     tapper = torch.from_numpy(tapper).to(device)
+        
+    #     loss_scalar = torch.tensor(0.0, device=device)
+        
+    #     # ------------------------
+    #     # ---- WPH Loss ---------
+    #     # ------------------------
+    #     x_in = x2 / 1.e-5 * tapper #ATTENTION
+    #     x_formatted = x_in.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)
+        
+    #     mu_flat = self.mu.squeeze().to(device, dtype=torch.float32)
+    #     sig_flat = self.sig.squeeze().to(device, dtype=torch.float32)
+        
+    #     u, nb_chunks = self.wph_op.preconfigure(x_formatted, requires_grad=True, pbc=False)
+    #     Lwph = 0.0
+        
+    #     for chunk_id in range(nb_chunks):
+    #         coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=False)
+            
+    #         residual_real = (torch.real(coeffs_chunk) - mu_flat[indices]) / sig_flat[indices]
+    #         residual_imag = (torch.imag(coeffs_chunk) - mu_flat[indices]) / sig_flat[indices]
+    #         residual = torch.cat([residual_real, residual_imag])
+            
+    #         L = 0.5 * torch.sum(residual ** 2) * self.lambda_wph
+    #         L.backward(retain_graph=True)
+    #         Lwph += L.item()
+            
+    #         del coeffs_chunk, residual_real, residual_imag, residual, indices
+    #         torch.cuda.empty_cache()
+            
+    #     loss_scalar += Lwph
+        
+    #     # -------------------------------
+    #     # ---- Beam χ² vis loss --------
+    #     # -------------------------------
+    #     for i in range(len(idmina)):
+    #         idmin, idmax = idmina[i], idmaxa[i]
+    #         uua = uu[idmin:idmin+idmax]
+    #         vva = vv[idmin:idmin+idmax]
+    #         wwa = ww[idmin:idmin+idmax]
+    #         vis_real = data.real[idmin:idmin+idmax]
+    #         vis_imag = data.imag[idmin:idmin+idmax]
+    #         sig_i = sigma[idmin:idmin+idmax]
+            
+    #         J = self.compute_vis_cuda(x1 + x2, uua, vva, wwa, vis_real, vis_imag, sig_i,
+    #                                   pb[i], cell_size, device, grid_array[i])
+    #         L = 0.5 * J
+    #         L.backward(retain_graph=True)  # <---- explicitly keeping retain_graph=True
+    #         loss_scalar += L.item()
+            
+    #         torch.cuda.empty_cache()
+    #         if verbose:
+    #             print_gpu_memory(device)
+                
+    #     # ----------------------------
+    #     # ---- Single Dish loss ------
+    #     # ----------------------------
+    #     fftsd_torch = torch.from_numpy(fftsd).to(device)
+    #     fftbeam_torch = torch.from_numpy(fftbeam).to(device)
+    #     xfft2 = tfft2(x1 * tapper)
+    #     model_sd = cell_size**2 * xfft2 * fftbeam_torch
+        
+    #     diff_real = model_sd.real - fftsd_torch.real
+    #     diff_imag = model_sd.imag - fftsd_torch.imag
+    #     Lsd = 0.5 * (torch.sum(diff_real**2) + torch.sum(diff_imag**2)) * lambda_sd
+    #     Lsd.backward(retain_graph=True)  # Optional — still kept if needed
+    #     loss_scalar += Lsd.item()
+        
+    #     del xfft2, model_sd, fftsd_torch, fftbeam_torch, diff_real, diff_imag
+    #     torch.cuda.empty_cache()
+        
+    #     # ----------------------------
+    #     # ---- Regularization --------
+    #     # ----------------------------
+    #     fftkernel_torch = torch.from_numpy(fftkernel).to(device)
+    #     for xreg in [x1, x2]:
+    #         xfft2 = tfft2(xreg * tapper)
+    #         conv = cell_size**2 * xfft2 * fftkernel_torch
+    #         Lr = 0.5 * torch.sum(torch.abs(conv) ** 2) * lambda_r
+    #         Lr.backward(retain_graph=False)  # Final term: no retain
+    #         loss_scalar += Lr.item()
+            
+    #         del xfft2, conv
+    #         torch.cuda.empty_cache()
+            
+    #     del fftkernel_torch
+    #     if verbose:
+    #         print_gpu_memory(device)
+            
+    #     return loss_scalar
 
     def compute_vis_cuda(self, x, uua, vva, wwa, vis_real, vis_imag, sig, pb, cell_size, device, grid):
         """

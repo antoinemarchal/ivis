@@ -54,7 +54,7 @@ vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
                                                 max_workers=1)
 
 ## WPH noise stat (start from pre-computed noise cube here for testing)
-device = 0
+device = "cpu"
 
 #params WPH
 logger.info("Get WPH operator and load moments model.")
@@ -64,8 +64,8 @@ L = 4 # number of angles
 pbc = False # periodic boundary conditions
 dn = 5 # number of translations
 # wph_model = ["S11","S00","S01","Cphase","C01","C00","L"] # list of WPH coefficients
-wph_model = ["S11","S00","S01"] # list of WPH coefficients
-# wph_model = ["S11"] # list of WPH coefficients
+# wph_model = ["S11","S00","S01","Cphase"] # list of WPH coefficients
+wph_model = ["S11"] # list of WPH coefficients
 # logger.warning("Only using S11.")
 # get operator
 wph_op = pw.WPHOp(M, N, J, L=L, dn=dn, device=device)
@@ -80,21 +80,19 @@ with fits.open(pathout + "noise_cube.fits", memmap=True) as hdul:
 noise_cube = data
 
 #rescale
-noise_cube /= 1e-5
-logger.warning("normalized noise cube")
+# noise_cube /= 1e-5
+# logger.warning("normalized noise cube")
 
-# Compute coeffs
-n_noise = noise_cube.shape[0]
-coeffs_list=[]
-for i in tqdm(np.arange(n_noise)):
-    coeffs = wph_op.apply(torch.from_numpy(noise_cube[i]).unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32), norm=None, pbc=pbc)
-    coeffs_list.append(coeffs)
+# # Compute coeffs
+# n_noise = noise_cube.shape[0]
+# coeffs_list=[]
+# for i in tqdm(np.arange(n_noise)):
+#     coeffs = wph_op.apply(torch.from_numpy(noise_cube[i]).unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32), norm=None, pbc=pbc)
+#     coeffs_list.append(coeffs)
     
-coeffs_list_cpu = [c.detach().cpu() for c in coeffs_list]
-mu = torch.stack(coeffs_list_cpu).mean(dim=0)
-std = torch.stack(coeffs_list_cpu).std(dim=0)
-
-print(mu.shape, std.shape)
+# coeffs_list_cpu = [c.detach().cpu() for c in coeffs_list]
+# mu = torch.stack(coeffs_list_cpu).mean(dim=0)
+# std = torch.stack(coeffs_list_cpu).std(dim=0)
 
 #user parameters
 max_its = 20
@@ -114,7 +112,7 @@ image_processor = Imager(vis_data,      # visibilities
                          beam_sd,       # beam of single-dish data in radio_beam format
                          target_header, # header on which to image the data
                          init_params[0],   # init array of parameters
-                         max_its,       # maximum number of iterations
+                         5,       # maximum number of iterations
                          lambda_sd,     # hyper-parameter single-dish
                          lambda_r,      # hyper-parameter regularization
                          positivity,    # impose a positivity constaint
@@ -123,7 +121,18 @@ image_processor = Imager(vis_data,      # visibilities
 # choose model
 model = ClassicIViS()
 # get image
-# init_params[0] = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+
+hdu0 = fits.PrimaryHDU(base)#, header=target_header)
+hdulist = fits.HDUList([hdu0])
+hdulist.writeto(pathout + "image.fits", overwrite=True)
+
+stop
+
+coeffs = wph_op.apply(torch.from_numpy(base*1.e5).unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32), norm=None, pbc=pbc)
+
+# init_params[0] = base
+# init_params[1] = noise_cube[0] / 1.e5
 
 # create image processor
 image_processor = Imager(vis_data,      # visibilities
@@ -133,13 +142,13 @@ image_processor = Imager(vis_data,      # visibilities
                          beam_sd,       # beam of single-dish data in radio_beam format
                          target_header, # header on which to image the data
                          init_params,   # init array of parameters
-                         200,       # maximum number of iterations
+                         max_its,       # maximum number of iterations
                          lambda_sd,     # hyper-parameter single-dish
                          lambda_r,      # hyper-parameter regularization
                          positivity,    # impose a positivity constaint
                          device,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
 # choose model
-model = TWiSTModel(wph_op, mu, std, 1)
+model = TWiSTModel(wph_op, noise_cube, coeffs, 1.e8)
 # get image
 result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
