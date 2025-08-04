@@ -97,7 +97,7 @@ mu = torch.stack(coeffs_list_cpu).mean(dim=0)
 std = torch.stack(coeffs_list_cpu).std(dim=0)
 
 #user parameters
-max_its = 40
+max_its = 20
 lambda_sd = 0
 lambda_r = 1
 device = 0#"cpu" #0 is GPU and "cpu" is CPU
@@ -114,7 +114,7 @@ image_processor = Imager(vis_data,      # visibilities
                          beam_sd,       # beam of single-dish data in radio_beam format
                          target_header, # header on which to image the data
                          init_params[0],# init array of parameters
-                         20,            # maximum number of iterations
+                         max_its,            # maximum number of iterations
                          lambda_sd,     # hyper-parameter single-dish
                          lambda_r,      # hyper-parameter regularization
                          positivity,    # impose a positivity constaint
