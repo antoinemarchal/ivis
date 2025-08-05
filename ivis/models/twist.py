@@ -5,19 +5,21 @@ import torch
 import pytorch_finufft
 from torch.fft import fft2 as tfft2
 from joblib import Parallel, delayed
+from scipy.signal import find_peaks
 
 from ivis.logger import logger
 from ivis.models.base import BaseModel
 
 from ivis.models.utils.tensor_ops import format_input_tensor
 from ivis.models.utils.gpu import print_gpu_memory
+from ivis.utils.fourier import powspec_torch
 
 class TWiSTModel(BaseModel):
     """
     fixme
     """
         
-    def __init__(self, wph_op, lambda_wph, pbc, mu, sig, sigma_n):
+    def __init__(self, wph_op, lambda_wph, pbc, mu, sig, pk, lambda_pk, lambda_ortho):
         self.wph_op = wph_op
         # self.noise_cube = noise_cube.astype(np.float32)  # (R, H, W), stay on CPU as NumPy
         # self.coeff_ref = coeff_ref.cpu().to(dtype=torch.complex64)  # shape (1, 1, X)
@@ -25,7 +27,9 @@ class TWiSTModel(BaseModel):
         self.pbc = pbc
         self.mu = mu
         self.sig = sig
-        self.sigma_n = sigma_n
+        self.pk = pk
+        self.lambda_pk = lambda_pk
+        self.lambda_ortho = lambda_ortho
 
     def loss(self, x, *args):
         """
@@ -120,8 +124,8 @@ class TWiSTModel(BaseModel):
             model_vis[idmin:idmin+idmax] = vis
 
         return model_vis.detach().cpu().numpy()
-
     
+
     def compute_loss(
             self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, device,
             sigma, fftsd, tapper, lambda_sd, lambda_r, fftkernel, cell_size,
@@ -142,13 +146,95 @@ class TWiSTModel(BaseModel):
         loss_scalar = torch.tensor(0.0, device=device)
 
         # ------------------------
-        # ---- Enforce hard power constraint on x2 (noise map)
+        # ---- P(k) Loss ---------
         # ------------------------
-        with torch.no_grad():
-            power = torch.mean(x2 ** 2)
-            scaling = self.sigma_n / (torch.sqrt(power) + 1e-12)
-            x2.mul_(torch.clamp(scaling, min=0.5, max=2.0))
+
+        # Compute power spectrum of x2 (noise map or image component)
+        ks, ps_x2 = powspec_torch(
+            x2,  # assumed shape (H, W)
+            pixel_size_arcsec=7,  # convert deg to arcsec
+            nbins=self.pk.shape[0]  # match number of bins
+        )
+
+        # Compute chi^2 loss against target P(k)
+        residual_pk = (ps_x2 - self.pk) / (self.pk + 1e-10)
+        Lpk = 0.5 * torch.sum(residual_pk ** 2) * self.lambda_pk
+
+        # Backpropagate
+        Lpk.backward(retain_graph=True)
+        loss_scalar += Lpk.item()
+
+        # ---------------------------------
+        # ---- WPH Orthogonality Loss ----
+        # ---------------------------------
+        x1_detached = x1.detach() / 1.e-5  # must match scaling!
+        x1_formatted = x1_detached.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)
+        x2_formatted = x2.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)
+        
+        u1, nb_chunks = self.wph_op.preconfigure(x1_formatted, requires_grad=False, pbc=self.pbc)
+        u2, _ = self.wph_op.preconfigure(x2_formatted, requires_grad=True, pbc=self.pbc)
+        
+        Lortho = 0.0
+        
+        for chunk_id in range(nb_chunks):
+            c1 = self.wph_op.apply(u1, chunk_id, norm=None, pbc=self.pbc)
+            c2 = self.wph_op.apply(u2, chunk_id, norm=None, pbc=self.pbc)
             
+            inner = torch.sum(torch.real(c1 * torch.conj(c2)))  # ⟨Φ(x1), Φ(x2)⟩
+            L = self.lambda_ortho * inner
+            L.backward(retain_graph=True)
+            Lortho += L.item()
+            
+            del c1, c2
+            torch.cuda.empty_cache()
+            
+        loss_scalar += Lortho
+        
+        # # ------------------------
+        # # ---- WPH Loss ----------
+        # # ------------------------
+        
+        # x_in = x2 / 1e-5
+        # x_formatted = x_in.unsqueeze(0).unsqueeze(0).to(device, dtype=torch.float32)  # [1, 1, H, W]
+        
+        # # Flatten and move to device
+        # mu_flat = self.mu.to(device).reshape(-1)         # [N], complex64
+        # sig_flat = self.sig.to(device).reshape(-1)       # [N], float32
+        # mask = self.wph_mask.to(device)                  # [2, 1, 1, N]
+        
+        # # Squeeze to [2, N]
+        # while mask.ndim > 2:
+        #     mask = mask.squeeze(1)
+            
+        # u, nb_chunks = self.wph_op.preconfigure(x_formatted, requires_grad=True, pbc=self.pbc)
+        # Lwph = 0.0
+        
+        # for chunk_id in range(nb_chunks):
+        #     coeffs_chunk, indices = self.wph_op.apply(u, chunk_id, norm=None, ret_indices=True, pbc=self.pbc)
+            
+        #     # Flatten chunk to match mu/sig/mask shapes
+        #     coeffs_chunk_flat = coeffs_chunk.view(-1)        # [N_chunk]
+        #     mu_chunk = mu_flat[indices]                      # [N_chunk]
+        #     sig_chunk = sig_flat[indices]                    # [N_chunk]
+        #     mask_real = mask[0][indices]                     # [N_chunk]
+        #     mask_imag = mask[1][indices]                     # [N_chunk]
+            
+        #     # Residuals
+        #     res_real = ((coeffs_chunk_flat.real - mu_chunk.real) / sig_chunk)[mask_real]
+        #     res_imag = ((coeffs_chunk_flat.imag - mu_chunk.imag) / sig_chunk)[mask_imag]
+            
+        #     residual = torch.cat([res_real, res_imag], dim=0)
+            
+        #     # Loss and backward
+        #     L = 0.5 * torch.sum(residual ** 2) * self.lambda_wph
+        #     L.backward(retain_graph=True)
+        #     Lwph += L.item()
+            
+        #     del coeffs_chunk, coeffs_chunk_flat, res_real, res_imag, residual, indices
+        #     torch.cuda.empty_cache()
+            
+        # loss_scalar += Lwph
+
         # ------------------------
         # ---- WPH Loss ---------
         # ------------------------

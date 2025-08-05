@@ -40,6 +40,47 @@ Author: Adapted from JF Robitaille package by Antoine Marchal (mostly added docs
 """
 
 import numpy as np
+import torch
+
+def powspec_torch(image, pixel_size_arcsec=1.0, nbins=None, autocorr=False, im2=None):
+    device = image.device
+    H, W = image.shape
+    if nbins is None:
+        nbins = max(H, W) // 2
+
+    dx_arcmin = pixel_size_arcsec / 60.0
+    fx = torch.fft.fftshift(torch.fft.fftfreq(W, d=dx_arcmin)).to(device)
+    fy = torch.fft.fftshift(torch.fft.fftfreq(H, d=dx_arcmin)).to(device)
+    kx, ky = torch.meshgrid(fx, fy, indexing='xy')
+    k_radius = torch.sqrt(kx**2 + ky**2)
+
+    ft1 = torch.fft.fft2(image)
+    if im2 is not None:
+        ft2 = torch.fft.fft2(im2)
+        ps2d = torch.real(ft1 * torch.conj(ft2)) / (H * W)
+    else:
+        ps2d = torch.real(ft1 * torch.conj(ft1)) / (H * W)
+
+    if autocorr:
+        ps2d = torch.fft.ifft2(ps2d).real
+
+    ps_flat = torch.fft.fftshift(ps2d).flatten()
+    k_flat = k_radius.flatten()
+
+    kmin = k_flat[k_flat > 0].min()
+    kmax = k_flat.max()
+    bins = torch.linspace(kmin, kmax, nbins + 1, device=device)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    inds = torch.bucketize(k_flat, bins) - 1
+
+    power_1d = torch.zeros(nbins, device=device)
+    for i in range(nbins):
+        mask = inds == i
+        if torch.any(mask):
+            power_1d[i] = ps_flat[mask].mean()
+
+    return bin_centers, power_1d
+
 
 def powspec(image, reso=1, autocorr=False, **kwargs):
     """

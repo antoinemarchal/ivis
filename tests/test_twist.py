@@ -20,6 +20,70 @@ from ivis.models import ClassicIViS, TWiSTModel
 
 plt.ion()
 
+def powspec_torch(image, pixel_size_arcsec=1.0, nbins=None, autocorr=False, im2=None):
+    """
+    Compute 1D power spectrum or autocorrelation using PyTorch.
+
+    Parameters
+    ----------
+    image : torch.Tensor
+        Input 2D tensor.
+    pixel_size_arcsec : float
+        Pixel size in arcseconds.
+    nbins : int
+        Number of radial bins.
+    autocorr : bool
+        If True, return autocorrelation instead of power spectrum.
+    im2 : torch.Tensor, optional
+        Optional second image for cross-spectrum.
+
+    Returns
+    -------
+    k_bin_centers : torch.Tensor
+        Radial frequency bins [arcmin^{-1}].
+    power_1d : torch.Tensor
+        Azimuthally averaged power spectrum.
+    """
+    device = image.device
+    H, W = image.shape
+    if nbins is None:
+        nbins = max(H, W) // 2
+
+    dx_arcmin = pixel_size_arcsec / 60.0
+    fx = torch.fft.fftshift(torch.fft.fftfreq(W, d=dx_arcmin)).to(device)
+    fy = torch.fft.fftshift(torch.fft.fftfreq(H, d=dx_arcmin)).to(device)
+    kx, ky = torch.meshgrid(fx, fy, indexing='xy')
+    k_radius = torch.sqrt(kx**2 + ky**2)
+
+    # FFTs
+    ft1 = torch.fft.fft2(image)
+    if im2 is not None:
+        ft2 = torch.fft.fft2(im2)
+        ps2d = torch.real(ft1 * torch.conj(ft2)) / (H * W)
+    else:
+        ps2d = torch.real(ft1 * torch.conj(ft1)) / (H * W)
+
+    if autocorr:
+        ps2d = torch.fft.ifft2(ps2d).real
+
+    ps_flat = torch.fft.fftshift(ps2d).flatten()
+    k_flat = k_radius.flatten()
+
+    kmin = k_flat[k_flat > 0].min()
+    kmax = k_flat.max()
+    bins = torch.linspace(kmin, kmax, nbins + 1, device=device)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    inds = torch.bucketize(k_flat, bins) - 1
+
+    power_1d = torch.zeros(nbins, device=device)
+    for i in range(nbins):
+        mask = inds == i
+        if torch.any(mask):
+            power_1d[i] = ps_flat[mask].mean()
+
+    return bin_centers, power_1d
+
+
 path_ms = "../docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
 path_beams = "../docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
 path_sd = None #path single-dish data
@@ -63,9 +127,9 @@ J = int(np.log2(min(M, N)))-2 # number of scales
 L = 4 # number of angles
 pbc = False # periodic boundary conditions
 dn = 5 # number of translations
-wph_model = ["S11","S00","S01","Cphase","C01","C00","L"] # list of WPH coefficients
+# wph_model = ["S11","S00","S01","Cphase","C01","C00","L"] # list of WPH coefficients
 # wph_model = ["S11","S00","S01","Cphase"] # list of WPH coefficients
-# wph_model = ["S11"] # list of WPH coefficients
+wph_model = ["S11"] # list of WPH coefficients
 # logger.warning("Only using S11.")
 # get operator
 wph_op = pw.WPHOp(M, N, J, L=L, dn=dn, device=device)
@@ -80,6 +144,15 @@ with fits.open(pathout + "noise_cube.fits", memmap=True) as hdul:
 noise_cube = data * np.sqrt(0.0936)
 
 sigma_n = np.std(noise_cube)
+
+#P(k)
+ps_list = []
+for i in range(noise_cube.shape[0]):
+    noise_map = torch.from_numpy(noise_cube[i]).to(device)
+    ks, ps = powspec_torch(noise_map, pixel_size_arcsec=7)
+    ps_list.append(ps)
+
+mean_noise_ps = torch.stack(ps_list).mean(dim=0)
 
 #rescale
 noise_cube /= 1e-5
@@ -114,7 +187,7 @@ image_processor = Imager(vis_data,      # visibilities
                          beam_sd,       # beam of single-dish data in radio_beam format
                          target_header, # header on which to image the data
                          init_params[0],# init array of parameters
-                         max_its,            # maximum number of iterations
+                         max_its,       # maximum number of iterations
                          lambda_sd,     # hyper-parameter single-dish
                          lambda_r,      # hyper-parameter regularization
                          positivity,    # impose a positivity constaint
@@ -124,6 +197,7 @@ image_processor = Imager(vis_data,      # visibilities
 model = ClassicIViS()
 # get image
 base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+ks, ps_base = powspec_torch(torch.from_numpy(base).to(device) , pixel_size_arcsec=7)
 
 # hdu0 = fits.PrimaryHDU(base)#, header=target_header)
 # hdulist = fits.HDUList([hdu0])
@@ -149,6 +223,6 @@ image_processor = Imager(vis_data,      # visibilities
                          device,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
 # choose model
-model = TWiSTModel(wph_op, 1.e8, True, mu, std, sigma_n)
+model = TWiSTModel(wph_op, 0.e8, True, mu, std, mean_noise_ps, 10, 10)
 # get image
 result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
