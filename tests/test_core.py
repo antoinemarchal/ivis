@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
     #____________________________________________________________________________
     #user parameters
-    max_its = 20
+    max_its = 1
     lambda_sd = 0#10
     lambda_r = 20
     device = 0 #0 is GPU and "cpu" is CPU
@@ -69,8 +69,8 @@ if __name__ == '__main__':
     beam_workers = 1
 
     #create image processor
-    init_params = np.zeros(shape).ravel()
-
+    init_params = np.zeros(shape)
+    
     image_processor = Imager(vis_data,      # visibilities
                              pb,            # array of primary beams
                              grid,          # array of interpolation grids
@@ -87,7 +87,7 @@ if __name__ == '__main__':
                              )
     #get image
     model = ClassicIViS()
-    result = image_processor.process(model=model, units="Jy/beam") #"Jy/arcsec^2" or "K"
+    result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
     #write on disk
     hdu0 = fits.PrimaryHDU(result, header=target_header)

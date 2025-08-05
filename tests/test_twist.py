@@ -10,7 +10,8 @@ from astropy import units as u
 from reproject import reproject_interp
 import pywph as pw
 import torch
-
+import pytorch_finufft
+ 
 from ivis.io import DataProcessor
 from ivis.imager import Imager
 from ivis.logger import logger
@@ -84,6 +85,63 @@ def powspec_torch(image, pixel_size_arcsec=1.0, nbins=None, autocorr=False, im2=
     return bin_centers, power_1d
 
 
+def generate_noise_map_beamwise(
+    uu, vv, idmina, idmaxa, sigma, shape, device
+):
+    """
+    Generate a dirty noise map by beam using inverse NUFFT (adjoint of Type 2),
+    consistent with your visibility modeling setup.
+
+    Parameters
+    ----------
+    uu, vv : np.ndarray
+        UV coordinates (radians/pixel).
+    idmina, idmaxa : list of int
+        Indices of start and length per beam.
+    sigma : np.ndarray
+        Visibility-domain standard deviation per visibility.
+    shape : tuple
+        (H, W) image shape.
+    device : str
+        Torch device, e.g., "cuda" or "cpu".
+
+    Returns
+    -------
+    noise_map : torch.Tensor
+        2D torch tensor [H, W] containing the summed dirty noise image over beams.
+    """
+    H, W = shape
+    noise_map = torch.zeros(H, W, dtype=torch.float32, device=device)
+
+    n_beams = len(idmina)
+    for i in range(n_beams):
+        idmin = idmina[i]
+        idmax = idmaxa[i]
+
+        # Grab UV coordinates and sigma for this beam
+        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
+        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
+        siga = torch.from_numpy(sigma[idmin:idmin+idmax]).to(device)
+
+        # Generate complex Gaussian visibility noise
+        noise_real = torch.randn_like(siga)
+        noise_imag = torch.randn_like(siga)
+        noise_vis = torch.complex(noise_real, noise_imag) * siga
+
+        # NUFFT points
+        points = torch.stack([-vva, uua], dim=0)  # FINUFFT ordering
+
+        # Inverse NUFFT (adjoint)
+        noise_dirty = pytorch_finufft.functional.finufft_type1(
+            points, noise_vis, shape, isign=-1, modeord=0
+        )
+
+        # Add real part to noise map (assumes real-valued imaging)
+        noise_map += noise_dirty.real
+
+    return noise_map
+
+
 path_ms = "../docs/tutorials/data_tutorials/ivis_data/msl_mw/" #directory of measurement sets    
 path_beams = "../docs/tutorials/data_tutorials/ivis_data/BEAMS/" #directory of primary beams
 path_sd = None #path single-dish data
@@ -117,9 +175,72 @@ vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
                                                 blocks='single',
                                                 max_workers=1)
 
-## WPH noise stat (start from pre-computed noise cube here for testing)
-device = 0
 
+#user parameters
+max_its = 1
+lambda_sd = 0
+lambda_r = 1
+device = 0#"cpu" #0 is GPU and "cpu" is CPU
+positivity = False
+
+#init parameters
+init_params = np.zeros((2,shape[0],shape[1]))
+
+# create image processor
+image_processor = Imager(vis_data,      # visibilities
+                         pb,            # array of primary beams
+                         grid,          # array of interpolation grids
+                         sd,            # single dish data in unit of Jy/arcsec^2
+                         beam_sd,       # beam of single-dish data in radio_beam format
+                         target_header, # header on which to image the data
+                         init_params[0],# init array of parameters
+                         max_its,       # maximum number of iterations
+                         lambda_sd,     # hyper-parameter single-dish
+                         lambda_r,      # hyper-parameter regularization
+                         positivity,    # impose a positivity constaint
+                         device,        # device: 0 is GPU; "cpu" is CPU
+                         beam_workers=1)
+# choose model
+model = ClassicIViS()
+# get image
+base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+ks, ps_base = powspec_torch(torch.from_numpy(base).to(device) , pixel_size_arcsec=7)
+
+stop
+
+#generate noise per beam
+idmina, idmaxa = image_processor.process_beam_positions()
+
+noise_cube = np.zeros((n_beams, 20, pb.shape[1], pb.shape[2]), dtype=np.float32)
+
+NN = 5
+n_beams = vis_data.beam.max()+1
+for beam_id in range(n_beams):
+    idmin = idmina[beam_id]
+    idmax = idmaxa[beam_id]  # number of visibilities (not end index)
+
+    u_b = vis_data.uu[idmin:idmin+idmax]
+    v_b = vis_data.vv[idmin:idmin+idmax]
+    sig_b = vis_data.sigma[idmin:idmin+idmax]
+
+    u_b = torch.tensor(u_b, dtype=torch.float32, device="cuda")
+    v_b = torch.tensor(v_b, dtype=torch.float32, device="cuda")
+    sig_b = torch.tensor(sig_b, dtype=torch.float32, device="cuda")
+
+    points = torch.stack([-v_b, u_b], dim=0)
+
+    for k in range(NN):
+        noise_real = torch.randn(len(sig_b), device="cuda") * sig_b
+        noise_imag = torch.randn(len(sig_b), device="cuda") * sig_b
+        noise_vis = torch.complex(noise_real, noise_imag)
+
+        dirty = pytorch_finufft.functional.finufft_type1(
+            points, noise_vis, (pb.shape[1],pb.shape[2]), isign=-1, modeord=0
+        ).real
+
+        noise_cube[beam_id, k] = dirty.detach().cpu().numpy()
+
+## WPH noise stat (start from pre-computed noise cube here for testing)
 #params WPH
 logger.info("Get WPH operator and load moments model.")
 M, N = shape # map size
@@ -169,35 +290,7 @@ coeffs_list_cpu = [c.detach().cpu() for c in coeffs_list]
 mu = torch.stack(coeffs_list_cpu).mean(dim=0)
 std = torch.stack(coeffs_list_cpu).std(dim=0)
 
-#user parameters
-max_its = 20
-lambda_sd = 0
-lambda_r = 1
-device = 0#"cpu" #0 is GPU and "cpu" is CPU
-positivity = False
-
-#init parameters
-init_params = np.zeros((2,shape[0],shape[1]))
-
-# create image processor
-image_processor = Imager(vis_data,      # visibilities
-                         pb,            # array of primary beams
-                         grid,          # array of interpolation grids
-                         sd,            # single dish data in unit of Jy/arcsec^2
-                         beam_sd,       # beam of single-dish data in radio_beam format
-                         target_header, # header on which to image the data
-                         init_params[0],# init array of parameters
-                         max_its,       # maximum number of iterations
-                         lambda_sd,     # hyper-parameter single-dish
-                         lambda_r,      # hyper-parameter regularization
-                         positivity,    # impose a positivity constaint
-                         device,        # device: 0 is GPU; "cpu" is CPU
-                         beam_workers=1)
-# choose model
-model = ClassicIViS()
-# get image
-base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
-ks, ps_base = powspec_torch(torch.from_numpy(base).to(device) , pixel_size_arcsec=7)
+stop
 
 # hdu0 = fits.PrimaryHDU(base)#, header=target_header)
 # hdulist = fits.HDUList([hdu0])
