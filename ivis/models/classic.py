@@ -96,7 +96,7 @@ class ClassicIViS(BaseModel):
         n_beams = len(idmina)
         for i in range(n_beams):
             idmin = idmina[i]
-            idmax = idmaxa[i]
+            idmax = idmin + idmaxa[i]
             
             vis = self.forward_beam(
                 x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array

@@ -211,6 +211,7 @@ class Imager:
             data=self.vis_data.data,
             uu=uu_radpix,
             vv=vv_radpix,
+            ww=self.vis_data.ww,
             pb=pb_native,
             idmina=idmin,
             idmaxa=idmax,
