@@ -178,69 +178,6 @@ class ClassicIViS(BaseModel):
             torch.cuda.empty_cache()
             
         return model_vis
-
-
-    def forward_beam_wstacked(self, x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array, Nw):
-        """
-        Simulate model visibilities for a single beam using w-stacking with on-the-fly phase kernel computation.
-        """
-        # Slice beam visibilities
-        idmin = idmina[i]
-        idmax = idmaxa[i]
-        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
-        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
-        wwa = torch.from_numpy(ww[idmin:idmin+idmax]).to(device)
-        pba = torch.from_numpy(pb[i]).to(device)
-        grid = torch.from_numpy(grid_array[i]).to(device)
-        
-        # Prepare 2D coordinates (l, m) in radians
-        H, W = pba.shape
-        delta_rad = cell_size * np.pi / (180 * 3600)  # arcsec to rad
-        lx = torch.linspace(-W/2, W/2 - 1, W, device=device) * delta_rad
-        ly = torch.linspace(-H/2, H/2 - 1, H, device=device) * delta_rad
-        l, m = torch.meshgrid(lx, ly, indexing='xy')
-        r2 = l**2 + m**2
-        
-        # Reproject full model x to this beam
-        input_tensor = format_input_tensor(x).float().to(device)
-        reprojected_tensor = torch.nn.functional.grid_sample(
-            input_tensor, grid, mode='bilinear', align_corners=True
-        ).squeeze()
-        x_pb = reprojected_tensor * pba  # real-valued
-        
-        # Bin visibilities by w
-        w_edges = torch.linspace(wwa.min(), wwa.max(), Nw + 1, device=device)
-        w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
-        bin_ids = torch.bucketize(wwa, w_edges) - 1
-        bin_ids = torch.clamp(bin_ids, 0, Nw - 1)
-        
-        # Track visibilities and their original positions
-
-        model_vis = torch.empty_like(uua, dtype=torch.complex64)
-
-        for j in range(Nw):
-            idx = (bin_ids == j).nonzero(as_tuple=True)[0]
-            if idx.numel() == 0:
-                continue
-            
-            u_bin = uua[idx]
-            v_bin = vva[idx]
-            points = torch.stack([-v_bin, u_bin], dim=0)
-            
-            phase = torch.exp(1j * np.pi * w_centers[j] * r2)
-            x_mod = x_pb.to(torch.complex64) * phase
-            
-            vis_bin = cell_size**2 * pytorch_finufft.functional.finufft_type2(
-                points, x_mod, isign=1, modeord=0
-            )
-            
-            model_vis[idx] = vis_bin # In-place write
-            # print_gpu_memory(device)
-
-            del vis_bin, x_mod, phase, points, u_bin, v_bin
-            torch.cuda.empty_cache()
-        
-        return model_vis
         
 
     def objective(self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, sigma, fftsd, tapper,
@@ -307,10 +244,6 @@ class ClassicIViS(BaseModel):
             vis_imag = torch.from_numpy(data.imag[idmin:idmin+idmax]).to(device)
             sig = torch.from_numpy(sigma[idmin:idmin+idmax]).to(device)
 
-            # if self.wstack:
-            #     model_vis = self.forward_beam_wstacked(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size,
-            #                                            grid_array, self.Nw)
-            # else:
             model_vis = self.forward_beam(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array)
                             
             residual_real = (model_vis.real - vis_real) / sig
