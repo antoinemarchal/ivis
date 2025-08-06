@@ -79,7 +79,7 @@ image_processor = Imager(vis_data,      # visibilities
                          device,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
 # choose model
-model = ClassicIViS(lambda_r, wstack=True, Nw=3)
+model = ClassicIViS(lambda_r, Nw=5)
 # get image
 base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 

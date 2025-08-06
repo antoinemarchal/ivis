@@ -19,28 +19,22 @@ class ClassicIViS(BaseModel):
     optimization via L-BFGS-B. The model supports CPU and GPU backends.
     """
             
-    def __init__(self, lambda_r=1, wstack=False, Nw=None):
+    def __init__(self, lambda_r=1, Nw=None):
         self.lambda_r = lambda_r
         if self.lambda_r == 0:
             logger.warning("lambda_r = 0 - No spatial regularization.")
             
-        self.wstack = wstack
-        
-        if not self.wstack:
+        if Nw is None or Nw <= 1:
+            logger.info("Nw <= 1 or None, using flat-sky NUFFT (no w-stacking).")
             self.Nw = None
-            logger.info("No w stacking")
         else:
-            # Default Nw if not provided
-            Nw = Nw if Nw is not None else 4
-            
-            # Make Nw odd
+        # Force odd Nw
             if Nw % 2 == 0:
                 Nw += 1
                 logger.info(f"Adjusted Nw to closest odd number: {Nw}")
-                
             self.Nw = Nw
-            logger.info(f"Using w stacking with Nw = {self.Nw}")
-
+            logger.info(f"Using w-stacking with Nw = {self.Nw}")
+                    
             
     def loss(self, x, shape, device, **kwargs):
         """
@@ -70,7 +64,17 @@ class ClassicIViS(BaseModel):
         L = self.objective(x=u, device=device, **kwargs)
         grad = u.grad.cpu().numpy().astype(x.dtype)
         
-        logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
+        if torch.device(device).type == 'cuda':
+            allocated = torch.cuda.memory_allocated(device) / 1024**2
+            reserved  = torch.cuda.memory_reserved(device)  / 1024**2
+            total     = torch.cuda.get_device_properties(device).total_memory / 1024**2
+            logger.info(
+                f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)} | "
+                f"GPU: {allocated:.2f} MB allocated, {reserved:.2f} MB reserved, {total:.2f} MB total"
+            )
+        else:
+            logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
+            
         return L.item(), grad.ravel()
 
     
@@ -104,6 +108,76 @@ class ClassicIViS(BaseModel):
             model_vis[idmin:idmax] = vis
             
         return model_vis.detach().cpu().numpy()
+
+
+    def forward_beam(self, x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array):
+        """
+        Simulate model visibilities for a single beam.
+        Supports w-stacking if self.Nw is enabled.
+        """
+        idmin = idmina[i]
+        idmax = idmaxa[i]
+        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
+        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
+        wwa = torch.from_numpy(ww[idmin:idmin+idmax]).to(device)
+        pba = torch.from_numpy(pb[i]).to(device)
+        grid = torch.from_numpy(grid_array[i]).to(device)
+        
+        # Prepare 2D (l, m) coordinates in radians
+        H, W = pba.shape
+        delta_rad = cell_size * np.pi / (180 * 3600)
+        lx = torch.linspace(-W/2, W/2 - 1, W, device=device) * delta_rad
+        ly = torch.linspace(-H/2, H/2 - 1, H, device=device) * delta_rad
+        l, m = torch.meshgrid(lx, ly, indexing='xy')
+        r2 = l**2 + m**2
+        
+        # Reproject input image
+        input_tensor = format_input_tensor(x).float().to(device)
+        reprojected_tensor = torch.nn.functional.grid_sample(
+            input_tensor, grid, mode='bilinear', align_corners=True
+        ).squeeze()
+        x_pb = reprojected_tensor * pba  # real-valued
+
+        # === Flat-sky version ===
+        if self.Nw is None:
+            points = torch.stack([-vva, uua], dim=0)
+            c = x_pb.to(torch.complex64)
+            model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(
+                points, c, isign=1, modeord=0
+            )
+            return model_vis
+        
+        # === W-stacked version ===
+        model_vis = torch.empty_like(uua, dtype=torch.complex64)
+        
+        # Bin visibilities by w
+        w_edges = torch.linspace(wwa.min(), wwa.max(), self.Nw + 1, device=device)
+        w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
+        bin_ids = torch.bucketize(wwa, w_edges) - 1
+        bin_ids = torch.clamp(bin_ids, 0, self.Nw - 1)
+        
+        for j in range(self.Nw):
+            idx = (bin_ids == j).nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                continue
+            
+            u_bin = uua[idx]
+            v_bin = vva[idx]
+            points = torch.stack([-v_bin, u_bin], dim=0)
+            
+            phase = torch.exp(1j * np.pi * w_centers[j] * r2)
+            x_mod = x_pb.to(torch.complex64) * phase
+            
+            vis_bin = cell_size**2 * pytorch_finufft.functional.finufft_type2(
+                points, x_mod, isign=1, modeord=0
+            )
+            
+            model_vis[idx] = vis_bin
+            
+            del vis_bin, x_mod, phase, points, u_bin, v_bin, idx
+            torch.cuda.empty_cache()
+            
+        return model_vis
 
 
     def forward_beam_wstacked(self, x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array, Nw):
@@ -141,9 +215,9 @@ class ClassicIViS(BaseModel):
         bin_ids = torch.clamp(bin_ids, 0, Nw - 1)
         
         # Track visibilities and their original positions
-        model_vis_list = []
-        vis_idx_order = []
-         
+
+        model_vis = torch.empty_like(uua, dtype=torch.complex64)
+
         for j in range(Nw):
             idx = (bin_ids == j).nonzero(as_tuple=True)[0]
             if idx.numel() == 0:
@@ -153,80 +227,21 @@ class ClassicIViS(BaseModel):
             v_bin = vva[idx]
             points = torch.stack([-v_bin, u_bin], dim=0)
             
-            # Correct phase sign for flat-sky approximation
             phase = torch.exp(1j * np.pi * w_centers[j] * r2)
             x_mod = x_pb.to(torch.complex64) * phase
             
-            # NUFFT for this bin
             vis_bin = cell_size**2 * pytorch_finufft.functional.finufft_type2(
                 points, x_mod, isign=1, modeord=0
             )
             
-            model_vis_list.append(vis_bin)
-            vis_idx_order.append(idx)
-            
-        # Concatenate visibilities and restore original ordering
-        model_vis = torch.cat(model_vis_list, dim=0)
-        original_idx = torch.cat(vis_idx_order, dim=0)
-        model_vis_sorted = torch.empty_like(model_vis)
-        model_vis_sorted[original_idx] = model_vis
-        
-        return model_vis_sorted
-    
-    
-    def forward_beam(self, x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array):
-        """
-        Simulate model visibilities for a single beam (low-memory NUFFT implementation).
-        
-        This function performs primary beam multiplication, reprojection to the observed
-        coordinate grid, and NUFFT transformation to compute the model visibilities
-        corresponding to a specific pointing (beam index `i`).
-        
-        Parameters
-        ----------
-        x : torch.Tensor
-            2D image tensor (typically shape H×W).
-        i : int
-            Beam index (pointing).
-        data : np.ndarray
-            Observed visibilities (unused here, included for interface symmetry).
-        uu, vv : np.ndarray
-            Full arrays of spatial frequencies in rad/pixel.
-        pb : list[np.ndarray]
-            List of primary beams, one per pointing.
-        idmina, idmaxa : list[int]
-            Lists defining the start index and number of visibilities per beam.
-        device : str or torch.device
-            Target device ("cpu" or "cuda").
-        cell_size : float
-            Pixel size in arcseconds.
-        grid_array : list[np.ndarray]
-            List of interpolation grids per beam for reprojection.
-        
-        Returns
-        -------
-        model_vis : torch.Tensor (complex64)
-            Simulated model visibilities for beam `i` as a complex tensor on `device`.
-        """
-        idmin = idmina[i]
-        idmax = idmaxa[i]
-        uua = torch.from_numpy(uu[idmin:idmin+idmax]).to(device)
-        vva = torch.from_numpy(vv[idmin:idmin+idmax]).to(device)
-        pba = torch.from_numpy(pb[i]).to(device)
-        grid = torch.from_numpy(grid_array[i]).to(device)
-        
-        points = torch.stack([-vva, uua], dim=0)
-        input_tensor = format_input_tensor(x).float().to(device)
-        reprojected_tensor = torch.nn.functional.grid_sample(
-            input_tensor, grid, mode='bilinear', align_corners=True
-        ).squeeze()
-        reproj = reprojected_tensor * pba
-        c = reproj.to(torch.complex64)
-        
-        model_vis = cell_size**2 * pytorch_finufft.functional.finufft_type2(points, c, isign=1, modeord=0)
+            model_vis[idx] = vis_bin # In-place write
+            # print_gpu_memory(device)
 
+            del vis_bin, x_mod, phase, points, u_bin, v_bin
+            torch.cuda.empty_cache()
+        
         return model_vis
-    
+        
 
     def objective(self, x, beam, fftbeam, data, uu, vv, ww, pb, idmina, idmaxa, sigma, fftsd, tapper,
                   lambda_sd, fftkernel, cell_size, grid_array, device, beam_workers=4, verbose=False):
@@ -292,11 +307,11 @@ class ClassicIViS(BaseModel):
             vis_imag = torch.from_numpy(data.imag[idmin:idmin+idmax]).to(device)
             sig = torch.from_numpy(sigma[idmin:idmin+idmax]).to(device)
 
-            if self.wstack:
-                model_vis = self.forward_beam_wstacked(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size,
-                                                       grid_array, self.Nw)
-            else:
-                model_vis = self.forward_beam(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array)
+            # if self.wstack:
+            #     model_vis = self.forward_beam_wstacked(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size,
+            #                                            grid_array, self.Nw)
+            # else:
+            model_vis = self.forward_beam(x, i, data, uu, vv, ww, pb, idmina, idmaxa, device, cell_size, grid_array)
                             
             residual_real = (model_vis.real - vis_real) / sig
             residual_imag = (model_vis.imag - vis_imag) / sig
@@ -305,11 +320,13 @@ class ClassicIViS(BaseModel):
             L = 0.5 * J
             L.backward(retain_graph=True)
             loss_scalar += L.item()
-            
+
+            del model_vis, residual_real, residual_imag, L, J, vis_real, vis_imag, sig
             torch.cuda.empty_cache()
+            
             if verbose:
                 print_gpu_memory(device)
-                
+            
         # ----------------------------
         # ---- Single Dish loss ------
         # ----------------------------
