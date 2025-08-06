@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
     #____________________________________________________________________________
     #user parameters
-    max_its = 1
+    max_its = 20
     lambda_sd = 0#10
     lambda_r = 20
     device = 0 #0 is GPU and "cpu" is CPU
@@ -80,13 +80,12 @@ if __name__ == '__main__':
                              init_params,   # array to start this optimization with 
                              max_its,       # maximum number of iterations
                              lambda_sd,     # hyper-parameter single-dish
-                             lambda_r,      # hyper-parameter regularization
                              positivity,    # impose a positivity constaint
                              device,        # device: 0 is GPU; "cpu" is CPU
                              beam_workers
                              )
     #get image
-    model = ClassicIViS()
+    model = ClassicIViS(lambda_r=1, wstack=True, Nw=3)
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
     #write on disk

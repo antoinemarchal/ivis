@@ -67,7 +67,7 @@ class Imager:
         Number of workers for parallel beam convolution.
     """
         
-    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, lambda_r, positivity, device, beam_workers):
+    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr, init_params, max_its, lambda_sd, positivity, device, beam_workers):
         super(Imager, self).__init__()
         self.vis_data = vis_data
         self.pb = pb
@@ -78,14 +78,12 @@ class Imager:
         self.init_params = init_params
         self.max_its = max_its
         self.lambda_sd = lambda_sd
-        self.lambda_r = lambda_r
         self.positivity = positivity
         self.beam_workers = beam_workers
         logger.info("[Initialize Imager        ]")
         logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
 
         # Logger for hyper-parameters
-        if self.lambda_r == 0: logger.warning("lambda_r = 0 - No spatial regularization.")
         if self.lambda_sd == 0: logger.warning("lambda_sd = 0 - No short spacing correction (ignoring single dish data).")
 
         # Check if CUDA is found on the machine and fall back on CPU otherwise
@@ -291,7 +289,7 @@ class Imager:
         data_c64 = np.asarray(self.vis_data.data, dtype=np.complex64)
         uu_f32 = np.asarray(uu_radpix, dtype=np.float32)
         vv_f32 = np.asarray(vv_radpix, dtype=np.float32)
-        ww_f32 = np.asarray(ww_radpix, dtype=np.float32)
+        ww_f32 = np.asarray(self.vis_data.ww, dtype=np.float32) #Not radpix - original
         pb_f32 = np.asarray(self.pb, dtype=np.float32)
         idmin_i32 = np.asarray(idmin, dtype=np.int32)
         idmax_i32 = np.asarray(idmax, dtype=np.int32)
@@ -300,13 +298,34 @@ class Imager:
         tapper_f32 = np.asarray(tapper, dtype=np.float32)
         fftkernel_f32 = np.asarray(fftkernel, dtype=np.float32)
         grid_f32 = np.asarray(self.grid, dtype=np.float32)
-        
-        opt_args = (
-            beam_f32, fftbeam_f32, data_c64, uu_f32, vv_f32, ww_f32,
-            pb_f32, idmin_i32, idmax_i32, self.device, sigma_f32, fftsd_c64,
-            tapper_f32, self.lambda_sd, self.lambda_r, fftkernel_f32, shape,
-            cell_size.value, grid_f32, self.beam_workers
+
+        # ---- Precompute params ----
+        params = dict(
+            beam=beam_f32,
+            fftbeam=fftbeam_f32,
+            data=data_c64,
+            uu=uu_f32,
+            vv=vv_f32,
+            ww=ww_f32,
+            pb=pb_f32,
+            idmina=idmin_i32,
+            idmaxa=idmax_i32,
+            sigma=sigma_f32,
+            fftsd=fftsd_c64,
+            tapper=tapper_f32,
+            lambda_sd=self.lambda_sd,
+            fftkernel=fftkernel_f32,
+            cell_size=cell_size.value,
+            grid_array=grid_f32,
+            beam_workers=self.beam_workers
         )
+
+        # ---- Define closure for optimization ----
+        def objective_flat(x):
+            return model.loss(x, shape=shape, device=device, **params)
+        
+        shape = self.init_params.shape
+        device = self.device
         
         options = {
             'maxiter': self.max_its,
@@ -322,11 +341,10 @@ class Imager:
             logger.error("Provided model does not implement a `.loss(x, ...)` method compatible with scipy.optimize.minimize.")
             raise TypeError("Invalid model type.")
 
-        # Run optimization
+        # ---- Run optimizer ----
         opt_output = optimize.minimize(
-            model.loss,
+            objective_flat,
             params_f32,
-            args=opt_args,
             jac=True,
             tol=1.e-8,
             bounds=bounds,
