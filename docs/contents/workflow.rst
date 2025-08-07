@@ -1,5 +1,5 @@
-Workflow
-========
+IViS Workflow
+=============
 
 .. raw:: html
 

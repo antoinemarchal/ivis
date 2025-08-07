@@ -67,7 +67,8 @@ Documentation
    :maxdepth: 2
    :caption: Contents:
 
-   workflow
+   contents/workflow
+   contents/memos
 
 
 .. toctree::
