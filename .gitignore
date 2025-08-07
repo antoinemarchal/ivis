@@ -8,10 +8,9 @@ docs/.coverage
 docs/tutorials/.ipynb_checkpoints/
 docs/tutorials/data_tutorials
 docs/tutorials/wph_noise.ipynb
+docs/tutorials/models/gmfs.rst
 
 # ivis
-ivis/imager_rrl.py
-ivis/utils/mod_loss_rrl.py
 ivis/jnk
 
 # Python artifacts
