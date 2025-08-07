@@ -7,7 +7,6 @@ docs/.DS_Store
 docs/.coverage
 docs/tutorials/.ipynb_checkpoints/
 docs/tutorials/data_tutorials
-docs/tutorials/models/gmfs.rst
 
 # ivis
 ivis/jnk
