@@ -228,21 +228,19 @@ def read_ms_block_I(
                     else:
                         SIGMA = T.getcol("SIGMA")
 
-        # ---- row/baseline mask in METERS (conservative across selected channels) ----
-        bl_m = np.sqrt((UVW**2).sum(axis=1))
+        # ---- row mask: only autocorr removal; no uvmin/uvmax here ----
         row_mask = np.ones(UVW.shape[0], dtype=bool)
         if not keep_autocorr:
             row_mask &= (A1 != A2)
-        row_mask &= (bl_m >= uvmin_m) & (bl_m <= uvmax_m)
-
+            
         UVW  = UVW[row_mask]
-        DATA = DATA[row_mask]                # (nrow2, nchan, npol)
+        DATA = DATA[row_mask]
         FLAG = FLAG[row_mask]
         if has_ws:
-            W = W[row_mask]                  # (nrow2, nchan, npol)
+            W = W[row_mask]
         else:
-            SIGMA = SIGMA[row_mask]          # (nrow2, npol)
-
+            SIGMA = SIGMA[row_mask]
+    
         nrow2, nchan_chk, npol = DATA.shape
         if nchan_chk != nchan:
             raise RuntimeError("Channel selection mismatch after masking.")
@@ -270,6 +268,23 @@ def read_ms_block_I(
                 row_sig0 = SIGMA[:, p0]; row_sig1 = SIGMA[:, p1]
                 row_sI   = 0.5 * np.sqrt(row_sig0**2 + row_sig1**2)
                 sI = np.repeat(row_sI[:, None], nchan, 1)
+
+        # --- per-channel UV mask in wavelengths (matches old behavior) ---
+        # baseline length in meters for each (remaining) row
+        bl_m = np.sqrt((UVW**2).sum(axis=1))                  # (nrow2,)
+        
+        # convert to wavelengths per channel
+        bl_lam = bl_m[:, None] * (frequency[None, :] / c_light.value)  # (nrow2, nchan)
+        
+        in_range = (bl_lam >= uvmin) & (bl_lam <= uvmax)      # (nrow2, nchan)
+        
+        # flag vis that are out-of-range for that channel
+        fI |= ~in_range
+        
+        # (optional but nice): make those samples weightless
+        sI[~in_range] = np.inf
+        # (optional): zero their vis (won’t be used once flagged anyway)
+        # I[~in_range] = 0
 
         # ---- to channel-major for this beam ----
         I_cb  = I.transpose(1, 0).astype(np.complex64)   # (nchan, nvis_b)

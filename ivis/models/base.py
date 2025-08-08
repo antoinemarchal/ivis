@@ -27,19 +27,19 @@ class BaseModel(ABC):
         """
         pass
 
-    @abstractmethod
-    def forward(self, x: np.ndarray, *args) -> np.ndarray:
-        """
-        Simulate model visibilities from image parameters.
+    # @abstractmethod
+    # def forward(self, x: np.ndarray, *args) -> np.ndarray:
+    #     """
+    #     Simulate model visibilities from image parameters.
 
-        Parameters
-        ----------
-        x : np.ndarray
-            Sky model or parameters (flattened or shaped).
+    #     Parameters
+    #     ----------
+    #     x : np.ndarray
+    #         Sky model or parameters (flattened or shaped).
 
-        Returns
-        -------
-        model_vis : np.ndarray
-            Predicted complex visibilities.
-        """
-        pass
+    #     Returns
+    #     -------
+    #     model_vis : np.ndarray
+    #         Predicted complex visibilities.
+    #     """
+    #     pass

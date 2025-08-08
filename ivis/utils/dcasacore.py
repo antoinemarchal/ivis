@@ -301,7 +301,7 @@ def read_channel_casacore(ms_path, uvmin, uvmax, target_frequency, target_channe
     # Temporarily suppress overflow warnings
     np.seterr(over='ignore')    
     # Your operation that causes the warning
-    sigma_i = np.sqrt(sigma[..., 0]**2 + sigma[..., -1]**2)
+    sigma_i = 0.5 * np.sqrt(sigma[..., 0]**2 + sigma[..., -1]**2)
     # Restore the default error handling (optional, but good practice)
     np.seterr(over='warn')  # 'warn' is the default setting
     

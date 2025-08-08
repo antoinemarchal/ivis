@@ -32,6 +32,158 @@ from pathlib import Path
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
 
+class Imager2:
+    """
+    GPU-accelerated imager for joint deconvolution of interferometric
+    and single-dish data, using the new VisIData dataclass.
+    """
+
+    def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr,
+                 init_params, max_its, lambda_sd, positivity, device,
+                 beam_workers):
+        self.vis_data = vis_data
+        self.pb = pb
+        self.grid = grid
+        self.sd = sd
+        self.beam_sd = beam_sd
+        self.hdr = hdr
+        self.init_params = init_params
+        self.max_its = max_its
+        self.lambda_sd = lambda_sd
+        self.positivity = positivity
+        self.beam_workers = beam_workers
+
+        logger.info("[Initialize Imager2       ]")
+        logger.info(f"Number of iterations: {self.max_its}")
+
+        if self.lambda_sd == 0:
+            logger.warning("lambda_sd = 0 — No short-spacing correction.")
+
+        self.device = self.get_device(device)
+
+    @staticmethod
+    def get_device(user_device):
+        """Pick CPU or GPU."""
+        if user_device == 0:
+            if torch.cuda.is_available():
+                device = torch.device("cuda:0")
+                logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+            else:
+                logger.warning("CUDA not available, using CPU.")
+                device = torch.device("cpu")
+        else:
+            device = torch.device("cpu")
+            logger.info("Using CPU.")
+        return device
+
+    def forward_model(self, model):
+        """
+        Compute model visibilities from the current image parameters
+        using the given model's forward operator.
+        """
+        if model is None:
+            raise ValueError("Must pass a model instance to `forward_model()`.")
+
+        cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+
+        pb_native = np.asarray(self.pb, dtype=np.float32)
+        grid_native = np.asarray(self.grid, dtype=np.float32)
+
+        return model.forward(
+            x=self.init_params,
+            vis_data=self.vis_data,
+            pb=pb_native,
+            device=self.device,
+            cell_size=cell_size.value,
+            grid_array=grid_native
+        )
+
+    def process(self, model=None, units="Jy/arcsec^2", disk=False):
+        """
+        Run imaging optimization.
+        """
+        if model is None:
+            raise ValueError("Must pass a model instance to `process()`.")
+        if not hasattr(model, "loss"):
+            raise TypeError("Model must implement `.loss()`.")
+
+        # --- Image/grid params ---
+        cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+        shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
+        tapper = dutils.apodize(0.98, shape)
+
+        # --- FFT beam for reg ---
+        kernel_map = dutils.laplacian(shape)
+        fftkernel = abs(fft2(kernel_map))
+
+        bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
+        beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
+        fftbeam = abs(fft2(beam))
+
+        # --- FFT single-dish ---
+        fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).numpy()
+
+        # --- Bounds ---
+        param_shape = self.init_params.shape
+        if self.positivity:
+            bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
+        else:
+            bounds = dutils.ROHSA_bounds(param_shape, lb_amp=-np.inf, ub_amp=np.inf)
+
+        # --- Precompute params dict ---
+        params = dict(
+            vis_data=self.vis_data,
+            pb=np.asarray(self.pb, dtype=np.float32),
+            fftbeam=np.asarray(fftbeam, dtype=np.float32),
+            fftsd=np.asarray(fftsd, dtype=np.complex64),
+            tapper=np.asarray(tapper, dtype=np.float32),
+            lambda_sd=self.lambda_sd,
+            fftkernel=np.asarray(fftkernel, dtype=np.float32),
+            cell_size=cell_size.value,
+            grid_array=np.asarray(self.grid, dtype=np.float32),
+            beam_workers=self.beam_workers
+        )
+
+        device = self.device
+
+        # --- Closure for optimizer ---
+        def objective_flat(x):
+            # Pass through **params so loss() sees vis_data, pb, fftbeam, etc.
+            return model.loss(x, shape=param_shape, device=device, **params)
+
+        # --- Optimize ---
+        options = dict(maxiter=self.max_its, maxfun=int(1e6), iprint=25)
+
+        logger.info("Starting L-BFGS-B optimization...")
+        opt_output = optimize.minimize(
+            objective_flat,
+            self.init_params.ravel().astype(np.float32),
+            jac=True,
+            tol=1e-8,
+            bounds=bounds,
+            method="L-BFGS-B",
+            options=options
+        )
+
+        result = np.reshape(opt_output.x, self.init_params.shape)
+        logger.warning("Multiply by 2 for ASKAP if needed.")
+
+        # --- Unit conversion ---
+        if units == "Jy/arcsec^2":
+            return result
+        elif units == "Jy/beam":
+            beam_r = Beam(4.2857 * cell_size, 4.2857 * cell_size, 1.e-12 * u.deg)
+            return result * beam_r.sr.to(u.arcsec**2).value
+        elif units == "K":
+            nu = self.vis_data.frequency[0] * u.Hz
+            beam_r = Beam(3 * cell_size, 3 * cell_size, 1.e-12 * u.deg)
+            result_Jy = result * beam_r.sr.to(u.arcsec**2).value
+            return (result_Jy * u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
+        else:
+            logger.error("Unknown unit type.")
+            return result
+        
+
 # Imager class    
 class Imager:
     """

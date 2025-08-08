@@ -34,10 +34,10 @@ shape = (target_header["NAXIS2"],target_header["NAXIS1"])
 #create data processor
 data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
 
-# pre-compute pb and interpolation grids — this can be commented after first compute
-logger.disabled = True
-data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits") 
-logger.disabled = False
+# # pre-compute pb and interpolation grids — this can be commented after first compute
+# logger.disabled = True
+# data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits") 
+# logger.disabled = False
 
 pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb.fits", fitsname_grid="grid_interp.fits")
 
@@ -47,7 +47,7 @@ sd = np.zeros(shape)
 beam_sd = Beam(1*u.deg, 1*u.deg, 1.e-12*u.deg)
 
 #Read data
-vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
+vis_data2 = data_processor.read_vis_from_scratch(uvmin=0, uvmax=np.inf,
                                                 target_frequency=None,
                                                 target_channel=0,
                                                 extension=".ms",
@@ -66,7 +66,7 @@ positivity = False
 init_params = np.zeros((1,shape[0],shape[1]))
 
 # create image processor
-image_processor = Imager(vis_data,      # visibilities
+image_processor = Imager(vis_data2,      # visibilities
                          pb,            # array of primary beams
                          grid,          # array of interpolation grids
                          sd,            # single dish data in unit of Jy/arcsec^2
@@ -79,8 +79,8 @@ image_processor = Imager(vis_data,      # visibilities
                          device,        # device: 0 is GPU; "cpu" is CPU
                          beam_workers=1)
 # choose model
-model = ClassicIViS(lambda_r, Nw=5)
+model = ClassicIViS(lambda_r, Nw=0)
 # get image
-base = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
+base2 = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
 
