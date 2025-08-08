@@ -32,7 +32,7 @@ from pathlib import Path
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
 
-class Imager2:
+class Imager3D:
     """
     GPU-accelerated imager for joint deconvolution of interferometric
     and single-dish data, using the new VisIData dataclass.
@@ -53,11 +53,17 @@ class Imager2:
         self.positivity = positivity
         self.beam_workers = beam_workers
 
-        logger.info("[Initialize Imager2       ]")
-        logger.info(f"Number of iterations: {self.max_its}")
+        logger.info("[Initialize Imager3D       ]")
+        logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
 
         if self.lambda_sd == 0:
             logger.warning("lambda_sd = 0 — No short-spacing correction.")
+            
+        if self.positivity == True:
+            logger.info('Optimizer bounded - Positivity == True')
+            logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
+        else:
+            logger.info('Optimizer not bounded - Positivity == False')
 
         self.device = self.get_device(device)
 
@@ -69,7 +75,7 @@ class Imager2:
                 device = torch.device("cuda:0")
                 logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
             else:
-                logger.warning("CUDA not available, using CPU.")
+                logger.warning("CUDA not available, falling back on CPU.")
                 device = torch.device("cpu")
         else:
             device = torch.device("cpu")
@@ -154,7 +160,7 @@ class Imager2:
         # --- Optimize ---
         options = dict(maxiter=self.max_its, maxfun=int(1e6), iprint=25)
 
-        logger.info("Starting L-BFGS-B optimization...")
+        logger.info("Starting optimisation (using LBFGS-B)")
         opt_output = optimize.minimize(
             objective_flat,
             self.init_params.ravel().astype(np.float32),

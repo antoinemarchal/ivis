@@ -14,8 +14,8 @@ import pytorch_finufft
 from ivis.io import DataProcessor
 from ivis.logger import logger
 from ivis.utils import dutils, mod_loss, fourier
-from ivis.models import ClassicIViSNew, TWiSTModel
-from ivis.imager import Imager2 
+from ivis.models import ClassicIViS3D, TWiSTModel
+from ivis.imager import Imager3D 
 
 plt.ion()
 
@@ -56,8 +56,8 @@ beam_sd = Beam(1 * u.deg, 1 * u.deg, 1.e-12 * u.deg)
 vis_data = data_processor.read_vis_visidata(
     uvmin=0.0,
     uvmax=np.inf,
-    target_channel=0,
-    # chan_sel=slice(0, 1),
+    # target_channel=0,
+    chan_sel=slice(0, 1),
     keep_autocorr=False,
     prefer_weight_spectrum=False,
 )
@@ -75,7 +75,7 @@ init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
 # -------------------
 # Create Imager2
 # -------------------
-image_processor = Imager2(
+image_processor = Imager3D(
     vis_data=vis_data,
     pb=pb,
     grid=grid,
@@ -93,7 +93,7 @@ image_processor = Imager2(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViSNew(lambda_r=lambda_r, Nw=0)
+model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 
 # -------------------
 # Run optimization

@@ -195,6 +195,7 @@ def read_ms_block_I(
     I_list=[]; sI_list=[]; fI_list=[]
 
     for ms in ms_list:
+        logger.info(f"    [MS] Reading: {ms}") 
         centers.append(_phasecenter(ms))
 
         with _quiet_tables():
@@ -354,6 +355,7 @@ def read_ms_blocks_I(
     # Load each block independently with your optimized reader
     blocks: list[VisIData] = []
     for bdir in block_dirs:
+        logger.info(f"[BLOCK] Loading block from: {bdir}")
         vi = read_ms_block_I(
             bdir,
             uvmin=uvmin,
@@ -590,6 +592,7 @@ if __name__ == "__main__":
 
 
     # concat
+    print("Test #Concat all")
     vis_all = read_ms_blocks_I(
         ms_root=ms_dir,                 # main dir with subdirs block1/, block2/, ...
         uvmin=20.0,
@@ -615,6 +618,7 @@ if __name__ == "__main__":
     #     print("block", bi, vis.data_I.shape)
 
     # Option A — Stream slabs per block (moderate RAM, simple)
+    print("Test # Option A — Stream slabs per block (moderate RAM, simple)")
     for bi, bdir, c0, c1, visI in iter_blocks_channel_slabs(
         ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,8), slab=4
     ):
@@ -622,6 +626,7 @@ if __name__ == "__main__":
         del visI
 
     # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)
+    print("Test # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)")
     for bi, c, b, I, sI, uu, vv, ww in iter_blocks_chan_beam_via_slabs(
         ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,8), slab=4
     ):

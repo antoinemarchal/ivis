@@ -10,7 +10,10 @@ from ivis.models.utils.tensor_ops import format_input_tensor
 from ivis.models.utils.gpu import print_gpu_memory
 
 
-class ClassicIViSNew(BaseModel):
+#------------------------------------------
+#------------ ClassiCIViS3D ---------------
+#------------------------------------------
+class ClassicIViS3D(BaseModel):
     def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True):
         self.lambda_r = lambda_r
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
@@ -99,7 +102,7 @@ class ClassicIViSNew(BaseModel):
                 continue
             
             points = torch.stack([-vva[idx], uua[idx]], dim=0)
-            phase = torch.exp(1j * np.pi * w_centers[j] * r2)             # r^2 uses radians
+            phase = torch.exp(1j * np.pi * w_centers[j] * r2) # r^2 uses radians
             x_mod = x_pb.to(torch.complex64) * phase
             
             vis_bin = (cell_size**2) * pytorch_finufft.functional.finufft_type2(
@@ -176,6 +179,9 @@ class ClassicIViSNew(BaseModel):
         return torch.tensor(loss_scalar)
 
 
+#------------------------------------------
+#------------ ClassiCIViS -----------------
+#------------------------------------------
 class ClassicIViS(BaseModel):
     """
     Classic IViS imaging model using visibility-domain loss and regularization.

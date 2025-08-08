@@ -327,65 +327,6 @@ class DataProcessor:
             logger.error("Provide 'single' or 'multiple' for blocks.")
             sys.exit()
 
-    # def read_vis_from_scratch(self, uvmin=0, uvmax=7000, chunks=1.e7, target_frequency=None, target_channel=0, extension=".ms", blocks="single", max_workers=1):
-    #     if blocks == 'single':
-    #         logger.info("Processing single scheduling block.")
-
-    #         # Get filenames of all ms files
-    #         msl = sorted(glob.glob(os.path.join(self.path_ms, f"*{extension}")))
-    #         logger.info("Number of MS files = {}".format(len(msl)))
-
-    #         if max_workers > 1:
-    #             logger.info("Processing read ms files in parallel.")
-    #             vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel,
-    #                                          max_workers)
-    #         else:
-    #             logger.info("Processing read ms files with single thread.")
-    #             vis_data = dcasacore.readmsl_no_parallel(msl, uvmin, uvmax, target_frequency,
-    #                                                      target_channel)
-    #         return vis_data
-
-    #     elif blocks == 'multiple':
-    #         logger.info("Processing multiple scheduling blocks.")
-
-    #         subdirs = [d for d in sorted(os.listdir(self.path_ms)) if os.path.isdir(os.path.join(self.path_ms, d))]
-    #         if not subdirs:
-    #             logger.error("No subdirectories found in the path.")
-    #             sys.exit()
-
-    #         all_vis_data = []
-
-    #         for subdir in subdirs:
-    #             subdir_path = os.path.join(self.path_ms, subdir)
-    #             msl = sorted(glob.glob(os.path.join(subdir_path, f"*{extension}")))
-
-    #             if not msl:
-    #                 logger.warning(f"No MS files found in {subdir_path}, skipping...")
-    #                 continue
-
-    #             if max_workers > 1:
-    #                 logger.info("Processing read ms files in parallel.")
-    #                 vis_data = dcasacore.readmsl(msl, uvmin, uvmax, target_frequency, target_channel,
-    #                                              max_workers)
-    #             else:
-    #                 logger.info("Processing read ms files with single thread.")
-    #                 vis_data = dcasacore.readmsl_no_parallel(msl, uvmin, uvmax, target_frequency,
-    #                                              target_channel)
-                    
-    #             all_vis_data.append(vis_data)
-
-    #         if not all_vis_data:
-    #             logger.error("No valid data found across subdirectories.")
-    #             sys.exit()
-
-    #         # Concatenate the data
-    #         concatenated_data = self.concatenate_vis_data(all_vis_data)
-    #         return concatenated_data
-
-    #     else:
-    #         logger.error("Provide 'single' or 'multiple' for blocks.")
-    #         sys.exit()
-
 
     @staticmethod
     def concatenate_vis_data(vis_data_list):
