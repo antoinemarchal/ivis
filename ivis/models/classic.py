@@ -134,7 +134,7 @@ class ClassicIViS3D(BaseModel):
 
         # --- χ² over all (chan, beam) ---
         for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
-            x_chan = x[c]                                     # (H,W)
+            x_chan = x[c] # (H,W)
             model_vis = self.forward_beam(x_chan, pb_list[b], grid_list[b], uu, vv, ww, cell_size, device)
 
             # match old pipeline: data were conjugated

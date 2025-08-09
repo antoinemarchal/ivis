@@ -182,8 +182,8 @@ class Imager3D:
                 line_search_fn="strong_wolfe",
                 tolerance_grad=1e-8,
                 tolerance_change=0.0,
-            )
-
+            )                
+                
             def closure():
                 opt.zero_grad(set_to_none=True)
                 loss = model.objective(
@@ -191,7 +191,19 @@ class Imager3D:
                     device=device,
                     **params
                 )
-                logger.info(f"[PID {os.getpid()}] Iter cost: {loss.item():.6e} (device: {device})")
+                if device.type == "cuda":
+                    allocated = torch.cuda.memory_allocated(device) / 1024**2
+                    reserved  = torch.cuda.memory_reserved(device) / 1024**2
+                    total     = torch.cuda.get_device_properties(device).total_memory / 1024**2
+                    logger.info(
+                        f"[PID {os.getpid()}] Iter cost: {loss.item():.6e} "
+                        f"(device: {device}) | GPU: {allocated:.2f} MB alloc, "
+                        f"{reserved:.2f} MB reserved, {total:.2f} MB total"
+                    )
+                else:
+                    logger.info(
+                        f"[PID {os.getpid()}] Iter cost: {loss.item():.6e} (device: {device})"
+                    )
                 return loss
 
             import time

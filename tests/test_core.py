@@ -10,9 +10,9 @@ import torch
 from tqdm import tqdm as tqdm
 
 from ivis.io import DataProcessor
-from ivis.imager import Imager
+from ivis.imager import Imager3D
 from ivis import logger
-from ivis.models import ClassicIViS
+from ivis.models import ClassicIViS3D
 
 import marchalib as ml #remove
 
@@ -38,14 +38,23 @@ if __name__ == '__main__':
     # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits") 
     
     #READ DATA
-    #read packaged visibilities from "pathout" directory
-    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-                                                    target_frequency=None,
-                                                    target_channel=0,
-                                                    extension=".ms",
-                                                    blocks='single',
-                                                    max_workers=4)
+    # #read packaged visibilities from "pathout" directory
+    # vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+    #                                                 target_frequency=None,
+    #                                                 target_channel=0,
+    #                                                 extension=".ms",
+    #                                                 blocks='single',
+    #                                                 max_workers=4)
 
+    vis_data = data_processor.read_vis_visidata(
+        uvmin=0.0,
+        uvmax=7000,
+        # target_channel=0,
+        chan_sel=slice(0, 1),
+        keep_autocorr=False,
+        prefer_weight_spectrum=False,
+    )
+    
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits")
     
     # #read single-dish data from "pathout" directory
@@ -69,23 +78,23 @@ if __name__ == '__main__':
     beam_workers = 1
 
     #create image processor
-    init_params = np.zeros(shape)
+    init_params = np.zeros((1,shape[0],shape[1]))
     
-    image_processor = Imager(vis_data,      # visibilities
-                             pb,            # array of primary beams
-                             grid,          # array of interpolation grids
-                             sd,            # single dish data in unit of Jy/arcsec^2
-                             beam_sd,       # beam of single-dish data in radio_beam format
-                             target_header, # header on which to image the data
-                             init_params,   # array to start this optimization with 
-                             max_its,       # maximum number of iterations
-                             lambda_sd,     # hyper-parameter single-dish
-                             positivity,    # impose a positivity constaint
-                             device,        # device: 0 is GPU; "cpu" is CPU
-                             beam_workers
-                             )
+    image_processor = Imager3D(vis_data,      # visibilities
+                               pb,            # array of primary beams
+                               grid,          # array of interpolation grids
+                               sd,            # single dish data in unit of Jy/arcsec^2
+                               beam_sd,       # beam of single-dish data in radio_beam format
+                               target_header, # header on which to image the data
+                               init_params,   # array to start this optimization with 
+                               max_its,       # maximum number of iterations
+                               lambda_sd,     # hyper-parameter single-dish
+                               positivity,    # impose a positivity constaint
+                               device,        # device: 0 is GPU; "cpu" is CPU
+                               beam_workers
+                               )
     #get image
-    model = ClassicIViS(lambda_r=1, Nw=8)
+    model = ClassicIViS3D(lambda_r=1, Nw=0)
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
     #write on disk
