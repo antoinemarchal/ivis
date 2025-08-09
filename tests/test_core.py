@@ -39,12 +39,12 @@ if __name__ == '__main__':
     
     #READ DATA
     # #read packaged visibilities from "pathout" directory
-    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-                                                    target_frequency=None,
-                                                    target_channel=0,
-                                                    extension=".ms",
-                                                    blocks='single',
-                                                    max_workers=4)
+    # vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+    #                                                 target_frequency=None,
+    #                                                 target_channel=0,
+    #                                                 extension=".ms",
+    #                                                 blocks='single',
+    #                                                 max_workers=4)
 
     vis_data = data_processor.read_vis_visidata(
         uvmin=0.0,
