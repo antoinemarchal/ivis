@@ -39,12 +39,12 @@ if __name__ == '__main__':
     
     #READ DATA
     # #read packaged visibilities from "pathout" directory
-    # vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
-    #                                                 target_frequency=None,
-    #                                                 target_channel=0,
-    #                                                 extension=".ms",
-    #                                                 blocks='single',
-    #                                                 max_workers=4)
+    vis_data = data_processor.read_vis_from_scratch(uvmin=0, uvmax=7000,
+                                                    target_frequency=None,
+                                                    target_channel=0,
+                                                    extension=".ms",
+                                                    blocks='single',
+                                                    max_workers=4)
 
     vis_data = data_processor.read_vis_visidata(
         uvmin=0.0,
@@ -53,6 +53,7 @@ if __name__ == '__main__':
         chan_sel=slice(0, 1),
         keep_autocorr=False,
         prefer_weight_spectrum=False,
+        n_workers=4,
     )
     
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits")
