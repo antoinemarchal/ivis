@@ -165,6 +165,7 @@ class DataProcessor:
             target_frequency: float | None = None,  # Hz
             keep_autocorr: bool = False,
             prefer_weight_spectrum: bool = True,
+            n_workers: int = 0,
     ):
         """
         Load visibilities as a channel-major I-only VisIData using read_ms_block_I.
@@ -228,6 +229,7 @@ class DataProcessor:
             chan_sel=chan_sel,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
+            n_workers=n_workers,
         )
         return visI
 

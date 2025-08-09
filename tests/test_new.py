@@ -60,6 +60,7 @@ vis_data = data_processor.read_vis_visidata(
     chan_sel=slice(0, 1),
     keep_autocorr=False,
     prefer_weight_spectrum=False,
+    n_workers=4,
 )
 
 # -------------------
