@@ -344,7 +344,7 @@ def read_ms_block_I(
         flag_I [:, b, :nv] = fI_cb
 
         nvis_good = np.count_nonzero(~fI_cb)
-        logger.info(f"    [MS] Packed beam {b}: nvis raw={nchan*nv}, nvis after flagging={nvis_good}")
+        # logger.info(f"    [MS] Packed beam {b}: nvis raw={nchan*nv}, nvis after flagging={nvis_good}")
 
     centers = np.asarray(centers, dtype=object)
     logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max}")
