@@ -118,7 +118,7 @@ class ClassicIViS3D(BaseModel):
                   cell_size=None, fftsd=None, fftbeam=None, tapper=None,
                   lambda_sd=0.0, fftkernel=None, beam_workers=4, verbose=False, **_):
         x.requires_grad_(True)
-        if x.grad is not None:
+        if x.is_leaf and x.grad is not None:
             x.grad.zero_()
 
         # fan-out pb/grid if given as full stacks

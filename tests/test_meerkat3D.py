@@ -10,6 +10,7 @@ from reproject import reproject_interp
 import pywph as pw
 import torch
 import pytorch_finufft
+import time
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
@@ -98,7 +99,11 @@ model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 # -------------------
 # Run optimization
 # -------------------
-base = image_processor.process(model=model, units="Jy/arcsec^2")
+t0 = time.perf_counter()
+base = image_processor.process(model=model, units="Jy/arcsec^2", history_size=7)
+t1 = time.perf_counter()
+
+print(f"Optimization took {t1 - t0:.2f} seconds")
 
 # # Save or inspect result
 # fits.writeto(pathout + "ivis_reconstruction.fits", base, target_header, overwrite=True)

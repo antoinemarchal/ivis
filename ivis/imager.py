@@ -28,6 +28,7 @@ import subprocess
 import tarfile
 import concurrent.futures
 from pathlib import Path
+from scipy.optimize import fmin_l_bfgs_b
 
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
@@ -82,6 +83,7 @@ class Imager3D:
             logger.info("Using CPU.")
         return device
 
+
     def forward_model(self, model):
         """
         Compute model visibilities from the current image parameters
@@ -104,14 +106,18 @@ class Imager3D:
             grid_array=grid_native
         )
 
-    def process(self, model=None, units="Jy/arcsec^2", disk=False):
+
+    def process(self, model=None, units="Jy/arcsec^2",
+                history_size=10, dtype=torch.float32):
         """
-        Run imaging optimization.
+        One-stop optimizer:
+          - positivity==True  -> CPU SciPy fmin_l_bfgs_b WITH bounds
+          - positivity==False -> PyTorch LBFGS on GPU if available, else CPU (unconstrained)
         """
         if model is None:
             raise ValueError("Must pass a model instance to `process()`.")
-        if not hasattr(model, "loss"):
-            raise TypeError("Model must implement `.loss()`.")
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # --- Image/grid params ---
         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
@@ -121,7 +127,6 @@ class Imager3D:
         # --- FFT beam for reg ---
         kernel_map = dutils.laplacian(shape)
         fftkernel = abs(fft2(kernel_map))
-
         bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
         beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
         fftbeam = abs(fft2(beam))
@@ -129,14 +134,7 @@ class Imager3D:
         # --- FFT single-dish ---
         fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).numpy()
 
-        # --- Bounds ---
-        param_shape = self.init_params.shape
-        if self.positivity:
-            bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
-        else:
-            bounds = dutils.ROHSA_bounds(param_shape, lb_amp=-np.inf, ub_amp=np.inf)
-
-        # --- Precompute params dict ---
+        # --- Common params ---
         params = dict(
             vis_data=self.vis_data,
             pb=np.asarray(self.pb, dtype=np.float32),
@@ -147,31 +145,70 @@ class Imager3D:
             fftkernel=np.asarray(fftkernel, dtype=np.float32),
             cell_size=cell_size.value,
             grid_array=np.asarray(self.grid, dtype=np.float32),
-            beam_workers=self.beam_workers
+            beam_workers=self.beam_workers,
         )
 
-        device = self.device
+        param_shape = self.init_params.shape
 
-        # --- Closure for optimizer ---
-        def objective_flat(x):
-            # Pass through **params so loss() sees vis_data, pb, fftbeam, etc.
-            return model.loss(x, shape=param_shape, device=device, **params)
+        # --- SciPy path (positivity)
+        if getattr(self, "positivity", False):
+            from scipy.optimize import fmin_l_bfgs_b
+            x0 = self.init_params.ravel().astype(np.float64)
+            raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
+            bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
 
-        # --- Optimize ---
-        options = dict(maxiter=self.max_its, maxfun=int(1e6), iprint=25)
+            def fun_and_grad(x):
+                f, g = model.loss(x, shape=param_shape, device="cpu", jac=True, **params)
+                return float(f), np.ascontiguousarray(g, dtype=np.float64)
 
-        logger.info("Starting optimisation (using LBFGS-B)")
-        opt_output = optimize.minimize(
-            objective_flat,
-            self.init_params.ravel().astype(np.float32),
-            jac=True,
-            tol=1e-8,
-            bounds=bounds,
-            method="L-BFGS-B",
-            options=options
-        )
+            logger.info("Starting optimisation: SciPy L-BFGS-B (CPU, bounds, positivity=True)")
+            x_opt, f_opt, info = fmin_l_bfgs_b(
+                fun_and_grad, x0, bounds=bounds64,
+                m=7, pgtol=1e-8, factr=1e7, maxls=20,
+                maxiter=int(self.max_its), iprint=25,
+            )
+            result = x_opt.reshape(param_shape)
 
-        result = np.reshape(opt_output.x, self.init_params.shape)
+        # --- PyTorch path (no bounds)
+        else:
+            logger.info(f"Starting optimisation: PyTorch LBFGS on {device} (unconstrained)")
+            x_param = torch.tensor(self.init_params, dtype=dtype, device=device, requires_grad=True)
+
+            opt = torch.optim.LBFGS(
+                [x_param],
+                lr=1.0,
+                max_iter=int(self.max_its),
+                history_size=history_size,
+                line_search_fn="strong_wolfe",
+                tolerance_grad=1e-8,
+                tolerance_change=0.0,
+            )
+
+            def closure():
+                opt.zero_grad(set_to_none=True)
+                loss = model.objective(
+                    x_param,
+                    device=device,
+                    **params
+                )
+                logger.info(f"[PID {os.getpid()}] Iter cost: {loss.item():.6e} (device: {device})")
+                return loss
+
+            import time
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            final_loss = opt.step(closure)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                f"[Timing] LBFGS (device={device}) took {elapsed:.2f} s; "
+                f"final loss={float(final_loss):.6g}"
+            )
+
+            result = x_param.detach().cpu().numpy().reshape(param_shape)
+
         logger.warning("Multiply by 2 for ASKAP if needed.")
 
         # --- Unit conversion ---
@@ -188,6 +225,92 @@ class Imager3D:
         else:
             logger.error("Unknown unit type.")
             return result
+
+        
+    # def process(self, model=None, units="Jy/arcsec^2", disk=False):
+    #     """
+    #     Run imaging optimization.
+    #     """
+    #     if model is None:
+    #         raise ValueError("Must pass a model instance to `process()`.")
+    #     if not hasattr(model, "loss"):
+    #         raise TypeError("Model must implement `.loss()`.")
+
+    #     # --- Image/grid params ---
+    #     cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+    #     shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
+    #     tapper = dutils.apodize(0.98, shape)
+
+    #     # --- FFT beam for reg ---
+    #     kernel_map = dutils.laplacian(shape)
+    #     fftkernel = abs(fft2(kernel_map))
+
+    #     bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
+    #     beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
+    #     fftbeam = abs(fft2(beam))
+
+    #     # --- FFT single-dish ---
+    #     fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).numpy()
+
+    #     # --- Bounds ---
+    #     param_shape = self.init_params.shape
+    #     if self.positivity:
+    #         bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
+    #     else:
+    #         bounds = dutils.ROHSA_bounds(param_shape, lb_amp=-np.inf, ub_amp=np.inf)
+
+    #     # --- Precompute params dict ---
+    #     params = dict(
+    #         vis_data=self.vis_data,
+    #         pb=np.asarray(self.pb, dtype=np.float32),
+    #         fftbeam=np.asarray(fftbeam, dtype=np.float32),
+    #         fftsd=np.asarray(fftsd, dtype=np.complex64),
+    #         tapper=np.asarray(tapper, dtype=np.float32),
+    #         lambda_sd=self.lambda_sd,
+    #         fftkernel=np.asarray(fftkernel, dtype=np.float32),
+    #         cell_size=cell_size.value,
+    #         grid_array=np.asarray(self.grid, dtype=np.float32),
+    #         beam_workers=self.beam_workers
+    #     )
+
+    #     device = self.device
+
+    #     # --- Closure for optimizer ---
+    #     def objective_flat(x):
+    #         # Pass through **params so loss() sees vis_data, pb, fftbeam, etc.
+    #         return model.loss(x, shape=param_shape, device=device, **params)
+
+    #     # --- Optimize ---
+    #     options = dict(maxiter=self.max_its, maxfun=int(1e6), iprint=25)
+
+    #     logger.info("Starting optimisation (using LBFGS-B)")
+    #     opt_output = optimize.minimize(
+    #         objective_flat,
+    #         self.init_params.ravel().astype(np.float32),
+    #         jac=True,
+    #         tol=1e-8,
+    #         bounds=bounds,
+    #         method="L-BFGS-B",
+    #         options=options
+    #     )
+
+    #     result = np.reshape(opt_output.x, self.init_params.shape)
+    #     logger.warning("Multiply by 2 for ASKAP if needed.")
+
+    #     # --- Unit conversion ---
+    #     if units == "Jy/arcsec^2":
+    #         return result
+    #     elif units == "Jy/beam":
+    #         beam_r = Beam(4.2857 * cell_size, 4.2857 * cell_size, 1.e-12 * u.deg)
+    #         return result * beam_r.sr.to(u.arcsec**2).value
+    #     elif units == "K":
+    #         nu = self.vis_data.frequency[0] * u.Hz
+    #         beam_r = Beam(3 * cell_size, 3 * cell_size, 1.e-12 * u.deg)
+    #         result_Jy = result * beam_r.sr.to(u.arcsec**2).value
+    #         return (result_Jy * u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
+    #     else:
+    #         logger.error("Unknown unit type.")
+    #         return result
         
 
 # Imager class    
