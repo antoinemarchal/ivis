@@ -10,24 +10,17 @@ from ivis.models.utils.tensor_ops import format_input_tensor
 from ivis.models.utils.gpu import print_gpu_memory
 
 
-import os
-import numpy as np
-import torch
-import pytorch_finufft
-
-
 class ClassicIViS3DStagedFast:
     """
-    Faster staged IViS:
-      - Precomputes per-(chan,beam): scaled u/v, (w_edges, w_centers, bin_ids), and per-bin FINUFFT points.
-      - Caches PB and grid on staging device.
-      - χ² forward path runs in float32/complex64 for speed (cast from x on-the-fly).
-      - SD/Reg paths are IDENTICAL to your original code (dtype follows x, e.g., float64/complex128).
-      - Keeps original knobs: lambda_r, Nw, use_2pi, conj_data, stage_static, pin_h2d.
+    All-fp32 IViS with lightweight staging.
+      - χ² path: fp32 -> complex64 NUFFT
+      - SD/Reg: fp32 real, complex64 in Fourier
+      - Optional lambda calibration helpers to preserve fp64-like 'strength'
+      - Keeps original keywords & objective signature for drop-in use.
     """
 
     def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True,
-                 stage_static='auto', pin_h2d=True):
+                 stage_static='auto', pin_h2d=True, finufft_eps=None):
         self.lambda_r  = float(lambda_r)
         self.Nw        = None if (Nw is None or Nw <= 1) else (Nw if (Nw % 2 == 1) else Nw + 1)
         self.use_2pi   = bool(use_2pi)
@@ -38,8 +31,10 @@ class ClassicIViS3DStagedFast:
         self.stage_static = stage_static
         self.pin_h2d = bool(pin_h2d)
 
-        self._cache = {}     # key -> staged dict
-        self._r2_cache = {}  # (H,W,cell_rad,device_str,real_dtype) -> r2 tensor
+        self.finufft_eps = finufft_eps  # e.g., 1e-6 for speed (optional)
+
+        self._statics = None
+        self._r2_cache = {}
 
     # ---------- helpers ----------
     @staticmethod
@@ -49,14 +44,9 @@ class ClassicIViS3DStagedFast:
     def _choose_static_device(self, compute_device: torch.device) -> torch.device:
         if self.stage_static == 'cpu':  return torch.device('cpu')
         if self.stage_static == 'cuda': return torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-        return compute_device  # auto
-
-    def clear_cache(self):
-        self._cache.clear()
-        self._r2_cache.clear()
+        return compute_device  # 'auto'
 
     def _to_dev(self, arr, device, dtype=None, pin=False, contig=True):
-        # tensor or numpy -> torch on device (optionally pinned)
         if isinstance(arr, torch.Tensor):
             t = arr if (dtype is None or arr.dtype == dtype) else arr.to(dtype)
             t = t.to(device, non_blocking=pin)
@@ -68,96 +58,128 @@ class ClassicIViS3DStagedFast:
                 t = torch.as_tensor(a, device=device, dtype=dtype)
         return t.contiguous() if contig else t
 
-    def _get_r2(self, H, W, cell_rad, device, real_dtype):
-        key = (H, W, float(cell_rad), str(device), str(real_dtype))
+    def _get_r2(self, H, W, cell_rad, device):
+        key = (H, W, float(cell_rad), str(device))
         r2 = self._r2_cache.get(key)
         if r2 is not None and r2.device == device:
             return r2
         with torch.no_grad():
-            lx = torch.linspace(-W/2, W/2 - 1, W, device=device, dtype=real_dtype) * cell_rad
-            ly = torch.linspace(-H/2, H/2 - 1, H, device=device, dtype=real_dtype) * cell_rad
+            # fp32 geometry
+            lx = torch.linspace(-W/2, W/2 - 1, W, device=device, dtype=torch.float32) * cell_rad
+            ly = torch.linspace(-H/2, H/2 - 1, H, device=device, dtype=torch.float32) * cell_rad
             l, m = torch.meshgrid(lx, ly, indexing='xy')
             r2 = (l**2 + m**2).contiguous()
         self._r2_cache[key] = r2
         return r2
 
+    def clear_cache(self):
+        self._statics = None
+        self._r2_cache.clear()
+
+    # ---------- optional: calibrate lambdas to mimic fp64 strength ----------
+    @torch.no_grad()
+    def calibrate_lambda(self, x0_np, cell_size, tapper, fftkernel, fftbeam=None,
+                         lambda_r=None, lambda_sd=None, device='cpu'):
+        """
+        One-shot calibration: compute ratio of fp64 vs fp32 reg (and SD) energies on x0,
+        return scaled lambdas to keep similar pull in fp32.
+        """
+        dev = torch.device(device)
+        x64 = torch.from_numpy(np.asarray(x0_np)).to(dev, dtype=torch.float64)
+        tap64 = torch.from_numpy(tapper).to(dev, dtype=torch.float64)
+        ker64 = torch.from_numpy(fftkernel).to(dev, dtype=torch.complex128)
+        X64 = tfft2(x64 * tap64)
+        E64_reg = torch.sum(torch.abs((cell_size**2) * X64 * ker64)**2).item()
+
+        x32 = x64.float()
+        tap32 = tap64.float()
+        ker32 = ker64.to(torch.complex64)
+        X32 = tfft2(x32 * tap32).to(torch.complex64)
+        E32_reg = torch.sum(torch.abs((cell_size**2) * X32 * ker32)**2).item()
+
+        out = {}
+        if lambda_r is not None and E32_reg > 0:
+            out['lambda_r_fp32'] = float(lambda_r) * (E64_reg / E32_reg)
+        if lambda_sd is not None and fftbeam is not None:
+            beam64 = torch.from_numpy(fftbeam).to(dev, dtype=torch.complex128)
+            E64_sd = torch.sum(torch.abs((cell_size**2) * X64 * beam64 - 0*beam64)**2).item()
+            beam32 = beam64.to(torch.complex64)
+            E32_sd = torch.sum(torch.abs((cell_size**2) * X32 * beam32 - 0*beam32)**2).item()
+            if E32_sd > 0:
+                out['lambda_sd_fp32'] = float(lambda_sd) * (E64_sd / E32_sd)
+        return out
+
     # ---------- staging ----------
-    def _prepare_static(self, vis_data, pb_list, grid_list, cell_size_arcsec, compute_device):
+    def _stage(self, vis_data, pb_list, grid_list, cell_size_arcsec, compute_device):
         static_dev = self._choose_static_device(torch.device(compute_device))
         key = (str(static_dev), id(vis_data), id(pb_list), id(grid_list),
                float(cell_size_arcsec), bool(self.use_2pi), self.Nw)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
+        if self._statics is not None and self._statics['key'] == key:
+            return self._statics
 
-        cell_rad = self._cellsize_arcsec_to_rad(cell_size_arcsec)
-        uv_scale = (2.0 * np.pi * cell_rad) if self.use_2pi else 1.0
+        cell_rad  = self._cellsize_arcsec_to_rad(cell_size_arcsec)
+        uv_scale  = (2.0 * np.pi * cell_rad) if self.use_2pi else 1.0
         norm_area = (cell_size_arcsec ** 2)
 
-        # Stage PB/grid as float32 (used by grid_sample)
-        pb_t  = [self._to_dev(pb,   static_dev, torch.float32, pin=self.pin_h2d) for pb in pb_list]
-        grd_t = [self._to_dev(grid, static_dev, torch.float32, pin=self.pin_h2d) for grid in grid_list]
+        # Stage PB, grid as fp32
+        pbs   = [self._to_dev(pb,   static_dev, torch.float32, pin=self.pin_h2d) for pb in pb_list]
+        grids = [self._to_dev(grid, static_dev, torch.float32, pin=self.pin_h2d) for grid in grid_list]
 
-        # Precompute per-(chan,beam) packs in *original iteration order*
-        chan_beam = []
+        # Build per-(chan,beam) packs (keep order)
+        packs = []
         for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
-            # data/sigma (keep their original dtype, move on-demand later)
             I_use = I.conj() if self.conj_data else I
-            I_re = self._to_dev(I_use.real, static_dev, None, pin=self.pin_h2d)
-            I_im = self._to_dev(I_use.imag, static_dev, None, pin=self.pin_h2d)
-            sig  = self._to_dev(sI,         static_dev, None, pin=self.pin_h2d)
+            # data/sigma in fp32 for residuals
+            I_re = self._to_dev(I_use.real, static_dev, torch.float32, pin=self.pin_h2d)
+            I_im = self._to_dev(I_use.imag, static_dev, torch.float32, pin=self.pin_h2d)
+            sig  = self._to_dev(sI,         static_dev, torch.float32, pin=self.pin_h2d)
 
-            # u,v scaled (float32) for fast NUFFT
+            # u,v,w in fp32; u/v scaled
             u32 = (self._to_dev(uu, static_dev, torch.float32, pin=self.pin_h2d) * uv_scale).contiguous()
             v32 = (self._to_dev(vv, static_dev, torch.float32, pin=self.pin_h2d) * uv_scale).contiguous()
 
-            # Optional W-stacking precompute: per-bin indices and FINUFFT points
             if self.Nw is not None:
-                ww32 = self._to_dev(ww, static_dev, torch.float32, pin=self.pin_h2d)
-                w_edges   = torch.linspace(ww32.min(), ww32.max(), self.Nw + 1, device=static_dev, dtype=torch.float32)
+                w32 = self._to_dev(ww, static_dev, torch.float32, pin=self.pin_h2d)
+                w_edges   = torch.linspace(w32.min(), w32.max(), self.Nw + 1, device=static_dev, dtype=torch.float32)
                 w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
-                bin_ids   = torch.bucketize(ww32, w_edges) - 1
+                bin_ids   = torch.bucketize(w32, w_edges) - 1
                 bin_ids.clamp_(0, self.Nw - 1)
-                idx_list     = [(bin_ids == j).nonzero(as_tuple=True)[0] for j in range(self.Nw)]
-                points_list  = [torch.stack([-v32[idx], u32[idx]], dim=0).contiguous()
-                                if idx.numel() > 0 else None for idx in idx_list]
+                idx_list = [(bin_ids == j).nonzero(as_tuple=True)[0] for j in range(self.Nw)]
             else:
-                w_centers = bin_ids = idx_list = points_list = None
+                w_centers = idx_list = None
 
-            chan_beam.append({
+            packs.append({
                 "c": c, "b": b,
                 "I_re": I_re, "I_im": I_im, "sig": sig,
                 "u32": u32, "v32": v32,
-                "w_centers": w_centers, "bin_ids": bin_ids,
-                "idx_list": idx_list, "points_list": points_list
+                "w_centers": w_centers, "idx_list": idx_list,
             })
 
-        out = {
+        self._statics = {
+            "key": key,
             "static_device": static_dev,
             "cell_rad": cell_rad,
             "uv_scale": uv_scale,
-            "norm_area": norm_area,
-            "pb": pb_t,
-            "grid": grd_t,
-            "chan_beam": chan_beam
+            "norm": norm_area,
+            "pb": pbs,
+            "grid": grids,
+            "chan_beam": packs
         }
-        self._cache[key] = out
-        return out
+        return self._statics
 
-    # ---------- fast forward for one (chan,beam) using staged statics ----------
-    def _forward_beam_fast(self, x2d, pb32, grid32, pack, cell_rad, norm_area, compute_device):
-        # x2d can be float64; cast a WORKING COPY to float32 for speed (autograd will handle the cast)
-        xt = (x2d if isinstance(x2d, torch.Tensor) else torch.as_tensor(x2d, device=compute_device))
+    # ---------- forward (fp32 end-to-end) ----------
+    def _forward_beam_fp32(self, x2d, pb32, grid32, pack, cell_rad, norm_area, compute_device):
+        xt = x2d if isinstance(x2d, torch.Tensor) else torch.as_tensor(x2d)
         if xt.ndim == 1:
             side = int(np.sqrt(xt.numel())); xt = xt.view(side, side)
         if xt.ndim != 2:
             raise ValueError(f"x2d must be 2D (H,W), got {tuple(xt.shape)}")
 
-        xt32 = xt.to(device=compute_device, dtype=torch.float32)
+        xt32 = xt.to(compute_device, dtype=torch.float32)
 
-        # PB * reprojection (float32)
-        grid32 = grid32.to(compute_device, non_blocking=True).contiguous()
-        pb32   = pb32.to(compute_device,   non_blocking=True).contiguous()
+        # PB * reprojection (fp32)
+        grid32 = grid32.to(compute_device, dtype=torch.float32, non_blocking=True).contiguous()
+        pb32   = pb32.to(compute_device,   dtype=torch.float32, non_blocking=True).contiguous()
         xt4    = xt32.unsqueeze(0).unsqueeze(0).contiguous()
         repro  = torch.nn.functional.grid_sample(xt4, grid32, mode='bilinear', align_corners=True)\
                     .squeeze(0).squeeze(0).contiguous()
@@ -165,38 +187,45 @@ class ClassicIViS3DStagedFast:
 
         norm_c = torch.as_tensor(norm_area, device=compute_device, dtype=torch.float32).to(torch.complex64)
 
-        # Flat-sky
         if self.Nw is None:
             points = torch.stack([-pack["v32"].to(compute_device, non_blocking=True),
                                    pack["u32"].to(compute_device, non_blocking=True)], dim=0).contiguous()
+            kwargs = {} if self.finufft_eps is None else {"finufftkwargs": {"eps": self.finufft_eps}}
             vis = pytorch_finufft.functional.finufft_type2(points, x_pb32.to(torch.complex64),
-                                                           isign=1, modeord=0)
+                                                           isign=1, modeord=0, **kwargs)
             return (vis * norm_c).contiguous()
 
-        # W-stacking: reuse precomputed per-bin points; phase per bin
+        # W-stacking (fp32): phase & points per bin
         H, W = x_pb32.shape
-        r2 = self._get_r2(H, W, cell_rad, compute_device, real_dtype=torch.float32)
-        model_vis = torch.empty_like(pack["u32"], dtype=torch.complex64, device=compute_device)
-
-        w_centers = pack["w_centers"].to(compute_device, non_blocking=True)
-        points_list = pack["points_list"]
-        idx_list    = pack["idx_list"]
-
+        r2 = self._get_r2(H, W, cell_rad, compute_device)  # fp32 cached
+        out = torch.empty_like(pack["u32"], dtype=torch.complex64, device=compute_device)
         x_c = x_pb32.to(torch.complex64).contiguous()
 
-        for j in range(self.Nw):
-            idx = idx_list[j]
+        # scratch points buffer sized to max N in this beam on first call
+        if not hasattr(self, "_pts_buf") or self._pts_buf.device != compute_device \
+           or self._pts_buf.shape[1] < pack["u32"].numel():
+            self._pts_buf = torch.empty((2, pack["u32"].numel()), device=compute_device, dtype=torch.float32)
+
+        kwargs = {} if self.finufft_eps is None else {"finufftkwargs": {"eps": self.finufft_eps}}
+
+        for j, idx in enumerate(pack["idx_list"]):
             if idx is None or idx.numel() == 0:
                 continue
-            pts = points_list[j].to(compute_device, non_blocking=True)
-            phase = torch.exp(1j * np.pi * w_centers[j] * r2).to(torch.complex64)  # r in radians
+            n = idx.numel()
+            # build points in-place
+            self._pts_buf[0, :n].copy_(-pack["v32"].index_select(0, idx).to(compute_device, non_blocking=True))
+            self._pts_buf[1, :n].copy_( pack["u32"].index_select(0, idx).to(compute_device, non_blocking=True))
+            pts = self._pts_buf[:, :n].contiguous()
+
+            phase = torch.exp(1j * np.pi * pack["w_centers"][j].to(compute_device) * r2).to(torch.complex64)
             x_mod = (x_c * phase).contiguous()
-            vis_j = pytorch_finufft.functional.finufft_type2(pts, x_mod, isign=1, modeord=0)
-            model_vis[idx] = vis_j * norm_c
 
-        return model_vis
+            vis_j = pytorch_finufft.functional.finufft_type2(pts, x_mod, isign=1, modeord=0, **kwargs)
+            out[idx] = vis_j * norm_c
 
-    # ---------- objective ----------
+        return out
+
+    # ---------- objective (fp32 everywhere) ----------
     def objective(self, x, vis_data, device,
                   pb_list=None, grid_list=None, pb=None, grid_array=None,
                   cell_size=None, fftsd=None, fftbeam=None, tapper=None,
@@ -215,81 +244,64 @@ class ClassicIViS3DStagedFast:
             if grid_array is None: raise ValueError("Need grid_list or grid_array")
             grid_list = [grid_array[b] for b in range(nbeam)]
 
-        S = self._prepare_static(vis_data, pb_list, grid_list, cell_size, compute_device)
+        S = self._stage(vis_data, pb_list, grid_list, cell_size, compute_device)
 
         loss_scalar = 0.0
 
-        # --- χ² over staged (chan,beam) in captured order ---
+        # --- χ² (fp32) ---
         for pack in S["chan_beam"]:
             c = pack["c"]; b = pack["b"]
-            x_cb = x[c].to(compute_device)
+            x_cb = x[c]  # accept any input dtype; forward casts internally to fp32
 
-            model_vis = self._forward_beam_fast(
+            model_vis = self._forward_beam_fp32(
                 x2d=x_cb,
                 pb32=S["pb"][b], grid32=S["grid"][b],
                 pack=pack,
-                cell_rad=S["cell_rad"], norm_area=S["norm_area"],
+                cell_rad=S["cell_rad"], norm_area=S["norm"],
                 compute_device=compute_device
             )
 
-            # Data/sigma to compute_device, keep their original dtype
+            # residuals in fp32 (keep everything single-precision)
             vr = pack["I_re"].to(compute_device, non_blocking=True)
             vi = pack["I_im"].to(compute_device, non_blocking=True)
             sg = pack["sig"].to(compute_device,  non_blocking=True)
 
-            # Residuals (let torch promote to highest real dtype, typically float64)
             res_r = (model_vis.real - vr) / sg
             res_i = (model_vis.imag - vi) / sg
-            Lchi = 0.5 * torch.sum(res_r**2 + res_i**2)
+            Lchi = 0.5 * (res_r.pow(2).sum() + res_i.pow(2).sum())
             Lchi.backward(retain_graph=True)
             loss_scalar += float(Lchi.item())
 
-            if verbose and compute_device.type == 'cuda':
-                alloc = torch.cuda.memory_allocated(compute_device) / 1024**2
-                resv  = torch.cuda.memory_reserved(compute_device)  / 1024**2
-                tot   = torch.cuda.get_device_properties(compute_device).total_memory / 1024**2
-                print(f"[χ²] c={c} b={b} L={Lchi.item():.3e} | GPU: {alloc:.1f} MB ({resv:.1f} MB reserved / {tot:.0f} MB)")
+        # --- SD term (fp32) ---
+        if lambda_sd > 0.0 and fftsd is not None and fftbeam is not None and tapper is not None:
+            tapper_t  = torch.from_numpy(tapper).to(compute_device, dtype=torch.float32)
+            fftsd_t   = torch.from_numpy(fftsd).to(compute_device, dtype=torch.complex64)
+            fftbeam_t = torch.from_numpy(fftbeam).to(compute_device, dtype=torch.complex64)
 
-        # --- SD term (UNCHANGED from your working code) ---
-        if lambda_sd > 0.0 and fftsd is not None:
-            fftsd_t   = torch.from_numpy(fftsd).to(compute_device)
-            fftbeam_t = torch.from_numpy(fftbeam).to(compute_device)
-            tapper_t  = torch.from_numpy(tapper).to(compute_device)
-            # NOTE: use your original tfft2 helper (must be in scope)
-            xfft2     = tfft2(x * tapper_t)
-            model_sd  = (cell_size**2) * xfft2 * fftbeam_t
+            X = tfft2(x.to(torch.float32) * tapper_t).to(torch.complex64)
+            model_sd = (cell_size**2) * X * fftbeam_t
             Lsd = 0.5 * (torch.nansum((model_sd.real - fftsd_t.real)**2) +
-                         torch.nansum((model_sd.imag - fftsd_t.imag)**2)) * lambda_sd
+                         torch.nansum((model_sd.imag - fftsd_t.imag)**2)) * float(lambda_sd)
             Lsd.backward(retain_graph=True)
             loss_scalar += float(Lsd.item())
 
-            if verbose:
-                print(f"[SD]  Lsd={float(Lsd.item()):.3e}")
+        # --- Regularization (fp32) ---
+        if self.lambda_r > 0.0 and fftkernel is not None and tapper is not None:
+            tapper_t    = torch.from_numpy(tapper).to(compute_device, dtype=torch.float32)
+            fftkernel_t = torch.from_numpy(fftkernel).to(compute_device, dtype=torch.complex64)
 
-        # --- Regularization term (UNCHANGED from your working code) ---
-        if self.lambda_r > 0.0 and fftkernel is not None:
-            tapper_t    = torch.from_numpy(tapper).to(compute_device)
-            fftkernel_t = torch.from_numpy(fftkernel).to(compute_device)
-            xfft2       = tfft2(x * tapper_t)
-            conv        = (cell_size**2) * xfft2 * fftkernel_t
-            Lr = 0.5 * torch.nansum(torch.abs(conv)**2) * self.lambda_r
+            X = tfft2(x.to(torch.float32) * tapper_t).to(torch.complex64)
+            conv = (cell_size**2) * X * fftkernel_t
+            Lr = 0.5 * torch.nansum(torch.abs(conv)**2) * float(self.lambda_r)
             Lr.backward()
             loss_scalar += float(Lr.item())
 
-            if verbose:
-                print(f"[Reg] lambda_r={self.lambda_r}  Lr={float(Lr.item()):.3e}")
+        return torch.tensor(loss_scalar, device=compute_device, dtype=torch.float32)
 
-        return torch.tensor(loss_scalar, device=compute_device)
-
-    # ---------- optimizer wrapper ----------
+    # ---------- optimizer wrapper (fp32 param tensor) ----------
     def loss(self, x, shape, device, vis_data, **kwargs):
-        """
-        Keep x's dtype (e.g., float64) so SD/Reg stay in the original precision.
-        Forward/χ² will cast a working copy to float32 internally for speed.
-        """
         compute_device = torch.device(device)
-        u_np = x.reshape(shape)
-        u = torch.from_numpy(u_np).to(device=compute_device).requires_grad_(True)
+        u = torch.from_numpy(x.reshape(shape)).to(device=compute_device, dtype=torch.float32).requires_grad_(True)
 
         L = self.objective(x=u, vis_data=vis_data, device=compute_device, **kwargs)
         grad = u.grad.detach().cpu().numpy().astype(x.dtype)
