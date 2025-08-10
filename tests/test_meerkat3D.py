@@ -58,7 +58,7 @@ vis_data = data_processor.read_vis_visidata(
     uvmin=0.0,
     uvmax=np.inf,
     # target_channel=0,
-    chan_sel=slice(0, 3),
+    chan_sel=slice(0, 50),
     keep_autocorr=False,
     prefer_weight_spectrum=False,
 )
@@ -71,7 +71,7 @@ lambda_sd = 0
 lambda_r = 1
 device = 0        # 0 for GPU, "cpu" for CPU
 positivity = False
-init_params = np.zeros((3, shape[0], shape[1]), dtype=np.float32)
+init_params = np.zeros((50, shape[0], shape[1]), dtype=np.float32)
 
 # -------------------
 # Create Imager3D
