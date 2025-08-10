@@ -19,7 +19,7 @@ import pytorch_finufft
 #-------------------------------------------
 from torch.utils.checkpoint import checkpoint as _checkpoint
 
-class ClassicIViS3D(BaseModel):
+class ClassicIViS3D_old(BaseModel):
     """
     Classic IViS 3D (flat-sky optimized, memory-safe):
       - Stages PB & grids to device once.
@@ -341,7 +341,7 @@ class ClassicIViS3D(BaseModel):
 
 
 # ------------------------------------------
-#------------ ClassiCIViS3D ----------------
+#------------ classicivis3d ----------------
 #-------------------------------------------
 class ClassicIViS3D_old1(BaseModel):
     """
@@ -642,7 +642,7 @@ class ClassicIViS3D_old1(BaseModel):
 #------------------------------------------
 #------------ ClassiCIViS3D ---------------
 #------------------------------------------
-class ClassicIViS3D_old(BaseModel):
+class ClassicIViS3D(BaseModel):
     def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True):
         self.lambda_r = lambda_r
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
