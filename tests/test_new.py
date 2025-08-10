@@ -94,7 +94,7 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3DStagedFast(lambda_r=lambda_r, Nw=0, stage_static='auto')
+model = ClassicIViS3DStagedFast(lambda_r=lambda_r, Nw=0)
 # model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 
 # -------------------
