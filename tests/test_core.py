@@ -95,16 +95,16 @@ if __name__ == '__main__':
                                beam_workers
                                )
     # #get image
-    # model = ClassicIViS3D(lambda_r=1, Nw=0)
+    model = ClassicIViS3D(lambda_r=1, Nw=0)
     # Flat-sky mode (Nw=None or <=1)
-    model = ClassicIViS3D(
-        lambda_r=lambda_r,
-        Nw=None,
-        beam_batch=4,           # shrink if you still OOM; grow to speed up
-        chunk_backward=True,    # backprop per micro-batch to free activations
-        gradient_checkpoint=False,  # turn on if you need even less memory
-        nufft_eps=None          # FINUFFT default
-    )
+    # model = ClassicIViS3D(
+    #     lambda_r=lambda_r,
+    #     Nw=None,
+    #     beam_batch=4,           # shrink if you still OOM; grow to speed up
+    #     chunk_backward=True,    # backprop per micro-batch to free activations
+    #     gradient_checkpoint=False,  # turn on if you need even less memory
+    #     nufft_eps=None          # FINUFFT default
+    # )
     
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
