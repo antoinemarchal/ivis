@@ -95,7 +95,7 @@ if __name__ == '__main__':
                                beam_workers
                                )
     #get image
-    model = ClassicIViS3D(lambda_r=1, Nw=0, stage_static="auto")
+    model = ClassicIViS3D(lambda_r=1, Nw=0)
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
     #write on disk
