@@ -12,7 +12,7 @@ from tqdm import tqdm as tqdm
 from ivis.io import DataProcessor
 from ivis.imager import Imager3D
 from ivis import logger
-from ivis.models import ClassicIViS3D
+from ivis.models import ClassicIViS3D, ClassicIViS3DStaged
 
 import marchalib as ml #remove
 
@@ -95,7 +95,7 @@ if __name__ == '__main__':
                                beam_workers
                                )
     #get image
-    model = ClassicIViS3D(lambda_r=1, Nw=0)
+    model = ClassicIViS3DStaged(lambda_r=1, Nw=0, stage_static="auto")
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
     #write on disk

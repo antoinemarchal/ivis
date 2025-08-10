@@ -350,10 +350,10 @@ class ClassicIViS3DStaged:
             alloc = torch.cuda.memory_allocated(compute_device) / 1024**2
             res   = torch.cuda.memory_reserved(compute_device)  / 1024**2
             tot   = torch.cuda.get_device_properties(compute_device).total_memory / 1024**2
-            print(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)} | "
+            logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)} | "
                   f"GPU: {alloc:.1f} MB allocated, {res:.1f} MB reserved, {tot:.0f} MB total")
         else:
-            print(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
+            logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
 
         return float(L.item()), grad.ravel()
 

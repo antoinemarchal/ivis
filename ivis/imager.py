@@ -158,7 +158,7 @@ class Imager3D:
             bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
 
             def fun_and_grad(x):
-                f, g = model.loss(x, shape=param_shape, device="cpu", jac=True, **params)
+                f, g = model.loss(x, shape=param_shape, device=self.device, jac=True, **params)
                 return float(f), np.ascontiguousarray(g, dtype=np.float64)
 
             logger.info("Starting optimisation: SciPy L-BFGS-B (CPU, bounds, positivity=True)")

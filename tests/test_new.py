@@ -94,7 +94,7 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3DStaged(lambda_r=lambda_r, Nw=0)
+model = ClassicIViS3DStaged(lambda_r=lambda_r, Nw=0, stage_static='cuda')
 
 # -------------------
 # Run optimization
