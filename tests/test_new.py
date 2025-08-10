@@ -60,7 +60,7 @@ vis_data = data_processor.read_vis_visidata(
     chan_sel=slice(0, 1),
     keep_autocorr=False,
     prefer_weight_spectrum=False,
-    n_workers=4,
+    n_workers=1,
 )
 
 # -------------------
@@ -94,12 +94,13 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3DStaged(lambda_r=lambda_r, Nw=0, stage_static='cuda')
+model = ClassicIViS3DStaged(lambda_r=lambda_r, Nw=0, stage_static='auto')
+# model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 
 # -------------------
 # Run optimization
 # -------------------
-base = image_processor.process(model=model, units="Jy/arcsec^2", history_size=7)
+base = image_processor.process(model=model, units="Jy/arcsec^2")
 
 # # Save or inspect result
 # fits.writeto(pathout + "ivis_reconstruction.fits", base, target_header, overwrite=True)
