@@ -14,7 +14,7 @@ import pytorch_finufft
 from ivis.io import DataProcessor
 from ivis.logger import logger
 from ivis.utils import dutils, mod_loss, fourier
-from ivis.models import ClassicIViS3D, ClassicIViS3DStaged, ClassicIViS3DStagedFast, TWiSTModel
+from ivis.models import ClassicIViS3D, TWiSTModel
 from ivis.imager import Imager3D 
 
 plt.ion()
@@ -94,8 +94,8 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3DStagedFast(lambda_r=lambda_r, Nw=0)
-# model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+# model = ClassicIViS3DStagedFast(lambda_r=lambda_r, Nw=0)
+model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 
 # -------------------
 # Run optimization

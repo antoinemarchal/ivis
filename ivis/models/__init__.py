@@ -1,2 +1,2 @@
-from .classic import ClassicIViS, ClassicIViS3D, ClassicIViS3DStaged, ClassicIViS3DStagedFast
+from .classic import ClassicIViS, ClassicIViS3D
 from .twist import TWiSTModel
