@@ -81,7 +81,7 @@ class ClassicIViS3D(BaseModel):
             points = torch.stack([-v_radpix, u_radpix], dim=0)            # [2, N]
             c = x_pb.to(torch.complex64)
             return (cell_size**2) * pytorch_finufft.functional.finufft_type2(
-                points, c, isign=1, modeord=0, eps = 1e-3
+                points, c, isign=1, modeord=0
             )
         
         # 4) W-stacking path
@@ -111,7 +111,7 @@ class ClassicIViS3D(BaseModel):
             x_mod = x_pb.to(torch.complex64) * phase
             
             vis_bin = (cell_size**2) * pytorch_finufft.functional.finufft_type2(
-                points, x_mod, isign=1, modeord=0, eps = 1e-3
+                points, x_mod, isign=1, modeord=0
             )
             model_vis[idx] = vis_bin
             
