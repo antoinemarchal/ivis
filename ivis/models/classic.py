@@ -14,163 +14,190 @@ import numpy as np
 import torch
 import pytorch_finufft
 
-#------------------------------------------
-#------------ ClassiCIViS3D ---------------
-#------------------------------------------
-class ClassicIViS3D(BaseModel):
-    def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True):
-        self.lambda_r = lambda_r
-        self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
-        self.conj_data = conj_data  # match old pipeline that did np.conj(data)
-        ...
 
-    # --- helper to match old _lambda_to_radpix ---
+# ------------------------------------------
+#------------ ClassiCIViS3D ----------------
+#-------------------------------------------
+class ClassicIViS3D(BaseModel):
+    """
+    Minimal classic model with:
+      - legacy numerics (2π scaling + (cell_size**2) factors)
+      - optional w-stacking
+      - PB/grid staged to device once (first call), then reused
+      - implements loss(...) for optimizers expecting numpy API
+    """
+
+    def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True, stage_static=None):
+        """
+        stage_static kept for backwards-compat; ignored (staging happens automatically).
+        """
+        self.lambda_r  = lambda_r
+        self.Nw        = None if (Nw is None or Nw <= 1) else (Nw if (Nw % 2 == 1) else Nw + 1)
+        self.use_2pi   = bool(use_2pi)
+        self.conj_data = bool(conj_data)
+
+        # simple staging cache
+        self._static = {
+            "device": None,   # str(device)
+            "pb": None,       # list[Tensor float32] per beam
+            "grid": None,     # list[Tensor float32] per beam
+        }
+
+    # --- helper (matches old _lambda_to_radpix) ---
     @staticmethod
     def _cellsize_arcsec_to_rad(cell_size_arcsec: float) -> float:
         return cell_size_arcsec * np.pi / (180.0 * 3600.0)
 
-    
-    def loss(self, x, shape, device, vis_data, **kwargs):
+    # -------- staging ----------
+    def stage_static(self, device, pb, grid_array):
         """
-        Optimizer-friendly loss wrapper (returns loss and grad as numpy).
+        Copy PB and grid to `device` once. You can call this explicitly,
+        or it will be called automatically on first objective()/loss() call.
         """
-        u = x.reshape(shape)
-        u = torch.from_numpy(u).to(device).requires_grad_(True)
+        nbeam = len(pb)
+        pb_t, grid_t = [], []
+        for b in range(nbeam):
+            pb_t.append(torch.from_numpy(np.asarray(pb[b], dtype=np.float32)).to(device))
+            grid_t.append(torch.from_numpy(np.asarray(grid_array[b], dtype=np.float32)).to(device))
+        self._static = {"device": str(device), "pb": pb_t, "grid": grid_t}
 
-        L = self.objective(x=u, vis_data=vis_data, device=device, **kwargs)
-        grad = u.grad.cpu().numpy().astype(x.dtype)
+    def _ensure_staged(self, device, pb=None, grid_array=None):
+        need_stage = (
+            self._static["pb"] is None or
+            self._static["grid"] is None or
+            self._static["device"] != str(device)
+        )
+        if need_stage:
+            if pb is None or grid_array is None:
+                raise ValueError("PB/grid not staged yet; pass `pb` and `grid_array` on the first call.")
+            self.stage_static(device, pb, grid_array)
 
-        if torch.device(device).type == 'cuda':
-            allocated = torch.cuda.memory_allocated(device) / 1024**2
-            reserved  = torch.cuda.memory_reserved(device)  / 1024**2
-            total     = torch.cuda.get_device_properties(device).total_memory / 1024**2
-            logger.info(
-                f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)} | "
-                f"GPU: {allocated:.2f} MB allocated, {reserved:.2f} MB reserved, {total:.2f} MB total"
-            )
-        else:
-            logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
-
-        return L.item(), grad.ravel()
-
-
+    # -------- core forward for one beam ----------
     def forward_beam(self, x2d, pb, grid, uu, vv, ww, cell_size, device):
-        # x2d -> 2D tensor [H,W]
+        """
+        x2d: [H,W] (tensor or array)
+        pb, grid: either already-staged tensors, or numpy arrays (will be moved)
+        uu,vv,ww: numpy arrays on host (moved per call)
+        cell_size: arcsec
+        """
+        # ensure [H,W] float
         xt = torch.as_tensor(x2d, device=device)
         if xt.ndim == 1:
             side = int(np.sqrt(xt.numel()))
             xt = xt.view(side, side)
         if xt.ndim != 2:
             raise ValueError(f"x2d must be 2D (H,W), got shape {tuple(xt.shape)}")
-        
-        # 1) PB * reprojection
-        xt = xt.unsqueeze(0).unsqueeze(0).float().to(device)              # [1,1,H,W]
-        grid_t = torch.from_numpy(np.asarray(grid)).to(device).float()    # [1,H,W,2]
-        repro = torch.nn.functional.grid_sample(xt, grid_t, mode='bilinear',
-                                                align_corners=True).squeeze(0).squeeze(0)  # [H,W]
-        x_pb = repro * torch.from_numpy(np.asarray(pb)).to(device).float()                 # [H,W]
-        
-        # 2) Units: arcsec -> radians; wavelengths -> radians/pixel with 2π
-        cell_rad = cell_size * np.pi / (180.0 * 3600.0)
-        u_radpix = torch.from_numpy(uu).to(device).float() * (2.0*np.pi*cell_rad)
-        v_radpix = torch.from_numpy(vv).to(device).float() * (2.0*np.pi*cell_rad)
-        
-        # 3) Flat-sky NUFFT
-        if self.Nw is None:
-            points = torch.stack([-v_radpix, u_radpix], dim=0)            # [2, N]
-            c = x_pb.to(torch.complex64)
-            return (cell_size**2) * pytorch_finufft.functional.finufft_type2(
-                points, c, isign=1, modeord=0
-            )
-        
-        # 4) W-stacking path
-        uua = u_radpix
-        vva = v_radpix
-        wwa = torch.from_numpy(ww).to(device).float()
+        xt = xt.float()
 
+        # pb/grid to device (no-op if already tensors on same device)
+        pb_t   = pb   if isinstance(pb, torch.Tensor)   else torch.from_numpy(np.asarray(pb, dtype=np.float32)).to(device)
+        grid_t = grid if isinstance(grid, torch.Tensor) else torch.from_numpy(np.asarray(grid, dtype=np.float32)).to(device)
+
+        # 1) reprojection * PB
+        xt_bchw = xt.unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
+        repro = torch.nn.functional.grid_sample(xt_bchw, grid_t, mode='bilinear', align_corners=True) \
+                  .squeeze(0).squeeze(0)        # [H,W]
+        x_pb = repro * pb_t                     # [H,W]
+
+        # 2) uv units -> radians/pixel
+        cell_rad = self._cellsize_arcsec_to_rad(cell_size)
+        scale = (2.0 * np.pi * cell_rad) if self.use_2pi else cell_rad
+        u_radpix = torch.from_numpy(uu).to(device).float() * scale
+        v_radpix = torch.from_numpy(vv).to(device).float() * scale
+
+        # 3) flat-sky NUFFT
+        if self.Nw is None:
+            points = torch.stack([-v_radpix, u_radpix], dim=0)  # [2,N]
+            img_c = x_pb.to(torch.complex64)
+            return (cell_size**2) * pytorch_finufft.functional.finufft_type2(
+                points, img_c, isign=1, modeord=0
+            )
+
+        # 4) w-stacking path
+        wwa = torch.from_numpy(ww).to(device).float()
         H, W = x_pb.shape
         lx = torch.linspace(-W/2, W/2 - 1, W, device=device) * cell_rad
         ly = torch.linspace(-H/2, H/2 - 1, H, device=device) * cell_rad
         l, m = torch.meshgrid(lx, ly, indexing='xy')
-        r2 = l**2 + m**2
-        
-        model_vis = torch.empty_like(uua, dtype=torch.complex64)
+        r2 = l*l + m*m
+
+        model_vis = torch.empty_like(u_radpix, dtype=torch.complex64)
         w_edges = torch.linspace(wwa.min(), wwa.max(), self.Nw + 1, device=device)
         w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
         bin_ids = torch.bucketize(wwa, w_edges) - 1
         bin_ids = torch.clamp(bin_ids, 0, self.Nw - 1)
-        
+
         for j in range(self.Nw):
             idx = (bin_ids == j).nonzero(as_tuple=True)[0]
             if idx.numel() == 0:
                 continue
-            
-            points = torch.stack([-vva[idx], uua[idx]], dim=0)
-            phase = torch.exp(1j * np.pi * w_centers[j] * r2) # r^2 uses radians
+            points = torch.stack([-v_radpix[idx], u_radpix[idx]], dim=0)
+            phase = torch.exp(1j * np.pi * w_centers[j] * r2)
             x_mod = x_pb.to(torch.complex64) * phase
-            
             vis_bin = (cell_size**2) * pytorch_finufft.functional.finufft_type2(
                 points, x_mod, isign=1, modeord=0
             )
             model_vis[idx] = vis_bin
-            
+
         return model_vis
 
-
+    # -------- global objective ----------
     def objective(self, x, vis_data, device,
                   pb_list=None, grid_list=None, pb=None, grid_array=None,
                   cell_size=None, fftsd=None, fftbeam=None, tapper=None,
                   lambda_sd=0.0, fftkernel=None, beam_workers=4, verbose=False, **_):
+
+        # stage pb/grid once (or reuse)
+        if pb is None or grid_array is None:
+            # allow old call-sites that pass lists
+            if pb_list is not None and grid_list is not None:
+                pb = pb_list
+                grid_array = grid_list
+            else:
+                raise ValueError("Pass `pb` and `grid_array` on first call so we can stage them.")
+        if cell_size is None:
+            raise ValueError("`cell_size` (arcsec) is required.")
+
+        self._ensure_staged(device, pb=pb, grid_array=grid_array)
+
         x.requires_grad_(True)
         if x.is_leaf and x.grad is not None:
             x.grad.zero_()
 
-        # fan-out pb/grid if given as full stacks
-        nbeam = len(vis_data.centers)
-        if pb_list is None:
-            if pb is None: raise ValueError("Need pb_list or pb array")
-            pb_list = [pb[b] for b in range(nbeam)]
-        if grid_list is None:
-            if grid_array is None: raise ValueError("Need grid_list or grid_array")
-            grid_list = [grid_array[b] for b in range(nbeam)]
-
         loss_scalar = 0.0
 
-        # --- χ² over all (chan, beam) ---
+        # --- χ² across all (chan, beam) ---
         for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
-            x_chan = x[c] # (H,W)
-            model_vis = self.forward_beam(x_chan, pb_list[b], grid_list[b], uu, vv, ww, cell_size, device)
+            x_chan = x[c]  # [H,W]
+            pb_t   = self._static["pb"][b]
+            grid_t = self._static["grid"][b]
 
-            # match old pipeline: data were conjugated
+            model_vis = self.forward_beam(x_chan, pb_t, grid_t, uu, vv, ww, cell_size, device)
+
             I_use = I.conj() if self.conj_data else I
-
             vis_real = torch.from_numpy(I_use.real).to(device)
             vis_imag = torch.from_numpy(I_use.imag).to(device)
             sig      = torch.from_numpy(sI).to(device)
 
-            residual_real = (model_vis.real - vis_real) / sig
-            residual_imag = (model_vis.imag - vis_imag) / sig
-            J = torch.sum(residual_real**2 + residual_imag**2)
-            L = 0.5 * J
+            rr = (model_vis.real - vis_real) / sig
+            ri = (model_vis.imag - vis_imag) / sig
+            L = 0.5 * torch.sum(rr*rr + ri*ri)
             L.backward(retain_graph=True)
-            loss_scalar += L.item()
-
-            if verbose:
-                print_gpu_memory(device)
+            loss_scalar += float(L)
 
         # --- SD term (unchanged) ---
         if lambda_sd > 0.0 and fftsd is not None:
-            fftsd_t = torch.from_numpy(fftsd).to(device)
+            fftsd_t   = torch.from_numpy(fftsd).to(device)
             fftbeam_t = torch.from_numpy(fftbeam).to(device)
-            tapper_t = torch.from_numpy(tapper).to(device)
+            tapper_t  = torch.from_numpy(tapper).to(device)
             xfft2 = tfft2(x * tapper_t)
             model_sd = (cell_size**2) * xfft2 * fftbeam_t
             Lsd = 0.5 * (torch.nansum((model_sd.real - fftsd_t.real)**2) +
                          torch.nansum((model_sd.imag - fftsd_t.imag)**2)) * lambda_sd
             Lsd.backward(retain_graph=True)
-            loss_scalar += Lsd.item()
+            loss_scalar += float(Lsd)
 
-        # --- Reg (unchanged) ---
+        # --- Reg term (unchanged) ---
         if self.lambda_r > 0.0 and fftkernel is not None:
             tapper_t = torch.from_numpy(tapper).to(device)
             fftkernel_t = torch.from_numpy(fftkernel).to(device)
@@ -178,9 +205,205 @@ class ClassicIViS3D(BaseModel):
             conv = (cell_size**2) * xfft2 * fftkernel_t
             Lr = 0.5 * torch.nansum(torch.abs(conv)**2) * self.lambda_r
             Lr.backward()
-            loss_scalar += Lr.item()
+            loss_scalar += float(Lr)
 
-        return torch.tensor(loss_scalar)
+        return torch.tensor(loss_scalar, device=x.device)
+
+    # -------- optimizer-friendly wrapper ----------
+    def loss(self, x, shape, device, vis_data, **kwargs):
+        """
+        Returns (loss_value, grad_flat) as numpy arrays (LBFGS-friendly).
+        """
+        u = x.reshape(shape)
+        u = torch.from_numpy(u).to(device).requires_grad_(True)
+
+        # stage once if needed
+        self._ensure_staged(
+            device=device,
+            pb=kwargs.get('pb', None) or kwargs.get('pb_list', None),
+            grid_array=kwargs.get('grid_array', None) or kwargs.get('grid_list', None),
+        )
+
+        L = self.objective(x=u, vis_data=vis_data, device=device, **kwargs)
+
+        if u.grad is None:
+            L.backward()
+
+        grad = u.grad.detach().cpu().numpy().astype(x.dtype)
+
+        # optional per-iter logging
+        logger.info(f"[PID {os.getpid()}] Iter cost: {np.format_float_scientific(L.item(), precision=6)} (device: {torch.device(device).type})")
+
+        return float(L.item()), grad.ravel()
+
+    
+# #------------------------------------------
+# #------------ ClassiCIViS3D ---------------
+# #------------------------------------------
+# class ClassicIViS3D(BaseModel):
+#     def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True):
+#         self.lambda_r = lambda_r
+#         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
+#         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
+#         ...
+
+#     # --- helper to match old _lambda_to_radpix ---
+#     @staticmethod
+#     def _cellsize_arcsec_to_rad(cell_size_arcsec: float) -> float:
+#         return cell_size_arcsec * np.pi / (180.0 * 3600.0)
+
+    
+#     def loss(self, x, shape, device, vis_data, **kwargs):
+#         """
+#         Optimizer-friendly loss wrapper (returns loss and grad as numpy).
+#         """
+#         u = x.reshape(shape)
+#         u = torch.from_numpy(u).to(device).requires_grad_(True)
+
+#         L = self.objective(x=u, vis_data=vis_data, device=device, **kwargs)
+#         grad = u.grad.cpu().numpy().astype(x.dtype)
+
+#         if torch.device(device).type == 'cuda':
+#             allocated = torch.cuda.memory_allocated(device) / 1024**2
+#             reserved  = torch.cuda.memory_reserved(device)  / 1024**2
+#             total     = torch.cuda.get_device_properties(device).total_memory / 1024**2
+#             logger.info(
+#                 f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)} | "
+#                 f"GPU: {allocated:.2f} MB allocated, {reserved:.2f} MB reserved, {total:.2f} MB total"
+#             )
+#         else:
+#             logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
+
+#         return L.item(), grad.ravel()
+
+
+#     def forward_beam(self, x2d, pb, grid, uu, vv, ww, cell_size, device):
+#         # x2d -> 2D tensor [H,W]
+#         xt = torch.as_tensor(x2d, device=device)
+#         if xt.ndim == 1:
+#             side = int(np.sqrt(xt.numel()))
+#             xt = xt.view(side, side)
+#         if xt.ndim != 2:
+#             raise ValueError(f"x2d must be 2D (H,W), got shape {tuple(xt.shape)}")
+        
+#         # 1) PB * reprojection
+#         xt = xt.unsqueeze(0).unsqueeze(0).float().to(device)              # [1,1,H,W]
+#         grid_t = torch.from_numpy(np.asarray(grid)).to(device).float()    # [1,H,W,2]
+#         repro = torch.nn.functional.grid_sample(xt, grid_t, mode='bilinear',
+#                                                 align_corners=True).squeeze(0).squeeze(0)  # [H,W]
+#         x_pb = repro * torch.from_numpy(np.asarray(pb)).to(device).float()                 # [H,W]
+        
+#         # 2) Units: arcsec -> radians; wavelengths -> radians/pixel with 2π
+#         cell_rad = cell_size * np.pi / (180.0 * 3600.0)
+#         u_radpix = torch.from_numpy(uu).to(device).float() * (2.0*np.pi*cell_rad)
+#         v_radpix = torch.from_numpy(vv).to(device).float() * (2.0*np.pi*cell_rad)
+        
+#         # 3) Flat-sky NUFFT
+#         if self.Nw is None:
+#             points = torch.stack([-v_radpix, u_radpix], dim=0)            # [2, N]
+#             c = x_pb.to(torch.complex64)
+#             return (cell_size**2) * pytorch_finufft.functional.finufft_type2(
+#                 points, c, isign=1, modeord=0
+#             )
+        
+#         # 4) W-stacking path
+#         uua = u_radpix
+#         vva = v_radpix
+#         wwa = torch.from_numpy(ww).to(device).float()
+
+#         H, W = x_pb.shape
+#         lx = torch.linspace(-W/2, W/2 - 1, W, device=device) * cell_rad
+#         ly = torch.linspace(-H/2, H/2 - 1, H, device=device) * cell_rad
+#         l, m = torch.meshgrid(lx, ly, indexing='xy')
+#         r2 = l**2 + m**2
+        
+#         model_vis = torch.empty_like(uua, dtype=torch.complex64)
+#         w_edges = torch.linspace(wwa.min(), wwa.max(), self.Nw + 1, device=device)
+#         w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
+#         bin_ids = torch.bucketize(wwa, w_edges) - 1
+#         bin_ids = torch.clamp(bin_ids, 0, self.Nw - 1)
+        
+#         for j in range(self.Nw):
+#             idx = (bin_ids == j).nonzero(as_tuple=True)[0]
+#             if idx.numel() == 0:
+#                 continue
+            
+#             points = torch.stack([-vva[idx], uua[idx]], dim=0)
+#             phase = torch.exp(1j * np.pi * w_centers[j] * r2) # r^2 uses radians
+#             x_mod = x_pb.to(torch.complex64) * phase
+            
+#             vis_bin = (cell_size**2) * pytorch_finufft.functional.finufft_type2(
+#                 points, x_mod, isign=1, modeord=0
+#             )
+#             model_vis[idx] = vis_bin
+            
+#         return model_vis
+
+
+#     def objective(self, x, vis_data, device,
+#                   pb_list=None, grid_list=None, pb=None, grid_array=None,
+#                   cell_size=None, fftsd=None, fftbeam=None, tapper=None,
+#                   lambda_sd=0.0, fftkernel=None, beam_workers=4, verbose=False, **_):
+#         x.requires_grad_(True)
+#         if x.is_leaf and x.grad is not None:
+#             x.grad.zero_()
+
+#         # fan-out pb/grid if given as full stacks
+#         nbeam = len(vis_data.centers)
+#         if pb_list is None:
+#             if pb is None: raise ValueError("Need pb_list or pb array")
+#             pb_list = [pb[b] for b in range(nbeam)]
+#         if grid_list is None:
+#             if grid_array is None: raise ValueError("Need grid_list or grid_array")
+#             grid_list = [grid_array[b] for b in range(nbeam)]
+
+#         loss_scalar = 0.0
+
+#         # --- χ² over all (chan, beam) ---
+#         for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
+#             x_chan = x[c] # (H,W)
+#             model_vis = self.forward_beam(x_chan, pb_list[b], grid_list[b], uu, vv, ww, cell_size, device)
+
+#             # match old pipeline: data were conjugated
+#             I_use = I.conj() if self.conj_data else I
+
+#             vis_real = torch.from_numpy(I_use.real).to(device)
+#             vis_imag = torch.from_numpy(I_use.imag).to(device)
+#             sig      = torch.from_numpy(sI).to(device)
+
+#             residual_real = (model_vis.real - vis_real) / sig
+#             residual_imag = (model_vis.imag - vis_imag) / sig
+#             J = torch.sum(residual_real**2 + residual_imag**2)
+#             L = 0.5 * J
+#             L.backward(retain_graph=True)
+#             loss_scalar += L.item()
+
+#             if verbose:
+#                 print_gpu_memory(device)
+
+#         # --- SD term (unchanged) ---
+#         if lambda_sd > 0.0 and fftsd is not None:
+#             fftsd_t = torch.from_numpy(fftsd).to(device)
+#             fftbeam_t = torch.from_numpy(fftbeam).to(device)
+#             tapper_t = torch.from_numpy(tapper).to(device)
+#             xfft2 = tfft2(x * tapper_t)
+#             model_sd = (cell_size**2) * xfft2 * fftbeam_t
+#             Lsd = 0.5 * (torch.nansum((model_sd.real - fftsd_t.real)**2) +
+#                          torch.nansum((model_sd.imag - fftsd_t.imag)**2)) * lambda_sd
+#             Lsd.backward(retain_graph=True)
+#             loss_scalar += Lsd.item()
+
+#         # --- Reg (unchanged) ---
+#         if self.lambda_r > 0.0 and fftkernel is not None:
+#             tapper_t = torch.from_numpy(tapper).to(device)
+#             fftkernel_t = torch.from_numpy(fftkernel).to(device)
+#             xfft2 = tfft2(x * tapper_t)
+#             conv = (cell_size**2) * xfft2 * fftkernel_t
+#             Lr = 0.5 * torch.nansum(torch.abs(conv)**2) * self.lambda_r
+#             Lr.backward()
+#             loss_scalar += Lr.item()
+
+#         return torch.tensor(loss_scalar)
 
 
 #------------------------------------------
