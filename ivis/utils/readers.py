@@ -151,6 +151,39 @@ class VisIData:
                 if I.size:
                     yield c, b, I, sI, uu, vv, ww
 
+
+    def single_channel(self, c: int, copy: bool = False) -> "VisIData":
+        """
+        Return a VisIData containing only channel c (shape (1, nbeam, nvis_max)).
+        By default returns views (no copy); set copy=True for independent arrays.
+        """
+        # channel slice
+        cs = slice(c, c+1)
+        
+        def maybe(a):
+            return a[cs].copy() if copy else a[cs]
+        
+        return VisIData(
+            frequency=self.frequency[cs].copy() if copy else self.frequency[cs],
+            velocity=self.velocity[cs].copy()   if copy else self.velocity[cs],
+            centers=self.centers,                  # same object array (beams)
+            nvis=self.nvis.copy() if copy else self.nvis,
+            uu=self.uu.copy() if copy else self.uu,
+            vv=self.vv.copy() if copy else self.vv,
+            ww=self.ww.copy() if copy else self.ww,
+            data_I=maybe(self.data_I),
+            sigma_I=maybe(self.sigma_I),
+            flag_I=maybe(self.flag_I),
+        )
+    
+    def iter_single_channel(self, copy: bool = False):
+        """
+        Iterate over channels, yielding (c, VisIData_with_only_that_channel).
+        """
+        for c in range(self.frequency.shape[0]):
+            yield c, self.single_channel(c, copy=copy)
+
+
 # ----------------------------- Public loader ------------------------------
 
 def _read_one_ms(ms_path: str,
@@ -783,8 +816,8 @@ def iter_blocks_chan_beam_via_slabs(
 
 if __name__ == "__main__":
     # Example usage — adjust path + channels
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
+    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
 
     # # Single shot load (channels 0..99)
     # visI = read_ms_block_I(
@@ -811,21 +844,19 @@ if __name__ == "__main__":
     #     del slab_vis
 
 
-    # concat
-    print("Test #Concat all")
-    vis_all = read_ms_blocks_I(
-        ms_root=ms_dir,
-        uvmin=20.0, uvmax=5000.0,
-        chan_sel=slice(0, 4),
-        keep_autocorr=False,
-        prefer_weight_spectrum=True,
-        mode="concat",
-        n_workers=4,
-    )
-    for c, b, I, sI, uu, vv, ww in vis_all.iter_chan_beam_I():
-        pass
-
-    stop
+    # # concat
+    # print("Test #Concat all")
+    # vis_all = read_ms_blocks_I(
+    #     ms_root=ms_dir,
+    #     uvmin=20.0, uvmax=5000.0,
+    #     chan_sel=slice(0, 4),
+    #     keep_autocorr=False,
+    #     prefer_weight_spectrum=True,
+    #     mode="concat",
+    #     n_workers=4,
+    # )
+    # for c, b, I, sI, uu, vv, ww in vis_all.iter_chan_beam_I():
+    #     pass
     
     # # keep separate
     # vis_blocks = read_ms_blocks_I(
@@ -840,16 +871,21 @@ if __name__ == "__main__":
 
     # Option A — Stream slabs per block (moderate RAM, simple)
     print("Test # Option A — Stream slabs per block (moderate RAM, simple)")
+
     for bi, bdir, c0, c1, visI in iter_blocks_channel_slabs(
-        ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,8), slab=4
+            ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,128), slab=16
     ):
         logger.info(f"[block {bi}] {os.path.basename(bdir)} slab [{c0}:{c1}) -> {visI.data_I.shape}")
+        for rel_c in range(visI.frequency.shape[0]):
+            logger.info(f"Get single channel {rel_c} from slab [{c0}:{c1}) -> {visI.data_I.shape}")
+            chan_vis = visI.single_channel(rel_c, copy=False)
         del visI
 
-    # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)
-    print("Test # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)")
-    for bi, c, b, I, sI, uu, vv, ww in iter_blocks_chan_beam_via_slabs(
-        ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,8), slab=4
-    ):
-        # NUFFT/predict/imaging for just this (block,chan,beam) slice
-        pass
+
+    # # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)
+    # print("Test # Option B — Stream (block, channel, beam) inside slabs (lowest RAM)")
+    # for bi, c, b, I, sI, uu, vv, ww in iter_blocks_chan_beam_via_slabs(
+    #     ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,8), slab=4
+    # ):
+    #     # NUFFT/predict/imaging for just this (block,chan,beam) slice
+    #     pass
