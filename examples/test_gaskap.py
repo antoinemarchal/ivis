@@ -44,7 +44,7 @@ if __name__ == '__main__':
     #PRE-COMPUTE DATA
     #untardir and fixms
     # data_processor.untardir(max_workers=56, clear=True) #warning clean=True will clear the .tar files
-    data_processor.fixms()
+    # data_processor.fixms()
     stop
     # Continuum subtractin using casatools
     #XXX fixme
