@@ -758,25 +758,114 @@ def iter_blocks_channel_slabs(
     slab: int = 64,
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
-    n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS    
+    n_workers: int = 0,
+    concat: bool = False,  # NEW: if True, concat slabs across blocks before yielding
 ):
     """
-    Yield (bi, block_dir, c0, c1, visI) where visI is a VisIData slab for that block.
+    Yield slabs for each block, or concatenated slabs if concat=True.
+
+    If concat=False:
+        Yields (bi, block_dir, c0, c1, visI) for each block slab.
+
+    If concat=True:
+        Yields (c0, c1, visI_concat) where visI_concat has all beams from all blocks
+        for that channel range (like mode="concat" but streaming).
     """
     block_dirs = _list_block_dirs(ms_root)
-    for bi, bdir in enumerate(block_dirs):
-        for c0, c1, visI in iter_channel_slabs(
-            bdir,
-            uvmin=uvmin,
-            uvmax=uvmax,
-            chan_sel=chan_sel,
-            slab=slab,
-            keep_autocorr=keep_autocorr,
-            prefer_weight_spectrum=prefer_weight_spectrum,
-            n_workers=n_workers,
-        ):
-            yield bi, bdir, c0, c1, visI
-            # caller should del visI when done to free RAM
+
+    if not concat:
+        for bi, bdir in enumerate(block_dirs):
+            for c0, c1, visI in iter_channel_slabs(
+                bdir,
+                uvmin=uvmin,
+                uvmax=uvmax,
+                chan_sel=chan_sel,
+                slab=slab,
+                keep_autocorr=keep_autocorr,
+                prefer_weight_spectrum=prefer_weight_spectrum,
+                n_workers=n_workers,
+            ):
+                yield bi, bdir, c0, c1, visI
+                # caller should del visI when done
+    else:
+        # Accumulate slabs from each block for the same channel range
+        from collections import defaultdict
+        slab_accum = defaultdict(list)
+        n_blocks = len(block_dirs)
+
+        for bi, bdir in enumerate(block_dirs):
+            for c0, c1, visI in iter_channel_slabs(
+                bdir,
+                uvmin=uvmin,
+                uvmax=uvmax,
+                chan_sel=chan_sel,
+                slab=slab,
+                keep_autocorr=keep_autocorr,
+                prefer_weight_spectrum=prefer_weight_spectrum,
+                n_workers=n_workers,
+            ):
+                slab_accum[(c0, c1)].append(visI)
+
+                # Once we have all blocks for this slab range -> concat & yield
+                if len(slab_accum[(c0, c1)]) == n_blocks:
+                    vis_concat = concat_visidata_slabs(slab_accum[(c0, c1)])
+                    yield c0, c1, vis_concat
+                    del slab_accum[(c0, c1)]
+
+
+def concat_visidata_slabs(slabs: list[VisIData]) -> VisIData:
+    """
+    Concatenate a list of VisIData slabs (same channels, different beams)
+    into one VisIData with all beams.
+    """
+    if not slabs:
+        raise ValueError("No slabs to concatenate")
+
+    # Frequency/velocity arrays are identical in all slabs
+    freq = slabs[0].frequency
+    vel  = slabs[0].velocity
+    nchan = freq.shape[0]
+
+    total_beams = sum(s.uu.shape[0] for s in slabs)
+    global_nvis_max = max(int(s.nvis.max()) for s in slabs)
+
+    data_I  = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.complex64)
+    sigma_I = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.float32)
+    flag_I  = np.ones( (nchan, total_beams, global_nvis_max), dtype=bool)
+
+    uu = np.zeros((total_beams, global_nvis_max), dtype=np.float32)
+    vv = np.zeros_like(uu)
+    ww = np.zeros_like(uu)
+    nvis = np.zeros((total_beams,), dtype=np.int32)
+    centers = np.empty((total_beams,), dtype=object)
+
+    b_off = 0
+    for slab in slabs:
+        nb = slab.uu.shape[0]
+        for j in range(nb):
+            nv = int(slab.nvis[j])
+            dst = b_off + j
+            nvis[dst] = nv
+            centers[dst] = slab.centers[j]
+            uu[dst, :nv] = slab.uu[j, :nv]
+            vv[dst, :nv] = slab.vv[j, :nv]
+            ww[dst, :nv] = slab.ww[j, :nv]
+            data_I [:, dst, :nv] = slab.data_I[:, j, :nv]
+            sigma_I[:, dst, :nv] = slab.sigma_I[:, j, :nv]
+            flag_I [:, dst, :nv] = slab.flag_I[:, j, :nv]
+        b_off += nb
+
+    return VisIData(
+        frequency=freq,
+        velocity=vel,
+        centers=centers,
+        nvis=nvis,
+        uu=uu, vv=vv, ww=ww,
+        data_I=data_I,
+        sigma_I=sigma_I,
+        flag_I=flag_I,
+    )
+
 
 def iter_blocks_chan_beam_via_slabs(
     ms_root: str,
@@ -817,7 +906,7 @@ def iter_blocks_chan_beam_via_slabs(
 if __name__ == "__main__":
     # Example usage — adjust path + channels
     # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
 
     # # Single shot load (channels 0..99)
     # visI = read_ms_block_I(
@@ -868,12 +957,41 @@ if __name__ == "__main__":
     
     # for bi, vis in enumerate(vis_blocks):
     #     print("block", bi, vis.data_I.shape)
-
+        
     # Option A — Stream slabs per block (moderate RAM, simple)
     print("Test # Option A — Stream slabs per block (moderate RAM, simple)")
+    
+    for c0, c1, visI in iter_blocks_channel_slabs(
+            ms_root=ms_dir,
+            uvmin=20,
+            uvmax=5000,
+            chan_sel=slice(0,128),
+            slab=16,
+            concat=True,
+    ):
+        # Count all unflagged visibilities in this slab
+        total_vis = np.count_nonzero(~visI.flag_I)
+        logger.info(
+            f"Concat slab [{c0}:{c1}) -> {visI.data_I.shape}, total unflagged vis={total_vis}"
+        )
+        
+        for rel_c in range(visI.frequency.shape[0]):
+            logger.info(
+                f"Get single channel {rel_c} from slab [{c0}:{c1}) -> {visI.data_I.shape}"
+            )
+            chan_vis = visI.single_channel(rel_c, copy=False)
+            
+        del visI
 
+    stop
+    
     for bi, bdir, c0, c1, visI in iter_blocks_channel_slabs(
-            ms_root=ms_dir, uvmin=20, uvmax=5000, chan_sel=slice(0,128), slab=16
+            ms_root=ms_dir,
+            uvmin=20,
+            uvmax=5000,
+            chan_sel=slice(0,128),
+            slab=16,
+            # concat=True,
     ):
         logger.info(f"[block {bi}] {os.path.basename(bdir)} slab [{c0}:{c1}) -> {visI.data_I.shape}")
         for rel_c in range(visI.frequency.shape[0]):
