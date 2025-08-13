@@ -906,7 +906,7 @@ def iter_blocks_chan_beam_via_slabs(
 if __name__ == "__main__":
     # Example usage — adjust path + channels
     # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
 
     # # Single shot load (channels 0..99)
     # visI = read_ms_block_I(
