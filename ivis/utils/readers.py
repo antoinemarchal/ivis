@@ -905,8 +905,8 @@ def iter_blocks_chan_beam_via_slabs(
 
 if __name__ == "__main__":
     # Example usage — adjust path + channels
-    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
+    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
 
     # # Single shot load (channels 0..99)
     # visI = read_ms_block_I(
@@ -968,6 +968,7 @@ if __name__ == "__main__":
             chan_sel=slice(0,128),
             slab=16,
             concat=True,
+            n_workers=4,
     ):
         # Count all unflagged visibilities in this slab
         total_vis = np.count_nonzero(~visI.flag_I)
