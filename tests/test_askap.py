@@ -53,7 +53,7 @@ if __name__ == '__main__':
     vis_data = read_ms_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=12000,
-        chan_sel=slice(0, 2),
+        chan_sel=slice(980,982),
         keep_autocorr=False,
         prefer_weight_spectrum=False,
         mode="concat",
@@ -69,15 +69,14 @@ if __name__ == '__main__':
     #     n_workers=4,
     # )
 
-    stop
-
     # -------------------
     # User parameters
     # -------------------
     max_its = 20
     lambda_sd = 0
     lambda_r = 1
-    device = 0        # 0 for GPU, "cpu" for CPU
+    cost_device = 0        # 0 for GPU, "cpu" for CPU
+    optim_device = "cpu"        # 0 for GPU, "cpu" for CPU
     positivity = False
     init_params = np.zeros((2, shape[0], shape[1]), dtype=np.float32)
     
@@ -95,7 +94,8 @@ if __name__ == '__main__':
         max_its=max_its,
         lambda_sd=lambda_sd,
         positivity=positivity,
-        device=device,
+        cost_device=cost_device,
+        optim_device=optim_device,
         beam_workers=1
     )
     
