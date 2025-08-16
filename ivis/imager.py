@@ -187,6 +187,17 @@ class Imager3D:
         cost_dev  = self.cost_device
         optim_dev = self.optim_device
 
+        # ---- local helper: format GPU mem for any CUDA device ----
+        def _gpu_mem_str(dev: torch.device) -> str:
+            if dev.type != "cuda":
+                return ""
+            idx = dev.index if (dev.index is not None) else torch.cuda.current_device()
+            alloc    = torch.cuda.memory_allocated(idx) / 1024**2
+            reserved = torch.cuda.memory_reserved(idx)  / 1024**2
+            peak     = torch.cuda.max_memory_allocated(idx) / 1024**2
+            total    = torch.cuda.get_device_properties(idx).total_memory / 1024**2
+            return f"GPU[{idx}]: {alloc:.2f} MB alloc, {reserved:.2f} MB reserved, {peak:.2f} MB peak, {total:.2f} MB total"
+
         # --- Image/grid params ---
         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
@@ -247,6 +258,14 @@ class Imager3D:
 
         # --- PyTorch path (unbounded LBFGS on optim_device; cost on cost_device)
         else:
+            # Reset peak stats on any CUDA devices we might use
+            if cost_dev.type == "cuda":
+                idx = cost_dev.index if cost_dev.index is not None else torch.cuda.current_device()
+                torch.cuda.reset_peak_memory_stats(idx)
+            if optim_dev.type == "cuda":
+                idx = optim_dev.index if optim_dev.index is not None else torch.cuda.current_device()
+                torch.cuda.reset_peak_memory_stats(idx)
+
             logger.info(
                 f"Starting optimisation: PyTorch LBFGS on {optim_dev} (unconstrained); "
                 f"cost on {cost_dev}"
@@ -271,11 +290,10 @@ class Imager3D:
                     loss = model.objective(
                         x_param, device=cost_dev, **params
                     )
-                    # Ensure grads got written
                     if x_param.grad is None:
                         raise RuntimeError("objective() did not produce gradients on x_param.")
                 else:
-                    # Cross-device: evaluate on a leaf copy on cost_dev; copy its grad back
+                    # Cross-device: leaf copy on cost_dev; copy its grad back
                     x_for_cost = x_param.detach().to(cost_dev).requires_grad_(True)
                     loss = model.objective(
                         x_for_cost, device=cost_dev, **params
@@ -283,35 +301,45 @@ class Imager3D:
                     if x_for_cost.grad is None:
                         raise RuntimeError("objective() did not produce gradients on x_for_cost.")
                     x_param.grad = x_for_cost.grad.to(optim_dev)
+                    del x_for_cost  # release ASAP
 
-                # Logging
-                if optim_dev.type == "cuda":
-                    allocated = torch.cuda.memory_allocated(optim_dev) / 1024**2
-                    reserved  = torch.cuda.memory_reserved(optim_dev) / 1024**2
-                    total     = torch.cuda.get_device_properties(optim_dev).total_memory / 1024**2
-                    logger.info(
-                        f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
-                        f"(optim_dev={optim_dev}, cost_dev={cost_dev}) | "
-                        f"GPU: {allocated:.2f} MB alloc, {reserved:.2f} MB reserved, {total:.2f} MB total"
-                    )
-                else:
-                    logger.info(
-                        f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
-                        f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
-                    )
-                return loss  # can be a plain scalar tensor; objective already did backward()
+                # --- logging & sync (log any CUDA device actually in use) ---
+                mem_bits = []
+                if cost_dev.type == "cuda":
+                    torch.cuda.synchronize(cost_dev)
+                    mem_bits.append(_gpu_mem_str(cost_dev))
+                if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+                    torch.cuda.synchronize(optim_dev)
+                    mem_bits.append(_gpu_mem_str(optim_dev))
+
+                mem_info = " | ".join([b for b in mem_bits if b])
+                logger.info(
+                    f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
+                    f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
+                    + (f" | {mem_info}" if mem_info else "")
+                )
+                return loss  # objective already did backward()
 
             import time
-            if optim_dev.type == "cuda":
-                torch.cuda.synchronize()
+            if cost_dev.type == "cuda":
+                torch.cuda.synchronize(cost_dev)
             t0 = time.perf_counter()
             final_loss = opt.step(closure)
-            if optim_dev.type == "cuda":
-                torch.cuda.synchronize()
+            if cost_dev.type == "cuda":
+                torch.cuda.synchronize(cost_dev)
             elapsed = time.perf_counter() - t0
+
+            end_mem_bits = []
+            if cost_dev.type == "cuda":
+                end_mem_bits.append(_gpu_mem_str(cost_dev))
+            if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+                end_mem_bits.append(_gpu_mem_str(optim_dev))
+            end_mem_info = " | ".join([b for b in end_mem_bits if b])
+
             logger.info(
                 f"[Timing] LBFGS (optim_dev={optim_dev}, cost_dev={cost_dev}) "
                 f"took {elapsed:.2f} s; final loss={float(final_loss):.6g}"
+                + (f" | {end_mem_info}" if end_mem_info else "")
             )
 
             result = x_param.detach().cpu().numpy().reshape(param_shape)
@@ -331,8 +359,7 @@ class Imager3D:
             return (result_Jy * u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
         else:
             logger.error("Unknown unit type.")
-            return result
-        
+            return result        
 
 # Imager class    
 class Imager:
