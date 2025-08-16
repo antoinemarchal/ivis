@@ -419,11 +419,12 @@ class Imager3D:
                 torch.cuda.synchronize(cost_dev)
             elapsed = time.perf_counter() - t0
 
-            end_mem_bits = []
-            for dev in [cost_dev, optim_dev]:
-                if dev.type == "cuda":
-                    end_mem_bits.append(_gpu_mem_str(dev))
-            end_mem_info = " | ".join(end_mem_bits)
+            if optim_dev == cost_dev:
+                end_mem_info = _gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
+            else:
+                end_mem_info = " | ".join(
+                    [_gpu_mem_str(d) for d in (cost_dev, optim_dev) if d.type == "cuda"]
+                )
 
             logger.info(
                 f"[Timing] LBFGS (optim_dev={optim_dev}, cost_dev={cost_dev}) "
