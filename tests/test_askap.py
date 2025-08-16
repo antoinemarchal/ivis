@@ -9,9 +9,6 @@ from astropy.coordinates import SkyCoord
 from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
-import queue  # Standard Python queue for passing data between threads
-import threading
-import multiprocessing
 import time
 
 from ivis.io import DataProcessor
@@ -55,12 +52,12 @@ if __name__ == '__main__':
     # -------------------
     vis_data = read_ms_blocks_I(
         ms_root=path_ms,
-        uvmin=0, uvmax=7000,
-        chan_sel=slice(0, 4),
+        uvmin=0, uvmax=12000,
+        chan_sel=slice(0, 2),
         keep_autocorr=False,
         prefer_weight_spectrum=False,
         mode="concat",
-        n_workers=8,
+        n_workers=4,
     )
     # vis_data = data_processor.read_vis_visidata(
     #     uvmin=0.0,
