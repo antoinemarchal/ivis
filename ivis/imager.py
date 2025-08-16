@@ -170,7 +170,6 @@ class Imager3D:
             grid_array=grid_native
         )
     
-
     def process(self, model=None, units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32,
                 down_factor=4, coarse_its=25, fine_its=5):
@@ -178,7 +177,11 @@ class Imager3D:
         import torch.nn.functional as F
         if model is None: raise ValueError("Must pass a model instance to `process()`.")
 
-        def f32c(a): return np.array(a, dtype=np.float32, order="C", copy=False)
+        def f32c(a):
+            arr = np.asarray(a, dtype=np.float32)            # allow copy if needed (NumPy 2.0 safe)
+            if not arr.flags.c_contiguous:
+                arr = np.ascontiguousarray(arr)              # ensure C-contiguous for torch.from_numpy
+            return arr
 
         def resize_img(x, hw):  # x: (H,W) or (C,H,W) -> same rank with new (H,W)
             t = torch.from_numpy(f32c(x))
@@ -227,22 +230,23 @@ class Imager3D:
         self.grid= grid_ds if isinstance(grid0,(list,tuple)) else grid_ds[0]
         self.init_params = init_ds
         self.max_its = coarse_its
-        coarse = self.process_standalone(model=model, units="Jy/arcsec^2", history_size=history_size, dtype=dtype)
+        coarse = self.process2(model=model, units="Jy/arcsec^2", history_size=history_size, dtype=dtype)
 
         # upsample to full
-        coarse_t = torch.from_numpy(f32c(coarse))
-        if coarse_t.ndim==2:
-            init_up = F.interpolate(coarse_t[None,None], size=(H,W), mode="bilinear", align_corners=True)[0,0].cpu().numpy()
+        ct = torch.from_numpy(f32c(coarse))
+        if ct.ndim==2:
+            init_up = F.interpolate(ct[None,None], size=(H,W), mode="bilinear", align_corners=True)[0,0].cpu().numpy()
         else:
-            init_up = F.interpolate(coarse_t[:,None], size=(H,W), mode="bilinear", align_corners=True)[:,0].cpu().numpy()
+            init_up = F.interpolate(ct[:,None], size=(H,W), mode="bilinear", align_corners=True)[:,0].cpu().numpy()
 
         # fine
         self.hdr, self.pb, self.grid = hdr0, pb0, grid0
         self.init_params, self.max_its = init_up, fine_its
-        out = self.process_standalone(model=model, units=units, history_size=history_size, dtype=dtype)
+        out = self.process2(model=model, units=units, history_size=history_size, dtype=dtype)
 
         self.max_its = its0
         return out
+
 
 
     def process_standalone(self, model=None, units="Jy/arcsec^2",
