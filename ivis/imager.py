@@ -29,6 +29,7 @@ import tarfile
 import concurrent.futures
 from pathlib import Path
 from scipy.optimize import fmin_l_bfgs_b
+import time
 
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
@@ -168,9 +169,83 @@ class Imager3D:
             cell_size=cell_size.value,
             grid_array=grid_native
         )
-
+    
 
     def process(self, model=None, units="Jy/arcsec^2",
+                history_size=10, dtype=torch.float32,
+                down_factor=4, coarse_its=25, fine_its=5):
+        import numpy as np, torch
+        import torch.nn.functional as F
+        if model is None: raise ValueError("Must pass a model instance to `process()`.")
+
+        def f32c(a): return np.array(a, dtype=np.float32, order="C", copy=False)
+
+        def resize_img(x, hw):  # x: (H,W) or (C,H,W) -> same rank with new (H,W)
+            t = torch.from_numpy(f32c(x))
+            if t.ndim == 2:
+                return F.interpolate(t[None,None], size=hw, mode="bilinear", align_corners=True)[0,0].numpy()
+            if t.ndim == 3:
+                return F.interpolate(t[:,None], size=hw, mode="bilinear", align_corners=True)[:,0].numpy()
+            raise ValueError(f"img rank {t.ndim}")
+
+        def grid_to_nchw(g):  # -> (N,2,H,W) and tag
+            g = f32c(g)
+            if g.ndim == 3 and g.shape[-1]==2:   return torch.from_numpy(g).permute(2,0,1)[None], ("hw2", g.shape)
+            if g.ndim == 4 and g.shape[-1]==2:   return torch.from_numpy(g).permute(0,3,1,2),     ("bhw2", g.shape)
+            if g.ndim == 5 and g.shape[1]==1 and g.shape[-1]==2:
+                gs = np.squeeze(g,1);            return torch.from_numpy(gs).permute(0,3,1,2),     ("n1hw2", g.shape)
+            if g.ndim == 4 and g.shape[1]==2:    return torch.from_numpy(g),                      ("n2hw", g.shape)
+            raise ValueError(f"grid shape {g.shape}")
+
+        def nchw_to_grid(t, tag):  # (N,2,H,W) -> original rank; ensure batch=1 for hw2
+            kind,_ = tag
+            if kind=="hw2":   return t.permute(0,2,3,1)[0].cpu().numpy()[None,...]
+            if kind=="bhw2":  return t.permute(0,2,3,1).cpu().numpy()
+            if kind=="n1hw2": return t.permute(0,2,3,1).cpu().numpy()[:,None,...]
+            if kind=="n2hw":  return t.cpu().numpy()
+            raise ValueError(f"tag {kind}")
+
+        def resize_grid(g, hw):
+            t,tag = grid_to_nchw(g)
+            s = F.interpolate(t.float(), size=hw, mode="bilinear", align_corners=True)
+            return nchw_to_grid(s, tag)
+
+        init = f32c(self.init_params)
+        H,W = init.shape[-2], init.shape[-1]
+        Hc,Wc = max(1,H//down_factor), max(1,W//down_factor)
+
+        hdr0, pb0, grid0, init0, its0 = self.hdr, self.pb, self.grid, self.init_params, self.max_its
+
+        # downsample
+        init_ds = resize_img(init, (Hc,Wc))
+        pb_ds   = [resize_img(p,(Hc,Wc)) for p in (pb0 if isinstance(pb0,(list,tuple)) else [pb0])]
+        grid_ds = [resize_grid(g,(Hc,Wc)) for g in (grid0 if isinstance(grid0,(list,tuple)) else [grid0])]
+
+        # coarse
+        self.hdr = dutils.downsample_hdr(hdr0, down_factor)
+        self.pb  = pb_ds if isinstance(pb0,(list,tuple)) else pb_ds[0]
+        self.grid= grid_ds if isinstance(grid0,(list,tuple)) else grid_ds[0]
+        self.init_params = init_ds
+        self.max_its = coarse_its
+        coarse = self.process_standalone(model=model, units="Jy/arcsec^2", history_size=history_size, dtype=dtype)
+
+        # upsample to full
+        coarse_t = torch.from_numpy(f32c(coarse))
+        if coarse_t.ndim==2:
+            init_up = F.interpolate(coarse_t[None,None], size=(H,W), mode="bilinear", align_corners=True)[0,0].cpu().numpy()
+        else:
+            init_up = F.interpolate(coarse_t[:,None], size=(H,W), mode="bilinear", align_corners=True)[:,0].cpu().numpy()
+
+        # fine
+        self.hdr, self.pb, self.grid = hdr0, pb0, grid0
+        self.init_params, self.max_its = init_up, fine_its
+        out = self.process_standalone(model=model, units=units, history_size=history_size, dtype=dtype)
+
+        self.max_its = its0
+        return out
+
+
+    def process_standalone(self, model=None, units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32):
         """
         Devices:

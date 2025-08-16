@@ -68,7 +68,7 @@ vis_data = data_processor.read_vis_visidata(
 # -------------------
 max_its = 20
 lambda_sd = 0
-lambda_r = 10
+lambda_r = 1
 cost_device = 0        # 0 for GPU, "cpu" for CPU
 optim_device = 0        # 0 for GPU, "cpu" for CPU
 positivity = False
@@ -101,8 +101,8 @@ model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 # -------------------
 # Run optimization
 # -------------------
-base = image_processor.process(model=model, units="Jy/arcsec^2")
-
+base = image_processor.process(model=model, units="Jy/arcsec^2", down_factor=2, coarse_its=5, fine_its=10)
+# base = image_processor.process_standalone(model=model, units="Jy/arcsec^2")
 # # Save or inspect result
 # fits.writeto(pathout + "ivis_reconstruction.fits", base, target_header, overwrite=True)
 

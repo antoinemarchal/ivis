@@ -43,10 +43,82 @@ Antoine Marchal, 2024–2025
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from astropy.wcs.utils import pixel_to_pixel
 from astropy import wcs
 from astropy.modeling import models, fitting
 import matplotlib.pyplot as plt
+
+
+
+def _to_nchw(arr: np.ndarray, expect_complex: bool = False) -> torch.Tensor:
+    """
+    Convert numpy array into 4D NCHW tensor for interpolation.
+
+    - If expect_complex=False: arr is (H,W), (B,H,W), or (N,B,H,W)
+      returns (N,1,H,W).
+    - If expect_complex=True: arr has trailing axis 2 for (real,imag)
+      e.g. (H,W,2), (B,H,W,2), or (N,1,H,W,2).
+      returns (N,2,H,W).
+    """
+    arr = np.array(arr, dtype=np.float32, order="C", copy=False)
+    t = torch.from_numpy(arr)
+
+    if expect_complex:
+        if t.ndim == 3 and t.shape[-1] == 2:
+            # (H,W,2) → (1,2,H,W)
+            t = t.permute(2, 0, 1).unsqueeze(0)
+        elif t.ndim == 4 and t.shape[-1] == 2:
+            # (B,H,W,2) → (B,2,H,W)
+            t = t.permute(0, 3, 1, 2)
+        elif t.ndim == 5 and t.shape[1] == 1 and t.shape[-1] == 2:
+            # (N,1,H,W,2) → (N,2,H,W)
+            t = t.squeeze(1).permute(0, 3, 1, 2)
+        else:
+            raise ValueError(f"Unsupported complex shape {arr.shape}")
+    else:
+        if t.ndim == 2:
+            # (H,W) → (1,1,H,W)
+            t = t.unsqueeze(0).unsqueeze(0)
+        elif t.ndim == 3:
+            # (B,H,W) → (B,1,H,W)
+            t = t.unsqueeze(1)
+        elif t.ndim == 4 and t.shape[1] == 1:
+            # (N,1,H,W) already fine
+            pass
+        else:
+            raise ValueError(f"Unsupported real shape {arr.shape}")
+
+    return t.float()
+
+
+def downsample_pb(pb: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample primary beam array (real, 2D/3D) with bilinear interpolation."""
+    t = _to_nchw(pb, expect_complex=False)
+    small = F.interpolate(t, scale_factor=1.0/factor,
+                          mode="bilinear", align_corners=False)
+    return small.squeeze(0).squeeze(0).cpu().numpy()
+
+
+def downsample_grid(grid: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample uv-grid array with trailing complex axis (...,2)."""
+    t = _to_nchw(grid, expect_complex=True)
+    small = F.interpolate(t, scale_factor=1.0/factor,
+                          mode="bilinear", align_corners=False)
+    # Back to (N,H,W,2)
+    return small.permute(0, 2, 3, 1).cpu().numpy()
+
+
+
+def downsample_hdr(hdr, factor: int):
+    """Return a copy of FITS-like header with updated NAXIS and CDELT."""
+    hdr = hdr.copy()
+    hdr["NAXIS1"] //= factor
+    hdr["NAXIS2"] //= factor
+    hdr["CDELT1"] *= factor
+    hdr["CDELT2"] *= factor
+    return hdr
+
 
 def wcs2D(hdr):
     """
