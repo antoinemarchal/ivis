@@ -290,25 +290,40 @@ class Imager3D:
                     )
                     if x_param.grad is None:
                         raise RuntimeError("objective() did not produce gradients on x_param.")
+
+                    # --- log now (graph already freed by backward, but param still live) ---
+                    mem_bits = []
+                    if cost_dev.type == "cuda":
+                        torch.cuda.synchronize(cost_dev)
+                        mem_bits.append(_gpu_mem_str(cost_dev))
+                    if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+                        torch.cuda.synchronize(optim_dev)
+                        mem_bits.append(_gpu_mem_str(optim_dev))
+                    mem_info = " | ".join(mem_bits)
+
                 else:
-                    # Cross-device: leaf copy on cost_dev; copy its grad back
+                    # Cross-device: leaf copy on cost_dev; DO NOT free before logging
                     x_for_cost = x_param.detach().to(cost_dev).requires_grad_(True)
                     loss = model.objective(
                         x_for_cost, device=cost_dev, **params
                     )
                     if x_for_cost.grad is None:
                         raise RuntimeError("objective() did not produce gradients on x_for_cost.")
+
+                    # --- log BEFORE copying grad back / freeing x_for_cost ---
+                    mem_bits = []
+                    if cost_dev.type == "cuda":
+                        torch.cuda.synchronize(cost_dev)
+                        mem_bits.append(_gpu_mem_str(cost_dev))
+                    if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+                        torch.cuda.synchronize(optim_dev)
+                        mem_bits.append(_gpu_mem_str(optim_dev))
+                    mem_info = " | ".join(mem_bits)
+
+                    # Now move grad off GPU and free the leaf
                     x_param.grad = x_for_cost.grad.to(optim_dev)
-                    del x_for_cost  # release ASAP
+                    del x_for_cost  # release AFTER logging so allocated != 0
 
-                # --- logging & sync (log any CUDA device in play) ---
-                mem_bits = []
-                for dev in [cost_dev, optim_dev]:
-                    if dev.type == "cuda":
-                        torch.cuda.synchronize(dev)
-                        mem_bits.append(_gpu_mem_str(dev))
-
-                mem_info = " | ".join(mem_bits)
                 logger.info(
                     f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
                     f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
