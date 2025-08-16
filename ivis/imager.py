@@ -259,12 +259,10 @@ class Imager3D:
         # --- PyTorch path (unbounded LBFGS on optim_device; cost on cost_device)
         else:
             # Reset peak stats on any CUDA devices we might use
-            if cost_dev.type == "cuda":
-                idx = cost_dev.index if cost_dev.index is not None else torch.cuda.current_device()
-                torch.cuda.reset_peak_memory_stats(idx)
-            if optim_dev.type == "cuda":
-                idx = optim_dev.index if optim_dev.index is not None else torch.cuda.current_device()
-                torch.cuda.reset_peak_memory_stats(idx)
+            for dev in [cost_dev, optim_dev]:
+                if dev.type == "cuda":
+                    idx = dev.index if dev.index is not None else torch.cuda.current_device()
+                    torch.cuda.reset_peak_memory_stats(idx)
 
             logger.info(
                 f"Starting optimisation: PyTorch LBFGS on {optim_dev} (unconstrained); "
@@ -303,16 +301,14 @@ class Imager3D:
                     x_param.grad = x_for_cost.grad.to(optim_dev)
                     del x_for_cost  # release ASAP
 
-                # --- logging & sync (log any CUDA device actually in use) ---
+                # --- logging & sync (log any CUDA device in play) ---
                 mem_bits = []
-                if cost_dev.type == "cuda":
-                    torch.cuda.synchronize(cost_dev)
-                    mem_bits.append(_gpu_mem_str(cost_dev))
-                if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
-                    torch.cuda.synchronize(optim_dev)
-                    mem_bits.append(_gpu_mem_str(optim_dev))
+                for dev in [cost_dev, optim_dev]:
+                    if dev.type == "cuda":
+                        torch.cuda.synchronize(dev)
+                        mem_bits.append(_gpu_mem_str(dev))
 
-                mem_info = " | ".join([b for b in mem_bits if b])
+                mem_info = " | ".join(mem_bits)
                 logger.info(
                     f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
                     f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
@@ -330,11 +326,10 @@ class Imager3D:
             elapsed = time.perf_counter() - t0
 
             end_mem_bits = []
-            if cost_dev.type == "cuda":
-                end_mem_bits.append(_gpu_mem_str(cost_dev))
-            if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
-                end_mem_bits.append(_gpu_mem_str(optim_dev))
-            end_mem_info = " | ".join([b for b in end_mem_bits if b])
+            for dev in [cost_dev, optim_dev]:
+                if dev.type == "cuda":
+                    end_mem_bits.append(_gpu_mem_str(dev))
+            end_mem_info = " | ".join(end_mem_bits)
 
             logger.info(
                 f"[Timing] LBFGS (optim_dev={optim_dev}, cost_dev={cost_dev}) "
@@ -359,8 +354,9 @@ class Imager3D:
             return (result_Jy * u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
         else:
             logger.error("Unknown unit type.")
-            return result        
+            return result
 
+        
 # Imager class    
 class Imager:
     """
