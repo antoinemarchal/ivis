@@ -230,7 +230,7 @@ class Imager3D:
         self.grid= grid_ds if isinstance(grid0,(list,tuple)) else grid_ds[0]
         self.init_params = init_ds
         self.max_its = coarse_its
-        coarse = self.process2(model=model, units="Jy/arcsec^2", history_size=history_size, dtype=dtype)
+        coarse = self.process_standalone(model=model, units="Jy/arcsec^2", history_size=history_size, dtype=dtype)
 
         # upsample to full
         ct = torch.from_numpy(f32c(coarse))
@@ -242,7 +242,7 @@ class Imager3D:
         # fine
         self.hdr, self.pb, self.grid = hdr0, pb0, grid0
         self.init_params, self.max_its = init_up, fine_its
-        out = self.process2(model=model, units=units, history_size=history_size, dtype=dtype)
+        out = self.process_standalone(model=model, units=units, history_size=history_size, dtype=dtype)
 
         self.max_its = its0
         return out
