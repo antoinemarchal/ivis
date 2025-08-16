@@ -84,6 +84,16 @@ def _list_ms_sorted(ms_dir: str):
         raise FileNotFoundError(f"No .ms found under {ms_dir}")
     return sorted(items, key=_beamkey_by_c10)
 
+def _list_block_dirs_sorted(ms_root: str):
+    out = []
+    with os.scandir(ms_root) as it:
+        for de in it:
+            if de.name.startswith('.'):
+                continue
+            if de.is_dir():
+                out.append(os.path.join(ms_root, de.name))
+    return sorted(out, key=lambda p: _natkey(Path(p).name))
+
 def _phasecenter(ms_path: str) -> SkyCoord:
     with _quiet_tables():
         with table(f"{ms_path}/FIELD", readonly=True) as t:
@@ -445,7 +455,7 @@ def read_ms_block_I_no_parrallel(
     UV filtering is done in METERS using bounds derived from the selected channel range,
     so we don't throw away visibilities that are in-range for some channel.
     """
-    ms_list = _list_ms(ms_dir)
+    ms_list = _list_ms_sorted(ms_dir)
 
     # ---- normalize channel selection -> explicit indices ----
     all_freq, all_vel = _freqs(ms_list[0])
@@ -720,7 +730,7 @@ def iter_channel_slabs(
         where start/stop are absolute channel indices into the SPW (Python slice semantics),
         and visI is a VisIData with shape (stop-start, nbeam, nvis_max).
     """
-    ms_list = _list_ms(ms_dir)
+    ms_list = _list_ms_sorted(ms_dir)
     all_freq, _ = _freqs(ms_list[0])
     all_idx = np.arange(all_freq.size, dtype=int)
 
