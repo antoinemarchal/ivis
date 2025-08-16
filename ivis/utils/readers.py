@@ -71,7 +71,21 @@ def _beamkey_by_c10(path: str):
         return (0, int(m2.group(1)), name.lower())
     return (1, *_natkey(name))  # fallback: natural sort on the whole name
 
+
 def _list_ms_sorted(ms_dir: str):
+    """List .ms directories in the same order as raw `ls` (lexicographic)."""
+    items = []
+    with os.scandir(ms_dir) as it:
+        for de in it:
+            if de.name.startswith('.'):
+                continue
+            if de.is_dir() and de.name.lower().endswith('.ms'):
+                items.append(os.path.join(ms_dir, de.name))
+    if not items:
+        raise FileNotFoundError(f"No .ms found under {ms_dir}")
+    return sorted(items)  # plain lexicographic, like `ls`
+
+def _list_ms_sorted_natural(ms_dir: str):
     """List .ms directories and sort by beam number (C10_#), then natural name."""
     items = []
     with os.scandir(ms_dir) as it:
