@@ -68,8 +68,9 @@ vis_data = data_processor.read_vis_visidata(
 # -------------------
 max_its = 20
 lambda_sd = 0
-lambda_r = 1
-device = 0        # 0 for GPU, "cpu" for CPU
+lambda_r = 10
+cost_device = 0        # 0 for GPU, "cpu" for CPU
+optim_device = 0        # 0 for GPU, "cpu" for CPU
 positivity = False
 init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
 
@@ -87,7 +88,8 @@ image_processor = Imager3D(
     max_its=max_its,
     lambda_sd=lambda_sd,
     positivity=positivity,
-    device=device,
+    cost_device=cost_device,
+    optim_device=optim_device,
     beam_workers=1
 )
 

@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-import os, glob, contextlib, numpy as np
+import os, re, glob, contextlib, numpy as np
 from dataclasses import dataclass
 from typing import Iterator, Tuple, Sequence, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
+from pathlib import Path
 
 from casacore.tables import table
 from astropy.constants import c as c_light
@@ -51,11 +52,37 @@ def _check_same_freq_grid(blocks: list["VisIData"]) -> None:
                 "Use the same SPW/chan_sel or resample first."
             )
 
-def _list_ms(ms_dir: str) -> Sequence[str]:
-    ms_list = sorted(glob.glob(os.path.join(ms_dir, "*.ms")))
-    if not ms_list:
-        raise FileNotFoundError(f"No .ms found in: {ms_dir}")
-    return ms_list
+def _natkey(name: str):
+    # Natural sort helper: "file2" < "file10"
+    return [int(s) if s.isdigit() else s.lower() for s in re.split(r'(\d+)', name)]
+
+def _beamkey_by_c10(path: str):
+    """
+    Prefer sorting by the number after 'C10_' in the filename, e.g. MW-C10_5_... -> 5.
+    Fallback to a general natural sort by full filename.
+    """
+    name = Path(path).name
+    m = re.search(r'[Cc]10[_-](\d+)', name)
+    if m:
+        return (0, int(m.group(1)), name.lower())
+    # optional: also recognize 'BEAM_###'
+    m2 = re.search(r'[Bb][Ee][Aa][Mm][_-]?(\d+)', name)
+    if m2:
+        return (0, int(m2.group(1)), name.lower())
+    return (1, *_natkey(name))  # fallback: natural sort on the whole name
+
+def _list_ms_sorted(ms_dir: str):
+    """List .ms directories and sort by beam number (C10_#), then natural name."""
+    items = []
+    with os.scandir(ms_dir) as it:
+        for de in it:
+            if de.name.startswith('.'):
+                continue
+            if de.is_dir() and de.name.lower().endswith('.ms'):
+                items.append(os.path.join(ms_dir, de.name))
+    if not items:
+        raise FileNotFoundError(f"No .ms found under {ms_dir}")
+    return sorted(items, key=_beamkey_by_c10)
 
 def _phasecenter(ms_path: str) -> SkyCoord:
     with _quiet_tables():
@@ -290,13 +317,17 @@ def read_ms_block_I(
 ) -> "VisIData":
     """
     Load a directory of .ms files (one per beam) into an I-only, channel-major VisIData.
-    Uses per-MS parallelism (processes) if n_workers > 1. Per-channel UV mask
-    is applied to match the original behavior.
+    The beams are packed in a **deterministic, natural order by beam index** inferred
+    from filenames like '...-C10_5_...'. This matches what humans expect from a
+    sorted listing (1,2,3,4,5,...), and is preserved under parallel reads.
     """
-    ms_list = _list_ms(ms_dir)
+    # 1) Deterministic, human-expected order
+    ms_list = _list_ms_sorted(ms_dir)
     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
+    for i, p in enumerate(ms_list):
+        logger.info(f"[ORDER PLAN] beam {i:02d} -> {Path(p).name}")
 
-    # Normalize channel selection
+    # 2) Channel selection
     all_freq, all_vel = _freqs(ms_list[0])
     nchan_total = all_freq.size
     if chan_sel is None:
@@ -312,33 +343,37 @@ def read_ms_block_I(
     velocity  = all_vel [chan_idx]     # (nchan,)
     nchan = int(frequency.size)
 
-    # Collect per-MS results
-    centers = []
-    uu_list=[]; vv_list=[]; ww_list=[]
-    I_list=[]; sI_list=[]; fI_list=[]
+    # 3) Read per-MS into fixed slots (preserve the chosen order)
+    nbeam = len(ms_list)
+    centers = [None] * nbeam
+    uu_list = [None] * nbeam
+    vv_list = [None] * nbeam
+    ww_list = [None] * nbeam
+    I_list  = [None] * nbeam
+    sI_list = [None] * nbeam
+    fI_list = [None] * nbeam
 
     if n_workers and n_workers > 1:
-        logger.info(f"[BLOCK] Parallel read with {n_workers} workers")
-        ctx = get_context("fork")   # works on Linux/macOS; not on Windows
+        logger.info(f"[BLOCK] Parallel read with {n_workers} workers (order-preserving)")
+        ctx = get_context("fork")  # 'spawn' on Windows
         with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
-            futs = {ex.submit(_read_one_ms, ms, chan_idx, keep_autocorr, prefer_weight_spectrum): ms
-                    for ms in ms_list}
+            futs = {ex.submit(_read_one_ms, ms, chan_idx, keep_autocorr, prefer_weight_spectrum): i
+                    for i, ms in enumerate(ms_list)}
             for fut in as_completed(futs):
-                ms = futs[fut]
+                i = futs[fut]
                 out = fut.result()
-                centers.append(out["center"])
-                uu_list.append(out["uu"]); vv_list.append(out["vv"]); ww_list.append(out["ww"])
-                I_list.append(out["I"]);   sI_list.append(out["sI"]);   fI_list.append(out["fI"])
+                centers[i] = out["center"]
+                uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
+                I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
     else:
-        logger.info("[BLOCK] Serial read")
-        for ms in ms_list:
+        logger.info("[BLOCK] Serial read (order-preserving)")
+        for i, ms in enumerate(ms_list):
             out = _read_one_ms(ms, chan_idx, keep_autocorr, prefer_weight_spectrum)
-            centers.append(out["center"])
-            uu_list.append(out["uu"]); vv_list.append(out["vv"]); ww_list.append(out["ww"])
-            I_list.append(out["I"]);   sI_list.append(out["sI"]);   fI_list.append(out["fI"])
+            centers[i] = out["center"]
+            uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
+            I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
 
-    # Pack to dense (nchan, nbeam, nvis_max)
-    nbeam = len(ms_list)
+    # 4) Pack to dense (nchan, nbeam, nvis_max)
     nvis = np.array([u.shape[0] for u in uu_list], dtype=np.int32)
     nvis_max = int(nvis.max())
 
@@ -349,10 +384,10 @@ def read_ms_block_I(
     uu = np.zeros((nbeam, nvis_max), dtype=np.float32)
     vv = np.zeros_like(uu); ww = np.zeros_like(uu)
 
-    # Per‑channel UV mask (old behavior) and channel‑major transpose
+    # Per-channel UV mask and channel-major transpose
     for b in range(nbeam):
         UVW0 = uu_list[b]; UVW1 = vv_list[b]; UVW2 = ww_list[b]
-        I    = I_list[b];  sI    = sI_list[b];  fI = fI_list[b]     # (nrow_b, nchan)
+        I    = I_list[b];  sI   = sI_list[b];  fI   = fI_list[b]   # (nrow_b, nchan)
 
         # baseline length in meters for each row
         bl_m   = np.sqrt((UVW0**2 + UVW1**2 + UVW2**2))[:, None]   # (nrow_b, 1)
@@ -363,7 +398,7 @@ def read_ms_block_I(
         fI |= ~in_rng
         sI[~in_rng] = np.inf
 
-        # to channel‑major for this beam
+        # to channel-major for this beam
         I_cb  = I.transpose(1, 0).astype(np.complex64)    # (nchan, nvis_b)
         sI_cb = sI.transpose(1, 0).astype(np.float32)     # (nchan, nvis_b)
         fI_cb = fI.transpose(1, 0).astype(bool)           # (nchan, nvis_b)
@@ -376,18 +411,19 @@ def read_ms_block_I(
         sigma_I[:, b, :nv] = sI_cb
         flag_I [:, b, :nv] = fI_cb
 
-        nvis_good = np.count_nonzero(~fI_cb)
-        # logger.info(f"    [MS] Packed beam {b}: nvis raw={nchan*nv}, nvis after flagging={nvis_good}")
-
     centers = np.asarray(centers, dtype=object)
     logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max}")
+
+    # Optional: verify the final order we packed
+    for i, p in enumerate(ms_list):
+        logger.info(f"[ORDER CHECK] beam {i:02d} -> {Path(p).name}")
 
     return VisIData(
         frequency=frequency,
         velocity=velocity,
-        centers=centers,
+        centers=centers,     # natural beam order by C10_#
         nvis=nvis,
-        uu=uu, vv=vv, ww=ww,            # meters (scaled to λ on demand)
+        uu=uu, vv=vv, ww=ww, # meters (scaled to λ on demand)
         data_I=data_I,
         sigma_I=sigma_I,
         flag_I=flag_I,
