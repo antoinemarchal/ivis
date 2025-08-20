@@ -12,9 +12,7 @@ from astropy.coordinates import Angle, SkyCoord
 import astropy.units as u
 
 from ivis.logger import logger
-from ivis.types import VisIData
-
-from .base import Reader
+from ivis.readers.base import Reader
 from ivis.types import VisIData
 
 # -------------------- utils --------------------
