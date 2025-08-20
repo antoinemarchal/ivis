@@ -13,16 +13,16 @@ import time
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.utils import dutils, mod_loss, fourier
 from ivis.models import ClassicIViS3D
 from ivis.imager import Imager3D
-from ivis.utils.readers import read_ms_blocks_I
+from ivis.types import VisIData
+from ivis.readers import CasacoreReader
 
 plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb69152/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#sb69152/"
     
     path_beams = "/priv/avatar/amarchal/Projects/ivis/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
@@ -36,7 +36,7 @@ if __name__ == '__main__':
     target_header["CRVAL2"] = cfield.dec.value
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
-    #SD data
+    #SD data -- NOT USE HERE
     fitsname = "reproj_GASS_v.fits"
     hdu_sd = fits.open(path_sd+fitsname)
     hdr_sd = hdu_sd[0].header
@@ -50,25 +50,18 @@ if __name__ == '__main__':
     # -------------------
     # Read visibilities into VisIData dataclass
     # -------------------
-    vis_data = read_ms_blocks_I(
+    reader = CasacoreReader(
+        prefer_weight_spectrum=False,
+        keep_autocorr=False,
+        n_workers=4)
+    
+    I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=12000,
-        chan_sel=slice(980,982),
-        keep_autocorr=False,
-        prefer_weight_spectrum=False,
+        chan_sel=slice(950,951),
         mode="concat",
-        n_workers=4,
     )
-    # vis_data = data_processor.read_vis_visidata(
-    #     uvmin=0.0,
-    #     uvmax=np.inf,
-    #     # target_channel=0,
-    #     chan_sel=slice(900, 902),
-    #     keep_autocorr=False,
-    #     prefer_weight_spectrum=False,
-    #     n_workers=4,
-    # )
-
+    
     # -------------------
     # User parameters
     # -------------------
@@ -78,13 +71,13 @@ if __name__ == '__main__':
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = "cpu"        # 0 for GPU, "cpu" for CPU
     positivity = False
-    init_params = np.zeros((2, shape[0], shape[1]), dtype=np.float32)
+    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
     
     # -------------------
     # Create Imager3D
     # -------------------
     image_processor = Imager3D(
-        vis_data=vis_data,
+        vis_data=I,
         pb=pb,
         grid=grid,
         sd=sd,
