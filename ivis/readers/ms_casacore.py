@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, re, glob, contextlib, numpy as np
 from dataclasses import dataclass
-from typing import Iterator, Tuple, Sequence, Optional
+from typing import Iterator, Tuple, List, Union, Sequence, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
@@ -12,6 +12,10 @@ from astropy.coordinates import Angle, SkyCoord
 import astropy.units as u
 
 from ivis.logger import logger
+from ivis.types import VisIData
+
+from .base import Reader
+from ivis.types import VisIData
 
 # -------------------- utils --------------------
 
@@ -124,115 +128,6 @@ def _freqs(ms_path: str):
     vel_q = ((rest - freqs * u.Hz) / rest * c_light)        # Quantity [m/s]
     vel   = vel_q.to_value(u.km/u.s).astype(np.float64)     # km/s
     return freqs, vel
-
-# -------------------- I-only container (channel-major) --------------------
-
-@dataclass
-class VisIData:
-    # Axes / coords
-    frequency: np.ndarray     # (nchan,) float64 [Hz]
-    velocity:  np.ndarray     # (nchan,) float64 [km/s]
-    centers:   np.ndarray     # (nbeam,), dtype=object (SkyCoord)
-    nvis:      np.ndarray     # (nbeam,) int32
-
-    # Coordinates (stored in METERS; we scale to wavelengths per channel on-demand)
-    uu: np.ndarray            # (nbeam, nvis_max) float32  [meters]
-    vv: np.ndarray            # (nbeam, nvis_max) float32  [meters]
-    ww: np.ndarray            # (nbeam, nvis_max) float32  [meters]
-
-    # I-only measurements (channel-major)
-    data_I:  np.ndarray       # (nchan, nbeam, nvis_max) complex64
-    sigma_I: np.ndarray       # (nchan, nbeam, nvis_max) float32
-    flag_I:  np.ndarray       # (nchan, nbeam, nvis_max) bool
-
-    def __post_init__(self):
-        self.frequency = np.asarray(self.frequency, dtype=np.float64)
-        self.velocity  = np.asarray(self.velocity,  dtype=np.float64)
-        self.centers   = np.asarray(self.centers,   dtype=object)
-        self.nvis      = np.asarray(self.nvis,      dtype=np.int32)
-        self.uu        = np.asarray(self.uu,        dtype=np.float32, order="C")
-        self.vv        = np.asarray(self.vv,        dtype=np.float32, order="C")
-        self.ww        = np.asarray(self.ww,        dtype=np.float32, order="C")
-        self.data_I    = np.asarray(self.data_I,    dtype=np.complex64, order="C")
-        self.sigma_I   = np.asarray(self.sigma_I,   dtype=np.float32,   order="C")
-        self.flag_I    = np.asarray(self.flag_I,    dtype=bool,         order="C")
-
-        nchan = self.frequency.shape[0]
-        nbeam, nvis_max = self.uu.shape
-        assert self.vv.shape == (nbeam, nvis_max)
-        assert self.ww.shape == (nbeam, nvis_max)
-        assert self.centers.shape == (nbeam,)
-        assert self.nvis.shape == (nbeam,)
-        assert self.data_I.shape  == (nchan, nbeam, nvis_max)
-        assert self.sigma_I.shape == (nchan, nbeam, nvis_max)
-        assert self.flag_I.shape  == (nchan, nbeam, nvis_max)
-
-        # Safety: flag padded tails
-        for b in range(nbeam):
-            nv = int(self.nvis[b])
-            if nv < nvis_max:
-                self.flag_I[:, b, nv:] = True
-
-    def slice_chan_beam_I(self, c: int, b: int):
-        """
-        Return I, σ, and (u,v,w) in WAVELENGTHS for the given channel & beam,
-        with flagged visibilities removed.
-        """
-        nv = int(self.nvis[b])
-        flg = self.flag_I[c, b, :nv]
-        good = ~flg
-
-        # exact per-channel scaling: meters → wavelengths
-        scale = self.frequency[c] / c_light.value  # scalar
-        uu_l = (self.uu[b, :nv] * scale)[good]
-        vv_l = (self.vv[b, :nv] * scale)[good]
-        ww_l = (self.ww[b, :nv] * scale)[good]
-
-        return (
-            self.data_I [c, b, :nv][good],
-            self.sigma_I[c, b, :nv][good],
-            uu_l, vv_l, ww_l,
-        )
-
-    def iter_chan_beam_I(self) -> Iterator[Tuple[int,int,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]]:
-        nchan, nbeam, _ = self.data_I.shape
-        for c in range(nchan):
-            for b in range(nbeam):
-                I, sI, uu, vv, ww = self.slice_chan_beam_I(c, b)
-                if I.size:
-                    yield c, b, I, sI, uu, vv, ww
-
-
-    def single_channel(self, c: int, copy: bool = False) -> "VisIData":
-        """
-        Return a VisIData containing only channel c (shape (1, nbeam, nvis_max)).
-        By default returns views (no copy); set copy=True for independent arrays.
-        """
-        # channel slice
-        cs = slice(c, c+1)
-        
-        def maybe(a):
-            return a[cs].copy() if copy else a[cs]
-        
-        return VisIData(
-            frequency=self.frequency[cs].copy() if copy else self.frequency[cs],
-            velocity=self.velocity[cs].copy()   if copy else self.velocity[cs],
-            centers=self.centers,                  # same object array (beams)
-            nvis=self.nvis.copy() if copy else self.nvis,
-            uu=self.uu.copy() if copy else self.uu,
-            vv=self.vv.copy() if copy else self.vv,
-            ww=self.ww.copy() if copy else self.ww,
-            data_I=maybe(self.data_I),
-            sigma_I=maybe(self.sigma_I),
-            flag_I=maybe(self.flag_I),
-        )
-    
-    def iter_single_channel(self, copy: bool = False):
-        """
-        Iterate over channels, yielding (c, VisIData_with_only_that_channel).
-        """
-        for c in range(self.frequency.shape[0]):
-            yield c, self.single_channel(c, copy=copy)
 
 
 # ----------------------------- Public loader ------------------------------
@@ -348,8 +243,8 @@ def read_ms_block_I(
     # 1) Deterministic, human-expected order
     ms_list = _list_ms_sorted(ms_dir)
     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
-    for i, p in enumerate(ms_list):
-        logger.info(f"[ORDER PLAN] beam {i:02d} -> {Path(p).name}")
+    # for i, p in enumerate(ms_list):
+    #     logger.info(f"[ORDER PLAN] beam {i:02d} -> {Path(p).name}")
 
     # 2) Channel selection
     all_freq, all_vel = _freqs(ms_list[0])
@@ -438,9 +333,9 @@ def read_ms_block_I(
     centers = np.asarray(centers, dtype=object)
     logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max}")
 
-    # Optional: verify the final order we packed
-    for i, p in enumerate(ms_list):
-        logger.info(f"[ORDER CHECK] beam {i:02d} -> {Path(p).name}")
+    # # Optional: verify the final order we packed
+    # for i, p in enumerate(ms_list):
+    #     logger.info(f"[ORDER CHECK] beam {i:02d} -> {Path(p).name}")
 
     return VisIData(
         frequency=frequency,
@@ -960,6 +855,66 @@ def iter_blocks_chan_beam_via_slabs(
                     if I.size:
                         yield bi, c_abs, b, I, sI, uu, vv, ww
             del visI  # free slab memory
+
+
+class CasacoreReader:
+    """
+    Concrete Reader backed by casacore.
+    Delegates to the module-level functions defined above.
+    """
+
+    def __init__(self, *, prefer_weight_spectrum: bool = True,
+                 keep_autocorr: bool = False, n_workers: int = 0):
+        self.prefer_weight_spectrum = prefer_weight_spectrum
+        self.keep_autocorr = keep_autocorr
+        self.n_workers = n_workers
+
+    # --- optional helpers (not required by the Protocol) ---
+    def list_ms(self, ms_dir: str) -> List[str]:
+        return _list_ms_sorted(ms_dir)
+
+    def freq_grid(self, ms_dir: str):
+        msl = self.list_ms(ms_dir)
+        if not msl:
+            raise FileNotFoundError(f"No .ms found in {ms_dir}")
+        freqs, _vel = _freqs(msl[0])
+        return freqs
+
+    # --- Protocol methods ---
+    def read_block_I(self, ms_dir: str, **kwargs) -> VisIData:
+        return read_ms_block_I(
+            ms_dir,
+            uvmin=kwargs.get("uvmin", 0.0),
+            uvmax=kwargs.get("uvmax", float("inf")),
+            chan_sel=kwargs.get("chan_sel"),
+            keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
+            prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
+            n_workers=kwargs.get("n_workers", self.n_workers),
+        )
+
+    def read_blocks_I(self, ms_root: str, **kwargs):
+        return read_ms_blocks_I(
+            ms_root,
+            uvmin=kwargs.get("uvmin", 0.0),
+            uvmax=kwargs.get("uvmax", float("inf")),
+            chan_sel=kwargs.get("chan_sel"),
+            keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
+            prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
+            mode=kwargs.get("mode", "concat"),
+            n_workers=kwargs.get("n_workers", self.n_workers),
+        )
+
+    def iter_channel_slabs(self, ms_dir: str, **kwargs) -> Iterator[Tuple[int, int, VisIData]]:
+        return iter_channel_slabs(
+            ms_dir,
+            uvmin=kwargs.get("uvmin", 0.0),
+            uvmax=kwargs.get("uvmax", float("inf")),
+            chan_sel=kwargs.get("chan_sel"),
+            slab=kwargs.get("slab", 64),
+            keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
+            prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
+            n_workers=kwargs.get("n_workers", self.n_workers),
+        )
 
 # ------------------------------- demo -------------------------------------
 

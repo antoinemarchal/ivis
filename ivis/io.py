@@ -6,7 +6,6 @@ This module defines the VisData dataclass and the DataProcessor class for
 handling Measurement Sets, extracting tar archives, and preparing input
 for imaging in the IViS pipeline.
 """
-
 import os
 import glob
 import sys
@@ -26,7 +25,7 @@ from tqdm import tqdm as tqdm
 
 from ivis.logger import logger
 from ivis.utils import dutils, dcasacore
-from ivis.utils.readers import read_ms_block_I
+from ivis.readers.base import Reader
 
 
 @dataclass #modified from MPol
@@ -155,83 +154,84 @@ class DataProcessor:
         logger.info("All .tar files have been processed.")
 
 
-    def read_vis_visidata(
-            self,
-            uvmin: float = 0.0,
-            uvmax: float = float("inf"),
-            *,
-            chan_sel=None,                   # None | slice | list[int] | np.ndarray[int]
-            target_channel: int | None = None,
-            target_frequency: float | None = None,  # Hz
-            keep_autocorr: bool = False,
-            prefer_weight_spectrum: bool = True,
-            n_workers: int = 0,
-    ):
-        """
-        Load visibilities as a channel-major I-only VisIData using read_ms_block_I.
+    # def read_visidata(
+    #         self,
+    #         reader: Reader, 
+    #         uvmin: float = 0.0,
+    #         uvmax: float = float("inf"),
+    #         *,
+    #         chan_sel=None,                   # None | slice | list[int] | np.ndarray[int]
+    #         target_channel: int | None = None,
+    #         target_frequency: float | None = None,  # Hz
+    #         keep_autocorr: bool = False,
+    #         prefer_weight_spectrum: bool = True,
+    #         n_workers: int = 0,
+    # ):
+    #     """
+    #     Load visibilities as a channel-major I-only VisIData using read_ms_block_I.
         
-        Channel selection priority:
-        1) If `chan_sel` is given, use it as-is.
-        2) Else if `target_channel` is given, use that single channel (slice(tc, tc+1)).
-        3) Else if `target_frequency` is given (Hz), pick the nearest channel.
-        4) Else load all channels.
+    #     Channel selection priority:
+    #     1) If `chan_sel` is given, use it as-is.
+    #     2) Else if `target_channel` is given, use that single channel (slice(tc, tc+1)).
+    #     3) Else if `target_frequency` is given (Hz), pick the nearest channel.
+    #     4) Else load all channels.
         
-        Parameters
-        ----------
-        uvmin, uvmax : float
-            Baseline length limits in wavelengths (approx at median selected λ).
-        chan_sel : slice | list[int] | np.ndarray[int] | None
-            Channel subset to load. If None, use target_* logic above.
-        target_channel : int | None
-            Single channel index to load (ignored if chan_sel is provided).
-        target_frequency : float | None
-            Frequency in Hz; nearest channel will be selected (ignored if chan_sel is provided).
-        keep_autocorr : bool
-            If False, drop ANTENNA1==ANTENNA2 baselines.
-        prefer_weight_spectrum : bool
-            If True and WEIGHT_SPECTRUM is present, use it for per-channel σ.
+    #     Parameters
+    #     ----------
+    #     uvmin, uvmax : float
+    #         Baseline length limits in wavelengths (approx at median selected λ).
+    #     chan_sel : slice | list[int] | np.ndarray[int] | None
+    #         Channel subset to load. If None, use target_* logic above.
+    #     target_channel : int | None
+    #         Single channel index to load (ignored if chan_sel is provided).
+    #     target_frequency : float | None
+    #         Frequency in Hz; nearest channel will be selected (ignored if chan_sel is provided).
+    #     keep_autocorr : bool
+    #         If False, drop ANTENNA1==ANTENNA2 baselines.
+    #     prefer_weight_spectrum : bool
+    #         If True and WEIGHT_SPECTRUM is present, use it for per-channel σ.
 
-        Returns
-        -------
-        VisIData
-            Container with shapes: data_I/sigma_I/flag_I -> (nchan, nbeam, nvis_max)
-        """
-        ms_dir = self.path_ms
+    #     Returns
+    #     -------
+    #     VisIData
+    #         Container with shapes: data_I/sigma_I/flag_I -> (nchan, nbeam, nvis_max)
+    #     """
+    #     ms_dir = self.path_ms
         
-        # Resolve channel selection
-        if chan_sel is not None:
-            pass  # use as-is
-        elif target_channel is not None:
-            tc = int(target_channel)
-            chan_sel = slice(tc, tc + 1)
-        elif target_frequency is not None:
-            # Nearest-channel lookup from first MS in directory
-            import glob, os
-            from casacore.tables import table  # local import to avoid hard dep at module import
+    #     # Resolve channel selection
+    #     if chan_sel is not None:
+    #         pass  # use as-is
+    #     elif target_channel is not None:
+    #         tc = int(target_channel)
+    #         chan_sel = slice(tc, tc + 1)
+    #     elif target_frequency is not None:
+    #         # Nearest-channel lookup from first MS in directory
+    #         import glob, os
+    #         from casacore.tables import table  # local import to avoid hard dep at module import
             
-            ms_list = sorted(glob.glob(os.path.join(ms_dir, "*.ms")))
-            if not ms_list:
-                raise FileNotFoundError(f"No .ms found in: {ms_dir}")
-            first_ms = ms_list[0]
-            # read CHAN_FREQ (Hz)
-            with table(f"{first_ms}/SPECTRAL_WINDOW", readonly=True) as t:
-                freqs = np.atleast_1d(np.squeeze(t.getcol("CHAN_FREQ"))).astype(float)
-            idx = int(np.argmin(np.abs(freqs - float(target_frequency))))
-            chan_sel = slice(idx, idx + 1)
-        else:
-            chan_sel = None  # all channels
+    #         ms_list = sorted(glob.glob(os.path.join(ms_dir, "*.ms")))
+    #         if not ms_list:
+    #             raise FileNotFoundError(f"No .ms found in: {ms_dir}")
+    #         first_ms = ms_list[0]
+    #         # read CHAN_FREQ (Hz)
+    #         with table(f"{first_ms}/SPECTRAL_WINDOW", readonly=True) as t:
+    #             freqs = np.atleast_1d(np.squeeze(t.getcol("CHAN_FREQ"))).astype(float)
+    #         idx = int(np.argmin(np.abs(freqs - float(target_frequency))))
+    #         chan_sel = slice(idx, idx + 1)
+    #     else:
+    #         chan_sel = None  # all channels
 
-        # Delegate to the optimized reader (reads only selected channels via getcolslice)
-        visI = read_ms_block_I(
-            ms_dir,
-            uvmin=float(uvmin),
-            uvmax=float(uvmax),
-            chan_sel=chan_sel,
-            keep_autocorr=keep_autocorr,
-            prefer_weight_spectrum=prefer_weight_spectrum,
-            n_workers=n_workers,
-        )
-        return visI
+    #     # Delegate to the optimized reader (reads only selected channels via getcolslice)
+    #     visI = reader.read_block_I(
+    #         ms_dir,
+    #         uvmin=float(uvmin),
+    #         uvmax=float(uvmax),
+    #         chan_sel=chan_sel,
+    #         keep_autocorr=keep_autocorr,
+    #         prefer_weight_spectrum=prefer_weight_spectrum,
+    #         n_workers=n_workers,
+    #     )
+    #     return visI
 
 
     def read_vis_from_scratch(

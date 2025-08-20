@@ -12,10 +12,10 @@ import torch
 import pytorch_finufft
 
 from ivis.io import DataProcessor
+from ivis.readers import CasacoreReader
 from ivis.logger import logger
-from ivis.utils import dutils, mod_loss, fourier
-from ivis.models import ClassicIViS3D, TWiSTModel
-from ivis.imager import Imager3D 
+from ivis.models import ClassicIViS3D
+from ivis.imager import Imager3D
 
 plt.ion()
 
@@ -53,14 +53,17 @@ beam_sd = Beam(1 * u.deg, 1 * u.deg, 1.e-12 * u.deg)
 # -------------------
 # Read visibilities into VisIData dataclass
 # -------------------
-vis_data = data_processor.read_vis_visidata(
+
+reader = CasacoreReader(
+    prefer_weight_spectrum=False,
+    keep_autocorr=False,
+    n_workers=4)
+
+vis_data = reader.read_block_I(
+    path_ms,
     uvmin=0.0,
     uvmax=np.inf,
-    # target_channel=0,
     chan_sel=slice(0, 1),
-    keep_autocorr=False,
-    prefer_weight_spectrum=False,
-    n_workers=4,
 )
 
 # -------------------
