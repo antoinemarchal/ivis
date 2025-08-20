@@ -127,6 +127,26 @@ def _freqs(ms_path: str):
     vel   = vel_q.to_value(u.km/u.s).astype(np.float64)     # km/s
     return freqs, vel
 
+# -------- helpers --------
+
+def _centers_equal(c0, c1, tol_deg: float) -> bool:
+    """
+    Compare 'center' objects with a tiny tolerance in degrees.
+    Supports:
+      - SkyCoord-like with .ra.deg/.dec.deg
+      - (ra_deg, dec_deg) tuples/lists
+      - Fallback to equality for strings/other identifiers.
+    """
+    try:
+        if hasattr(c0, "ra") and hasattr(c0, "dec") and hasattr(c1, "ra") and hasattr(c1, "dec"):
+            return (abs(float(c0.ra.deg)  - float(c1.ra.deg))  <= tol_deg and
+                    abs(float(c0.dec.deg) - float(c1.dec.deg)) <= tol_deg)
+        if isinstance(c0, (tuple, list)) and isinstance(c1, (tuple, list)) and len(c0) == 2 and len(c1) == 2:
+            return (abs(float(c0[0]) - float(c1[0])) <= tol_deg and
+                    abs(float(c0[1]) - float(c1[1])) <= tol_deg)
+    except Exception:
+        pass
+    return c0 == c1
 
 # ----------------------------- Public loader ------------------------------
 
@@ -528,29 +548,39 @@ def read_ms_block_I_no_parrallel(
         flag_I=flag_I,
     )
 
+
 def read_ms_blocks_I(
     ms_root: str,
     uvmin: float = 0.0,
     uvmax: float = float("inf"),
-    chan_sel=None,                   # None | slice | list[int] | np.ndarray[int]
+    chan_sel=None,                      # None | slice | list[int] | np.ndarray[int]
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
-    mode: str = "concat",            # "concat" | "separate"
-    n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS    
-) -> "VisIData | list[VisIData]":
+    mode: str = "merge",                # "merge" | "stack" | "separate"
+    n_workers: int = 0,                 # 0/1 = serial; >1 = parallel per-MS
+    center_tol_deg: float = 1e-12,      # tolerance for center equality when mode="merge"
+) -> "VisIData | List[VisIData]":
     """
-    Load multiple blocks of observations located under ms_root.
+    Load multiple *blocks* of observations located under `ms_root`, then either:
+      - MERGE: concatenate vis per beam across blocks, assuming *same beam order and centers*
+      - STACK: stack beams (Nblock × beams)
+      - SEPARATE: return list[VisIData], one per block
 
-    - If ms_root contains *.ms directly, it's treated as a single block.
-    - Any immediate subdirectory of ms_root that contains *.ms is also a block.
+    Block discovery policy:
+      - If `ms_root` itself contains *.ms directly, it's treated as a single block.
+      - Any *immediate* subdirectory of `ms_root` that contains *.ms is also a block.
 
-    mode="concat":  returns one VisIData with beams from all blocks concatenated
-    mode="separate": returns a list[VisIData], one per block
+    Returns:
+      - mode="merge"  -> VisIData with beams equal to the number of unique centers (per order in block 0)
+      - mode="stack"  -> VisIData with beams equal to sum of beams across blocks
+      - mode="separate" -> list[VisIData]
     """
+    # ---------- discover and read blocks ----------
     block_dirs = _list_block_dirs(ms_root)
+    if not block_dirs:
+        raise FileNotFoundError(f"No blocks found under {ms_root}")
 
-    # Load each block independently with your optimized reader
-    blocks: list[VisIData] = []
+    blocks: List[VisIData] = []
     for bdir in block_dirs:
         logger.info(f"[BLOCK] Loading block from: {bdir}")
         vi = read_ms_block_I(
@@ -567,44 +597,99 @@ def read_ms_blocks_I(
     if mode == "separate":
         return blocks
 
-    if mode != "concat":
-        raise ValueError('mode must be "concat" or "separate"')
+    if mode not in ("merge", "stack"):
+        raise ValueError('mode must be one of: "merge", "stack", "separate"')
 
-    # ---------------- concat path ----------------
-    _check_same_freq_grid(blocks)  # ensure same channels across blocks
-
-    # Concatenate beams; keep per-beam nvis; pad to global nvis_max
+    # ---------- common sanity: same spectral grid ----------
+    _check_same_freq_grid(blocks)
     nchan = blocks[0].frequency.size
-    total_beams = sum(b.uu.shape[0] for b in blocks)
-    global_nvis_max = max(int(b.nvis.max()) for b in blocks)
 
-    # Allocate output
-    data_I  = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.complex64)
-    sigma_I = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.float32)
-    flag_I  = np.ones( (nchan, total_beams, global_nvis_max), dtype=bool)
+    # ---------- STACK: old behavior (Nblock × beams) ----------
+    if mode == "stack":
+        total_beams = sum(b.uu.shape[0] for b in blocks)
+        global_nvis_max = max(int(b.nvis.max()) for b in blocks)
 
-    uu = np.zeros((total_beams, global_nvis_max), dtype=np.float32)
-    vv = np.zeros_like(uu); ww = np.zeros_like(uu)
-    nvis = np.zeros((total_beams,), dtype=np.int32)
-    centers = np.empty((total_beams,), dtype=object)
+        data_I  = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.complex64)
+        sigma_I = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.float32)
+        flag_I  = np.ones( (nchan, total_beams, global_nvis_max), dtype=bool)
 
-    # Copy block by block
-    b_off = 0
-    for blk in blocks:
-        nb = blk.uu.shape[0]
-        for j in range(nb):
+        uu = np.zeros((total_beams, global_nvis_max), dtype=np.float32)
+        vv = np.zeros_like(uu)
+        ww = np.zeros_like(uu)
+        nvis = np.zeros((total_beams,), dtype=np.int32)
+        centers = np.empty((total_beams,), dtype=object)
+
+        b_off = 0
+        for blk in blocks:
+            nb = blk.uu.shape[0]
+            for j in range(nb):
+                nv = int(blk.nvis[j])
+                dst = b_off + j
+                nvis[dst] = nv
+                centers[dst] = blk.centers[j]
+                uu[dst, :nv] = blk.uu[j, :nv]
+                vv[dst, :nv] = blk.vv[j, :nv]
+                ww[dst, :nv] = blk.ww[j, :nv]
+                data_I [:, dst, :nv] = blk.data_I[:, j, :nv]
+                sigma_I[:, dst, :nv] = blk.sigma_I[:, j, :nv]
+                flag_I [:, dst, :nv] = blk.flag_I[:, j, :nv]
+            b_off += nb
+
+        return VisIData(
+            frequency=blocks[0].frequency,
+            velocity=blocks[0].velocity,
+            centers=centers,
+            nvis=nvis,
+            uu=uu, vv=vv, ww=ww,
+            data_I=data_I,
+            sigma_I=sigma_I,
+            flag_I=flag_I,
+        )
+
+    # ---------- MERGE: concatenate per-beam across blocks ----------
+    # Sanity: same number of beams and same centers (order) across blocks
+    nbeams = blocks[0].uu.shape[0]
+    for bi, blk in enumerate(blocks[1:], start=1):
+        if blk.uu.shape[0] != nbeams:
+            raise ValueError(f"Block {bi} has {blk.uu.shape[0]} beams; expected {nbeams}.")
+        for j in range(nbeams):
+            c0, c1 = blocks[0].centers[j], blk.centers[j]
+            if not _centers_equal(c0, c1, tol_deg=center_tol_deg):
+                raise ValueError(f"Beam center mismatch at beam {j}: "
+                                 f"block0={c0} vs block{bi}={c1}")
+
+    # Merged nvis per beam = sum over blocks
+    merged_nvis = np.zeros((nbeams,), dtype=np.int32)
+    for j in range(nbeams):
+        merged_nvis[j] = sum(int(blk.nvis[j]) for blk in blocks)
+    global_nvis_max = int(merged_nvis.max())
+
+    # Allocate outputs
+    data_I  = np.zeros((nchan, nbeams, global_nvis_max), dtype=np.complex64)
+    sigma_I = np.zeros((nchan, nbeams, global_nvis_max), dtype=np.float32)
+    flag_I  = np.ones( (nchan, nbeams, global_nvis_max), dtype=bool)
+
+    uu = np.zeros((nbeams, global_nvis_max), dtype=np.float32)
+    vv = np.zeros_like(uu)
+    ww = np.zeros_like(uu)
+    nvis = merged_nvis.copy()
+    centers = np.array(blocks[0].centers, dtype=object)  # preserve order
+
+    # Concatenate per beam across blocks in read order (block0, block1, ...)
+    for j in range(nbeams):
+        w = 0
+        for blk in blocks:
             nv = int(blk.nvis[j])
-            dst = b_off + j
-            nvis[dst] = nv
-            centers[dst] = blk.centers[j]
-            uu[dst, :nv] = blk.uu[j, :nv]
-            vv[dst, :nv] = blk.vv[j, :nv]
-            ww[dst, :nv] = blk.ww[j, :nv]
-            data_I [:, dst, :nv] = blk.data_I[:, j, :nv]
-            sigma_I[:, dst, :nv] = blk.sigma_I[:, j, :nv]
-            flag_I [:, dst, :nv] = blk.flag_I[:, j, :nv]
-            # padded tails remain flagged=True
-        b_off += nb
+            if nv <= 0:
+                continue
+            uu[j, w:w+nv] = blk.uu[j, :nv]
+            vv[j, w:w+nv] = blk.vv[j, :nv]
+            ww[j, w:w+nv] = blk.ww[j, :nv]
+            data_I [:, j, w:w+nv] = blk.data_I[:, j, :nv]
+            sigma_I[:, j, w:w+nv] = blk.sigma_I[:, j, :nv]
+            flag_I [:, j, w:w+nv] = blk.flag_I[:, j, :nv]
+            w += nv
+        # padded tail remains flag=True
 
     return VisIData(
         frequency=blocks[0].frequency,
@@ -616,6 +701,95 @@ def read_ms_blocks_I(
         sigma_I=sigma_I,
         flag_I=flag_I,
     )
+
+# def read_ms_blocks_I(
+#     ms_root: str,
+#     uvmin: float = 0.0,
+#     uvmax: float = float("inf"),
+#     chan_sel=None,                   # None | slice | list[int] | np.ndarray[int]
+#     keep_autocorr: bool = False,
+#     prefer_weight_spectrum: bool = True,
+#     mode: str = "concat",            # "concat" | "separate"
+#     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS    
+# ) -> "VisIData | list[VisIData]":
+#     """
+#     Load multiple blocks of observations located under ms_root.
+
+#     - If ms_root contains *.ms directly, it's treated as a single block.
+#     - Any immediate subdirectory of ms_root that contains *.ms is also a block.
+
+#     mode="concat":  returns one VisIData with beams from all blocks concatenated
+#     mode="separate": returns a list[VisIData], one per block
+#     """
+#     block_dirs = _list_block_dirs(ms_root)
+
+#     # Load each block independently with your optimized reader
+#     blocks: list[VisIData] = []
+#     for bdir in block_dirs:
+#         logger.info(f"[BLOCK] Loading block from: {bdir}")
+#         vi = read_ms_block_I(
+#             bdir,
+#             uvmin=uvmin,
+#             uvmax=uvmax,
+#             chan_sel=chan_sel,
+#             keep_autocorr=keep_autocorr,
+#             prefer_weight_spectrum=prefer_weight_spectrum,
+#             n_workers=n_workers,
+#         )
+#         blocks.append(vi)
+
+#     if mode == "separate":
+#         return blocks
+
+#     if mode != "concat":
+#         raise ValueError('mode must be "concat" or "separate"')
+
+#     # ---------------- concat path ----------------
+#     _check_same_freq_grid(blocks)  # ensure same channels across blocks
+
+#     # Concatenate beams; keep per-beam nvis; pad to global nvis_max
+#     nchan = blocks[0].frequency.size
+#     total_beams = sum(b.uu.shape[0] for b in blocks)
+#     global_nvis_max = max(int(b.nvis.max()) for b in blocks)
+
+#     # Allocate output
+#     data_I  = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.complex64)
+#     sigma_I = np.zeros((nchan, total_beams, global_nvis_max), dtype=np.float32)
+#     flag_I  = np.ones( (nchan, total_beams, global_nvis_max), dtype=bool)
+
+#     uu = np.zeros((total_beams, global_nvis_max), dtype=np.float32)
+#     vv = np.zeros_like(uu); ww = np.zeros_like(uu)
+#     nvis = np.zeros((total_beams,), dtype=np.int32)
+#     centers = np.empty((total_beams,), dtype=object)
+
+#     # Copy block by block
+#     b_off = 0
+#     for blk in blocks:
+#         nb = blk.uu.shape[0]
+#         for j in range(nb):
+#             nv = int(blk.nvis[j])
+#             dst = b_off + j
+#             nvis[dst] = nv
+#             centers[dst] = blk.centers[j]
+#             uu[dst, :nv] = blk.uu[j, :nv]
+#             vv[dst, :nv] = blk.vv[j, :nv]
+#             ww[dst, :nv] = blk.ww[j, :nv]
+#             data_I [:, dst, :nv] = blk.data_I[:, j, :nv]
+#             sigma_I[:, dst, :nv] = blk.sigma_I[:, j, :nv]
+#             flag_I [:, dst, :nv] = blk.flag_I[:, j, :nv]
+#             # padded tails remain flagged=True
+#         b_off += nb
+
+#     return VisIData(
+#         frequency=blocks[0].frequency,
+#         velocity=blocks[0].velocity,
+#         centers=centers,
+#         nvis=nvis,
+#         uu=uu, vv=vv, ww=ww,
+#         data_I=data_I,
+#         sigma_I=sigma_I,
+#         flag_I=flag_I,
+#     )
 
 # ------------------------- channel-slab iterator --------------------------
 
@@ -918,10 +1092,10 @@ class CasacoreReader:
 
 if __name__ == "__main__":
     # Example usage — adjust path + channels
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
+    # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
 
-    # # Single shot load (channels 0..99)
+    # # single shot load (channels 0..99)
     # visI = read_ms_block_I(
     #     ms_dir,
     #     uvmin=20.0,
@@ -946,19 +1120,21 @@ if __name__ == "__main__":
     #     del slab_vis
 
 
-    # # concat
-    # print("Test #Concat all")
-    # vis_all = read_ms_blocks_I(
-    #     ms_root=ms_dir,
-    #     uvmin=20.0, uvmax=5000.0,
-    #     chan_sel=slice(0, 4),
-    #     keep_autocorr=False,
-    #     prefer_weight_spectrum=True,
-    #     mode="concat",
-    #     n_workers=4,
-    # )
-    # for c, b, I, sI, uu, vv, ww in vis_all.iter_chan_beam_I():
-    #     pass
+    # concat or merge
+    print("Test #Concat all")
+    vis_all = read_ms_blocks_I(
+        ms_root=ms_dir,
+        uvmin=20.0, uvmax=5000.0,
+        chan_sel=slice(0, 4),
+        keep_autocorr=False,
+        prefer_weight_spectrum=True,
+        mode="merge",
+        n_workers=4,
+    )
+    for c, b, I, sI, uu, vv, ww in vis_all.iter_chan_beam_I():
+        pass
+
+    stop
     
     # # keep separate
     # vis_blocks = read_ms_blocks_I(
