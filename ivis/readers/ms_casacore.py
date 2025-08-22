@@ -10,6 +10,8 @@ from casacore.tables import table
 from astropy.constants import c as c_light
 from astropy.coordinates import Angle, SkyCoord
 import astropy.units as u
+from astropy.wcs import WCS
+from astropy.io.fits import Header
 
 from ivis.logger import logger
 from ivis.readers.base import Reader
@@ -148,6 +150,28 @@ def _centers_equal(c0, c1, tol_deg: float) -> bool:
         pass
     return c0 == c1
 
+
+def _normalize_target_header_from_header(hdr: Header):
+    """
+    Returns (celestial WCS, (ny, nx)) from a FITS Header that may include
+    FREQ/STOKES axes. Uses only the celestial part.
+    """
+    # Use celestial slice: works even if header advertises 3–4 axes
+    wcs_cel = WCS(hdr).celestial
+    nx = int(hdr["NAXIS1"])
+    ny = int(hdr["NAXIS2"])
+    return wcs_cel, (ny, nx)
+
+def _coord_in_image(wcs_cel: WCS, shape: tuple, coord: SkyCoord) -> bool:
+    """
+    Returns True if coord projects inside image footprint.
+    shape = (ny, nx). Uses zero-based pixel coords.
+    """
+    ny, nx = shape
+    c_icrs = coord.icrs
+    x, y = wcs_cel.world_to_pixel(c_icrs)  # origin=0 convention
+    return (0 <= x <= nx - 1) and (0 <= y <= ny - 1)
+
 # ----------------------------- Public loader ------------------------------
 
 def _read_one_ms(ms_path: str,
@@ -251,6 +275,7 @@ def read_ms_block_I(
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
+    target_header: "Header | None" = None,
 ) -> "VisIData":
     """
     Load a directory of .ms files (one per beam) into an I-only, channel-major VisIData.
@@ -263,6 +288,24 @@ def read_ms_block_I(
     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
     # for i, p in enumerate(ms_list):
     #     logger.info(f"[ORDER PLAN] beam {i:02d} -> {Path(p).name}")
+
+
+    # ---- filter beams if target_header given ----
+    if target_header is not None:
+        wcs_cel = WCS(target_header).celestial
+        shape = (int(target_header["NAXIS2"]), int(target_header["NAXIS1"]))
+        kept, skipped = [], []
+        for ms in ms_list:
+            c = _phasecenter(ms)
+            if _coord_in_image(wcs_cel, shape, c):
+                kept.append(ms)
+            else:
+                skipped.append(ms)
+        for s in skipped:
+            logger.info(f"[SKIP] {os.path.basename(s)}: outside target footprint")
+        ms_list = kept
+        if not ms_list:
+            raise ValueError("No beams intersect target image footprint.")
 
     # 2) Channel selection
     all_freq, all_vel = _freqs(ms_list[0])
@@ -558,6 +601,7 @@ def read_ms_blocks_I(
     prefer_weight_spectrum: bool = True,
     mode: str = "merge",                # "merge" | "stack" | "separate"
     n_workers: int = 0,                 # 0/1 = serial; >1 = parallel per-MS
+    target_header: "Header | None" = None,
     center_tol_deg: float = 1e-12,      # tolerance for center equality when mode="merge"
 ) -> "VisIData | List[VisIData]":
     """
@@ -591,6 +635,7 @@ def read_ms_blocks_I(
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,
+            target_header=target_header,
         )
         blocks.append(vi)
 
@@ -1054,6 +1099,11 @@ class CasacoreReader:
 
     # --- Protocol methods ---
     def read_block_I(self, ms_dir: str, **kwargs) -> VisIData:
+        """
+        Wrapper around read_ms_block_I with reader defaults.
+        Accepts: uvmin, uvmax, chan_sel, keep_autocorr, prefer_weight_spectrum,
+                 n_workers, target_header
+        """
         return read_ms_block_I(
             ms_dir,
             uvmin=kwargs.get("uvmin", 0.0),
@@ -1062,9 +1112,16 @@ class CasacoreReader:
             keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
             prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
             n_workers=kwargs.get("n_workers", self.n_workers),
+            target_header=kwargs.get("target_header"),  # <-- pass Header to filter beams
         )
 
-    def read_blocks_I(self, ms_root: str, **kwargs):
+    def read_blocks_I(self, ms_root: str, **kwargs) -> Union["VisIData", List["VisIData"]]:
+        """
+        Wrapper around read_ms_blocks_I with reader defaults.
+        Accepts: uvmin, uvmax, chan_sel, keep_autocorr, prefer_weight_spectrum,
+                 mode ('merge' | 'stack' | 'separate'), n_workers,
+                 target_header, center_tol_deg
+        """
         return read_ms_blocks_I(
             ms_root,
             uvmin=kwargs.get("uvmin", 0.0),
@@ -1072,10 +1129,12 @@ class CasacoreReader:
             chan_sel=kwargs.get("chan_sel"),
             keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
             prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
-            mode=kwargs.get("mode", "concat"),
+            mode=kwargs.get("mode", "merge"),
             n_workers=kwargs.get("n_workers", self.n_workers),
+            target_header=kwargs.get("target_header"),        # <-- propagate to per-block reads
+            center_tol_deg=kwargs.get("center_tol_deg", 1e-12),
         )
-
+    
     def iter_channel_slabs(self, ms_dir: str, **kwargs) -> Iterator[Tuple[int, int, VisIData]]:
         return iter_channel_slabs(
             ms_dir,

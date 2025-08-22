@@ -10,6 +10,7 @@ from reproject import reproject_interp
 import pywph as pw
 import torch
 import pytorch_finufft
+from astropy.coordinates import SkyCoord
 
 from ivis.io import DataProcessor
 from ivis.readers import CasacoreReader
@@ -64,6 +65,7 @@ I: VisIData = reader.read_block_I(
     uvmin=0.0,
     uvmax=np.inf,
     chan_sel=slice(0, 1),
+    target_header=target_header
 )
 
 # -------------------
