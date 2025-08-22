@@ -28,9 +28,8 @@ if __name__ == '__main__':
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
     pathout = "/priv/avatar/amarchal/Projects/ivis/examples/data/ASKAP/" #path where data will be packaged and stored
 
-    #REF WCS INPUT USER -- 00:56:11.2558213 -71:07:07.322603
-    # cfield = SkyCoord(ra="1h21m46s", dec="-72d19m26s", frame='icrs')
-    cfield = SkyCoord(ra="0h56m11.2558213s", dec="-71d07m07.322603s", frame="icrs")
+    #REF WCS INPUT USER
+    cfield = SkyCoord(ra="1h21m46s", dec="-72d19m26s", frame='icrs')
     filename = "/priv/avatar/amarchal/MPol-dev/examples/workflow/img.fits"
     target_header = fits.open(filename)[0].header
     target_header["CRVAL1"] = cfield.ra.value
@@ -47,7 +46,6 @@ if __name__ == '__main__':
     #create data processor
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_Dave.fits", fitsname_grid="grid_interp_Dave.fits")
-    pb = pb[11]; grid = grid[11]
 
     # -------------------
     # Read visibilities into VisIData dataclass
@@ -56,12 +54,17 @@ if __name__ == '__main__':
         prefer_weight_spectrum=False,
         keep_autocorr=False,
         n_workers=4)
+
+    #Filter beam by center and radius
+    center = SkyCoord("00h56m11.2558213s", "-71d07m07.322603s", frame="icrs")
     
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=12000,
         chan_sel=slice(950,951),
         mode="merge",
+        target_center=center,
+        target_radius=1*u.deg,
     )
     
     # -------------------
