@@ -22,7 +22,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/"#blocks_test/sb69152/"
+    path_ms = "/priv/avatar/amarchal/gaskap/fullsurvey/sb69152/"#blocks_test//"
     
     path_beams = "/priv/avatar/amarchal/Projects/ivis/examples/data/ASKAP/BEAMS/" #directory of primary beams
     path_sd = "/priv/avatar/amarchal/GASS/data/" #path single-dish data - dummy here
