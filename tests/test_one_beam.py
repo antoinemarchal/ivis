@@ -61,10 +61,10 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=12000,
-        chan_sel=slice(950,951),
+        chan_sel=slice(930,951),
         mode="merge",
         target_center=center,
-        target_radius=1*u.deg,
+        target_radius=0.5*u.deg,
     )
     
     # -------------------
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = "cpu"        # 0 for GPU, "cpu" for CPU
     positivity = False
-    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
+    init_params = np.zeros((21, shape[0], shape[1]), dtype=np.float32)
     
     # -------------------
     # Create Imager3D
