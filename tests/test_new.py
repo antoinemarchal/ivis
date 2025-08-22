@@ -60,12 +60,15 @@ reader = CasacoreReader(
     keep_autocorr=False,
     n_workers=4)
 
+center = SkyCoord("00h56m11.2558213s", "-71d07m07.322603s", frame="icrs")
+
 I: VisIData = reader.read_block_I(
     path_ms,
     uvmin=0.0,
     uvmax=np.inf,
     chan_sel=slice(0, 1),
-    target_header=target_header
+    target_center=center,
+    target_radius=1*u.deg,
 )
 
 # -------------------
