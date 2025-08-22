@@ -150,7 +150,6 @@ def _centers_equal(c0, c1, tol_deg: float) -> bool:
         pass
     return c0 == c1
 
-
 def _norm_radius(radius) -> Angle:
     """Accept Angle, Quantity, or float (deg) and return Angle."""
     if isinstance(radius, Angle):
@@ -292,31 +291,16 @@ def read_ms_block_I(
 ) -> "VisIData":
     """
     Load a directory of .ms files (one per beam) into an I-only, channel-major VisIData.
-    The beams are packed in a **deterministic, natural order by beam index** inferred
-    from filenames like '...-C10_5_...'. This matches what humans expect from a
-    sorted listing (1,2,3,4,5,...), and is preserved under parallel reads.
+
+    Primary-beam order is preserved **even if** some beams are skipped: we do not
+    remove beam slots; we simply avoid reading DATA for out-of-radius beams and
+    leave their slots empty (nvis=0, flag=True).
     """
-    # 1) Deterministic, human-expected order
+    # ---------------- 1) Deterministic beam list (do NOT filter) ----------------
     ms_list = _list_ms_sorted(ms_dir)
     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
 
-    # --- NEW: center+radius filter ---
-    if (target_center is not None) and (target_radius is not None):
-        R = _norm_radius(target_radius)
-        kept, skipped = [], []
-        for ms in ms_list:
-            c = _phasecenter(ms)  # cheap FIELD read
-            if _within_radius(target_center, R, c):
-                kept.append(ms)
-            else:
-                skipped.append(ms)
-        for s in skipped:
-            logger.info(f"[SKIP] {os.path.basename(s)}: outside {R.to_string()} of center")
-        ms_list = kept
-        if not ms_list:
-            raise ValueError(f"No beams within {R.to_string()} of {target_center.to_string('hmsdms')}")
-
-    # 2) Channel selection
+    # ---------------- 2) Channel selection (unchanged) ----------------
     all_freq, all_vel = _freqs(ms_list[0])
     nchan_total = all_freq.size
     if chan_sel is None:
@@ -332,9 +316,32 @@ def read_ms_block_I(
     velocity  = all_vel [chan_idx]     # (nchan,)
     nchan = int(frequency.size)
 
-    # 3) Read per-MS into fixed slots (preserve the chosen order)
+    # ---------------- 3) Decide which beams to actually read ----------------
+    def _norm_radius(R):
+        from astropy.coordinates import Angle
+        import astropy.units as u
+        if R is None: return None
+        if isinstance(R, Angle): return R
+        if hasattr(R, "unit"):   return Angle(R)          # Quantity
+        return Angle(R, unit=u.deg)                       # float -> deg
+
+    def _within_radius(cen, R, coord):
+        return coord.icrs.separation(cen.icrs) <= R
+
     nbeam = len(ms_list)
     centers = [None] * nbeam
+    keep_mask = [True] * nbeam  # default: keep
+    R = _norm_radius(target_radius) if (target_center is not None and target_radius is not None) else None
+
+    for i, ms in enumerate(ms_list):
+        c = _phasecenter(ms)      # cheap FIELD read
+        centers[i] = c
+        if R is not None and not _within_radius(target_center, R, c):
+            keep_mask[i] = False
+            logger.info(f"[SKIP-READ] {os.path.basename(ms)} outside {R.to_string()} of "
+                        f"{target_center.to_string('hmsdms')}")
+
+    # ---------------- 4) Read only the kept beams (preserve positions) ----------------
     uu_list = [None] * nbeam
     vv_list = [None] * nbeam
     ww_list = [None] * nbeam
@@ -343,28 +350,30 @@ def read_ms_block_I(
     fI_list = [None] * nbeam
 
     if n_workers and n_workers > 1:
-        logger.info(f"[BLOCK] Parallel read with {n_workers} workers (order-preserving)")
+        logger.info(f"[BLOCK] Parallel read with {n_workers} workers (order-preserving; selective)")
         ctx = get_context("fork")  # 'spawn' on Windows
         with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
-            futs = {ex.submit(_read_one_ms, ms, chan_idx, keep_autocorr, prefer_weight_spectrum): i
-                    for i, ms in enumerate(ms_list)}
+            futs = {ex.submit(_read_one_ms, ms_list[i], chan_idx, keep_autocorr, prefer_weight_spectrum): i
+                    for i in range(nbeam) if keep_mask[i]}
             for fut in as_completed(futs):
                 i = futs[fut]
                 out = fut.result()
-                centers[i] = out["center"]
                 uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
                 I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
     else:
-        logger.info("[BLOCK] Serial read (order-preserving)")
-        for i, ms in enumerate(ms_list):
-            out = _read_one_ms(ms, chan_idx, keep_autocorr, prefer_weight_spectrum)
-            centers[i] = out["center"]
+        logger.info("[BLOCK] Serial read (order-preserving; selective)")
+        for i in range(nbeam):
+            if not keep_mask[i]:
+                continue  # leave None -> empty slot
+            out = _read_one_ms(ms_list[i], chan_idx, keep_autocorr, prefer_weight_spectrum)
             uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
             I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
 
-    # 4) Pack to dense (nchan, nbeam, nvis_max)
-    nvis = np.array([u.shape[0] for u in uu_list], dtype=np.int32)
-    nvis_max = int(nvis.max())
+    # ---------------- 5) Pack to dense (nchan, nbeam, nvis_max) ----------------
+    nvis = np.zeros((nbeam,), dtype=np.int32)
+    for i in range(nbeam):
+        nvis[i] = 0 if uu_list[i] is None else int(uu_list[i].shape[0])
+    nvis_max = int(nvis.max())  # can be 0 if all beams skipped
 
     data_I  = np.zeros((nchan, nbeam, nvis_max), dtype=np.complex64)
     sigma_I = np.zeros((nchan, nbeam, nvis_max), dtype=np.float32)
@@ -375,6 +384,8 @@ def read_ms_block_I(
 
     # Per-channel UV mask and channel-major transpose
     for b in range(nbeam):
+        if nvis[b] == 0:
+            continue  # empty slot; already all flags=True
         UVW0 = uu_list[b]; UVW1 = vv_list[b]; UVW2 = ww_list[b]
         I    = I_list[b];  sI   = sI_list[b];  fI   = fI_list[b]   # (nrow_b, nchan)
 
@@ -392,7 +403,7 @@ def read_ms_block_I(
         sI_cb = sI.transpose(1, 0).astype(np.float32)     # (nchan, nvis_b)
         fI_cb = fI.transpose(1, 0).astype(bool)           # (nchan, nvis_b)
 
-        nv = int(UVW0.shape[0])
+        nv = nvis[b]
         uu[b, :nv] = UVW0
         vv[b, :nv] = UVW1
         ww[b, :nv] = UVW2
@@ -401,7 +412,9 @@ def read_ms_block_I(
         flag_I [:, b, :nv] = fI_cb
 
     centers = np.asarray(centers, dtype=object)
-    logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max}")
+    kept_count = int(np.count_nonzero(keep_mask)) if R is not None else nbeam
+    logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max} "
+                f"(read {kept_count}/{nbeam} beams)")
 
     return VisIData(
         frequency=frequency,
@@ -413,6 +426,141 @@ def read_ms_block_I(
         sigma_I=sigma_I,
         flag_I=flag_I,
     )
+
+# def read_ms_block_I(
+#     ms_dir: str,
+#     uvmin: float = 0.0,               # in wavelengths (desired)
+#     uvmax: float = float("inf"),      # in wavelengths (desired)
+#     chan_sel=None,                    # None | slice | list[int] | np.ndarray[int]
+#     keep_autocorr: bool = False,
+#     prefer_weight_spectrum: bool = True,
+#     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
+#     target_center: "SkyCoord | None" = None,
+#     target_radius: "Angle | u.Quantity | float | None" = None,  # float ⇒ degrees
+# ) -> "VisIData":
+#     """
+#     Load a directory of .ms files (one per beam) into an I-only, channel-major VisIData.
+#     The beams are packed in a **deterministic, natural order by beam index** inferred
+#     from filenames like '...-C10_5_...'. This matches what humans expect from a
+#     sorted listing (1,2,3,4,5,...), and is preserved under parallel reads.
+#     """
+#     # 1) Deterministic, human-expected order
+#     ms_list = _list_ms_sorted(ms_dir)
+#     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
+
+#     # --- NEW: center+radius filter ---
+#     if (target_center is not None) and (target_radius is not None):
+#         R = _norm_radius(target_radius)
+#         kept, skipped = [], []
+#         for ms in ms_list:
+#             c = _phasecenter(ms)  # cheap FIELD read
+#             if _within_radius(target_center, R, c):
+#                 kept.append(ms)
+#             else:
+#                 skipped.append(ms)
+#         for s in skipped:
+#             logger.info(f"[SKIP] {os.path.basename(s)}: outside {R.to_string()} of center")
+#         ms_list = kept
+#         if not ms_list:
+#             raise ValueError(f"No beams within {R.to_string()} of {target_center.to_string('hmsdms')}")
+
+#     # 2) Channel selection
+#     all_freq, all_vel = _freqs(ms_list[0])
+#     nchan_total = all_freq.size
+#     if chan_sel is None:
+#         chan_idx = np.arange(nchan_total, dtype=int)
+#     elif isinstance(chan_sel, slice):
+#         chan_idx = np.arange(nchan_total, dtype=int)[chan_sel]
+#     else:
+#         chan_idx = np.asarray(chan_sel, dtype=int)
+#     if chan_idx.size == 0:
+#         raise ValueError(f"chan_sel selects 0 channels; available nchan={nchan_total}")
+
+#     frequency = all_freq[chan_idx]     # (nchan,)
+#     velocity  = all_vel [chan_idx]     # (nchan,)
+#     nchan = int(frequency.size)
+
+#     # 3) Read per-MS into fixed slots (preserve the chosen order)
+#     nbeam = len(ms_list)
+#     centers = [None] * nbeam
+#     uu_list = [None] * nbeam
+#     vv_list = [None] * nbeam
+#     ww_list = [None] * nbeam
+#     I_list  = [None] * nbeam
+#     sI_list = [None] * nbeam
+#     fI_list = [None] * nbeam
+
+#     if n_workers and n_workers > 1:
+#         logger.info(f"[BLOCK] Parallel read with {n_workers} workers (order-preserving)")
+#         ctx = get_context("fork")  # 'spawn' on Windows
+#         with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
+#             futs = {ex.submit(_read_one_ms, ms, chan_idx, keep_autocorr, prefer_weight_spectrum): i
+#                     for i, ms in enumerate(ms_list)}
+#             for fut in as_completed(futs):
+#                 i = futs[fut]
+#                 out = fut.result()
+#                 centers[i] = out["center"]
+#                 uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
+#                 I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
+#     else:
+#         logger.info("[BLOCK] Serial read (order-preserving)")
+#         for i, ms in enumerate(ms_list):
+#             out = _read_one_ms(ms, chan_idx, keep_autocorr, prefer_weight_spectrum)
+#             centers[i] = out["center"]
+#             uu_list[i] = out["uu"]; vv_list[i] = out["vv"]; ww_list[i] = out["ww"]
+#             I_list[i]  = out["I"];  sI_list[i] = out["sI"];  fI_list[i] = out["fI"]
+
+#     # 4) Pack to dense (nchan, nbeam, nvis_max)
+#     nvis = np.array([u.shape[0] for u in uu_list], dtype=np.int32)
+#     nvis_max = int(nvis.max())
+
+#     data_I  = np.zeros((nchan, nbeam, nvis_max), dtype=np.complex64)
+#     sigma_I = np.zeros((nchan, nbeam, nvis_max), dtype=np.float32)
+#     flag_I  = np.ones( (nchan, nbeam, nvis_max), dtype=bool)
+
+#     uu = np.zeros((nbeam, nvis_max), dtype=np.float32)
+#     vv = np.zeros_like(uu); ww = np.zeros_like(uu)
+
+#     # Per-channel UV mask and channel-major transpose
+#     for b in range(nbeam):
+#         UVW0 = uu_list[b]; UVW1 = vv_list[b]; UVW2 = ww_list[b]
+#         I    = I_list[b];  sI   = sI_list[b];  fI   = fI_list[b]   # (nrow_b, nchan)
+
+#         # baseline length in meters for each row
+#         bl_m   = np.sqrt((UVW0**2 + UVW1**2 + UVW2**2))[:, None]   # (nrow_b, 1)
+#         # convert to wavelengths per channel
+#         bl_lam = bl_m * (frequency[None, :] / c_light.value)       # (nrow_b, nchan)
+#         in_rng = (bl_lam >= uvmin) & (bl_lam <= uvmax)
+
+#         fI |= ~in_rng
+#         sI[~in_rng] = np.inf
+
+#         # to channel-major for this beam
+#         I_cb  = I.transpose(1, 0).astype(np.complex64)    # (nchan, nvis_b)
+#         sI_cb = sI.transpose(1, 0).astype(np.float32)     # (nchan, nvis_b)
+#         fI_cb = fI.transpose(1, 0).astype(bool)           # (nchan, nvis_b)
+
+#         nv = int(UVW0.shape[0])
+#         uu[b, :nv] = UVW0
+#         vv[b, :nv] = UVW1
+#         ww[b, :nv] = UVW2
+#         data_I [:, b, :nv] = I_cb
+#         sigma_I[:, b, :nv] = sI_cb
+#         flag_I [:, b, :nv] = fI_cb
+
+#     centers = np.asarray(centers, dtype=object)
+#     logger.info(f"[BLOCK] Done: nchan={nchan}, nbeam={nbeam}, nvis_max={nvis_max}")
+
+#     return VisIData(
+#         frequency=frequency,
+#         velocity=velocity,
+#         centers=centers,     # natural beam order by C10_#
+#         nvis=nvis,
+#         uu=uu, vv=vv, ww=ww, # meters (scaled to λ on demand)
+#         data_I=data_I,
+#         sigma_I=sigma_I,
+#         flag_I=flag_I,
+#     )
 
 
 def read_ms_block_I_no_parrallel(

@@ -67,8 +67,8 @@ I: VisIData = reader.read_block_I(
     uvmin=0.0,
     uvmax=np.inf,
     chan_sel=slice(0, 1),
-    target_center=center,
-    target_radius=1*u.deg,
+    # target_center=center,
+    # target_radius=1*u.deg,
 )
 
 # -------------------
