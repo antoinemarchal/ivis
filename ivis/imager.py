@@ -172,13 +172,19 @@ class Imager3D:
     def process(self, model=None, units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32):
         """
-        Devices:
-          - optim_device: where PyTorch LBFGS params/optimizer live
-          - cost_device : where model.objective() runs
-        Rules:
-          - positivity==True (bounded): SciPy L-BFGS-B (CPU-only).
-          - positivity==False (unbounded): PyTorch LBFGS on optim_device; cost on cost_device.
-        NOTE: objective() is expected to call backward() internally (unchanged).
+        Devices
+        -------
+        - ``optim_device``: where PyTorch LBFGS params/optimizer live
+        - ``cost_device`` : where ``model.objective()`` runs
+        
+        Rules
+        -----
+        - ``positivity=True`` (bounded): SciPy L-BFGS-B (CPU-only).
+        - ``positivity=False`` (unbounded): PyTorch LBFGS on optim_device; cost on cost_device.
+        
+        Notes
+        -----
+        ``objective()`` is expected to call ``backward()`` internally (unchanged).
         """
         if model is None:
             raise ValueError("Must pass a model instance to `process()`.")

@@ -441,19 +441,23 @@ def read_ms_blocks_I(
     center_tol_deg: float = 1e-12,      # tolerance for center equality when mode="merge"
 ) -> "VisIData | List[VisIData]":
     """
-    Load multiple *blocks* of observations located under `ms_root`, then either:
-      - MERGE: concatenate vis per beam across blocks, assuming *same beam order and centers*
-      - STACK: stack beams (Nblock × beams)
-      - SEPARATE: return list[VisIData], one per block
+    Load multiple ``blocks`` of observations located under ``ms_root``, then either:
 
-    Block discovery policy:
-      - If `ms_root` itself contains *.ms directly, it's treated as a single block.
-      - Any *immediate* subdirectory of `ms_root` that contains *.ms is also a block.
+    - ``merge``: concatenate vis per beam across blocks, assuming same beam order and centers
+    - ``stack``: stack beams (Nblock × beams)
+    - ``separate``: return a list of ``VisIData``, one per block
 
-    Returns:
-      - mode="merge"  -> VisIData with beams equal to the number of unique centers (per order in block 0)
-      - mode="stack"  -> VisIData with beams equal to sum of beams across blocks
-      - mode="separate" -> list[VisIData]
+    Block discovery policy
+    ----------------------
+    - If ``ms_root`` itself contains ``*.ms`` directly, it's treated as a single block.
+    - Any immediate subdirectory of ``ms_root`` that contains ``*.ms`` is also a block.
+
+    Returns
+    -------
+    VisIData | list[VisIData]
+        - ``merge``: beams equal to the number of unique centers (per order in block 0)  
+        - ``stack``: beams equal to the sum of beams across blocks  
+        - ``separate``: list of ``VisIData`` objects  
     """
     # ---------- discover and read blocks ----------
     block_dirs = _list_block_dirs(ms_root)
@@ -847,11 +851,6 @@ class CasacoreReader:
 
     # --- Protocol methods ---
     def read_block_I(self, ms_dir: str, **kwargs) -> VisIData:
-        """
-        Wrapper around read_ms_block_I with reader defaults.
-        Accepts: uvmin, uvmax, chan_sel, keep_autocorr, prefer_weight_spectrum,
-                 n_workers, target_header
-        """
         return read_ms_block_I(
             ms_dir,
             uvmin=kwargs.get("uvmin", 0.0),
@@ -865,12 +864,6 @@ class CasacoreReader:
         )
 
     def read_blocks_I(self, ms_root: str, **kwargs) -> Union["VisIData", List["VisIData"]]:
-        """
-        Wrapper around read_ms_blocks_I with reader defaults.
-        Accepts: uvmin, uvmax, chan_sel, keep_autocorr, prefer_weight_spectrum,
-                 mode ('merge' | 'stack' | 'separate'), n_workers,
-                 target_header, center_tol_deg
-        """
         return read_ms_blocks_I(
             ms_root,
             uvmin=kwargs.get("uvmin", 0.0),
