@@ -53,7 +53,83 @@ class ClassicIViS3D(BaseModel):
 
         return L.item(), grad.ravel()
 
+    
+    @torch.no_grad()
+    def forward(
+        self,
+        x,
+        vis_data,
+        device,
+        pb_list=None, grid_list=None,
+        pb=None, grid_array=None,
+        cell_size=None,
+        return_cube: bool = True,
+        fill_flagged: str = "zero",   # "zero" or "model"
+    ):
+        """
+        Simulate model visibilities.
 
+        If return_cube=True, returns shape like vis_data.data_I: (nchan, nbeam, nvis).
+        Otherwise returns a flat (unflagged) vector in the same order as iter_chan_beam_I().
+        """
+        dev = torch.device(device)
+
+        # x -> torch [C,H,W]
+        if not torch.is_tensor(x):
+            x = torch.from_numpy(np.asarray(x))
+        x = x.to(dev).float()
+
+        # Fan-out PB/grid
+        nbeam = len(vis_data.centers)
+        if pb_list is None:
+            if pb is None:
+                raise ValueError("Need pb_list or pb array")
+            pb_list = [pb[b] for b in range(nbeam)]
+        if grid_list is None:
+            if grid_array is None:
+                raise ValueError("Need grid_list or grid_array")
+            grid_list = [grid_array[b] for b in range(nbeam)]
+
+        if not return_cube:
+            # Flat (unflagged) path via iterator
+            chunks = []
+            for c, b, Icb, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
+                mv = self.forward_beam(
+                    x2d=x[c], pb=pb_list[b], grid=grid_list[b],
+                    uu=uu, vv=vv, ww=ww, cell_size=cell_size, device=dev
+                )
+                chunks.append(mv.detach().cpu().numpy().reshape(-1))
+            return np.concatenate(chunks, axis=0).astype(np.complex64) if chunks else np.empty(0, np.complex64)
+
+        # ---- Cube path: build exactly like data_I shape, but fetch uvw from iterator ----
+        if not hasattr(vis_data, "data_I"):
+            raise ValueError("vis_data must have data_I to infer cube shape when return_cube=True.")
+        nchan, nbeam, nvis = vis_data.data_I.shape
+        out = np.zeros((nchan, nbeam, nvis), dtype=np.complex64)
+
+        # Optionally use flags to zero flagged slots (to mirror data_I storage)
+        has_flags = hasattr(vis_data, "flag_I")
+
+        for c, b, Icb, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
+            # Forward for this (chan, beam)
+            mv = self.forward_beam(
+                x2d=x[c], pb=pb_list[b], grid=grid_list[b],
+                uu=uu, vv=vv, ww=ww, cell_size=cell_size, device=dev
+            ).detach().cpu().numpy().astype(np.complex64)
+
+            # Place into cube; if mv shorter than nvis (due to flagging/packing), fill prefix
+            L = min(nvis, mv.size)
+            out[c, b, :L] = mv
+
+            # Zero flagged slots to mirror data_I
+            if has_flags and fill_flagged == "zero":
+                fl = np.asarray(vis_data.flag_I[c, b], dtype=bool)
+                if fl.shape == out[c, b].shape:
+                    out[c, b][fl] = 0.0
+
+        return out
+    
+    
     def forward_beam(self, x2d, pb, grid, uu, vv, ww, cell_size, device):
         # x2d -> 2D tensor [H,W]
         xt = torch.as_tensor(x2d, device=device)

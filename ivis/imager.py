@@ -163,7 +163,7 @@ class Imager3D:
             x=self.init_params,
             vis_data=self.vis_data,
             pb=pb_native,
-            device=self.device,
+            device=self.cost_device,
             cell_size=cell_size.value,
             grid_array=grid_native
         )
