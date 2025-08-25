@@ -1,10 +1,9 @@
 # IViS - Interferometric Visibility-domain Inversion Software
 
-```text
-_ _| \ \     / _)   ___| 
-  |   \ \   /   | \___ \ 
-  |    \ \ /    |       |
-___|    \_/    _| _____/ 
+&nbsp;&nbsp;&nbsp;&nbsp;_ _| \ \     / _)   ___|  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|   \ \   /   | \___ \  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|    \ \ /    |       |  
+&nbsp;&nbsp;&nbsp;___|    \_/    _| _____/  
 
 [![Documentation Status](https://readthedocs.org/projects/ivis-dev/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
 
