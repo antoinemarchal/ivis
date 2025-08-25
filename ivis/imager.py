@@ -386,7 +386,7 @@ class Imager3D:
 
         # --- Unit conversion ---
         if units == "Jy/arcsec^2":
-            return result
+            output = result
 
         elif units == "Jy/beam":
             assumed_fwhm_pix = 3 #hard-coded value
@@ -397,15 +397,19 @@ class Imager3D:
             )
             beam_r = Beam(assumed_fwhm_pix * cell_size,
                           assumed_fwhm_pix * cell_size, 1.e-12 * u.deg)
-            return result * beam_r.sr.to(u.arcsec**2).value
+            output = result * beam_r.sr.to(u.arcsec**2).value
         
         elif units == "K":
             nu_Hz = self.vis_data.frequency
-            return dunits.jy_per_arcsec2_to_K(result, nu_Hz)
+            output = dunits.jy_per_arcsec2_to_K(result, nu_Hz)
 
         else:
             logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
-            return result
+            output = result
+
+        #Success logger
+        logger.info("Successful run. Please clap.")
+        return output
 
 
 #------------------------------------
