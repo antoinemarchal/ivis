@@ -110,7 +110,7 @@ model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 # Run optimization
 # -------------------
 # base = image_processor.process(model=model, units="Jy/arcsec^2", down_factor=2, coarse_its=5, fine_its=10)
-base = image_processor.process(model=model, units="Jy/arcsec^2")
+base = image_processor.process(model=model, units="K")
 # # Save or inspect result
 # fits.writeto(pathout + "ivis_reconstruction.fits", base, target_header, overwrite=True)
 

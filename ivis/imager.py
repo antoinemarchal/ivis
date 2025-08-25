@@ -192,6 +192,28 @@ class Imager3D:
         cost_dev  = self.cost_device
         optim_dev = self.optim_device
 
+        # --- Units logger ---
+        if units == "Jy/arcsec^2":
+            logger.info("Units of output: Jy/arcsec^2.")
+            
+        elif units == "K":
+            logger.info("Units of output: K (using frequency in Hz).")
+            
+        elif units == "Jy/beam":
+            logger.warning(
+                "Units of output: Jy/beam. "
+                "Note: this is not the preferred unit in IViS, as the effective beam "
+                "depends on regularization. Unlike CLEAN, the model is not reconvolved "
+                "with a Gaussian restoring beam. "
+                "We recommend using 'K' units for diffuse extended emission."
+            )
+            
+        else:
+            logger.error(
+                f"Unknown unit '{units}'. Units must be 'Jy/arcsec^2', 'K', or (not recommended) 'Jy/beam'. "
+                "Defaulting to Jy/arcsec^2."
+            )
+
         # ---- local helper: format GPU mem for any CUDA device ----
         def _gpu_mem_str(dev: torch.device) -> str:
             if dev.type != "cuda":
@@ -360,21 +382,29 @@ class Imager3D:
 
             result = x_param.detach().cpu().numpy().reshape(param_shape)
 
-        logger.warning("Multiply by 2 for ASKAP if needed.")
+        logger.warning("If you are using ASKAP's convention I = XX + YY (with no 1/2 factor) then multiply the output by 2. Here assuming I = 1/2 (XX + YY).")
 
         # --- Unit conversion ---
         if units == "Jy/arcsec^2":
             return result
+
         elif units == "Jy/beam":
-            beam_r = Beam(4.2857 * cell_size, 4.2857 * cell_size, 1.e-12 * u.deg)
+            assumed_fwhm_pix = 3 #hard-coded value
+            logger.warning(
+                f"Converting to Jy/beam assuming a restoring beam of "
+                f"{assumed_fwhm_pix} × cell_size = "
+                f"{assumed_fwhm_pix * cell_size:.3f} FWHM."
+            )
+            beam_r = Beam(assumed_fwhm_pix * cell_size,
+                          assumed_fwhm_pix * cell_size, 1.e-12 * u.deg)
             return result * beam_r.sr.to(u.arcsec**2).value
+        
         elif units == "K":
-            nu = self.vis_data.frequency[0] * u.Hz
-            beam_r = Beam(3 * cell_size, 3 * cell_size, 1.e-12 * u.deg)
-            result_Jy = result * beam_r.sr.to(u.arcsec**2).value
-            return (result_Jy * u.Jy).to(u.K, u.brightness_temperature(nu, beam_r)).value
+            nu_Hz = self.vis_data.frequency
+            return dunits.jy_per_arcsec2_to_K(result, nu_Hz)
+
         else:
-            logger.error("Unknown unit type.")
+            logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
             return result
 
 
@@ -709,11 +739,11 @@ class Imager:
         if units == "Jy/arcsec^2":
             return result
 
-        if units == "Jy/beam":
-            logger.info("assuming a synthesized beam of 4.2857 x cell_size")
-            cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
-            beam_r = Beam(4.2857*cell_size, 4.2857*cell_size, 1.e-12*u.deg) 
-            return result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
+        # if units == "Jy/beam":
+        #     logger.info("assuming a synthesized beam of 4.2857 x cell_size")
+        #     cell_size = (self.hdr["CDELT2"] *u.deg).to(u.arcsec)
+        #     beam_r = Beam(4.2857*cell_size, 4.2857*cell_size, 1.e-12*u.deg) 
+        #     return result * (beam_r.sr).to(u.arcsec**2).value #Jy/arcsec^2 to Jy/beam    
 
         elif units == "K":
             logger.info("assuming a synthesized beam of 3 x cell_size")
