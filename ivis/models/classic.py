@@ -23,13 +23,8 @@ class ClassicIViS3D(BaseModel):
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
         ...
-
-    # # --- helper to match old _lambda_to_radpix ---
-    # @staticmethod
-    # def _cellsize_arcsec_to_rad(cell_size_arcsec: float) -> float:
-    #     return cell_size_arcsec * np.pi / (180.0 * 3600.0)
-
     
+
     def loss(self, x, shape, device, vis_data, **kwargs):
         """
         Optimizer-friendly loss wrapper (returns loss and grad as numpy).
@@ -52,8 +47,8 @@ class ClassicIViS3D(BaseModel):
             logger.info(f"[PID {os.getpid()}] Total cost: {np.format_float_scientific(L.item(), precision=5)}")
 
         return L.item(), grad.ravel()
-
     
+
     @torch.no_grad()
     def forward(
         self,
@@ -129,7 +124,7 @@ class ClassicIViS3D(BaseModel):
 
         return out
     
-    
+
     def forward_beam(self, x2d, pb, grid, uu, vv, ww, cell_size, device):
         # x2d -> 2D tensor [H,W]
         xt = torch.as_tensor(x2d, device=device)

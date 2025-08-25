@@ -102,6 +102,7 @@ def _list_ms_sorted_natural(ms_dir: str):
         raise FileNotFoundError(f"No .ms found under {ms_dir}")
     return sorted(items, key=_beamkey_by_c10)
 
+
 def _list_block_dirs_sorted(ms_root: str):
     out = []
     with os.scandir(ms_root) as it:
@@ -112,6 +113,7 @@ def _list_block_dirs_sorted(ms_root: str):
                 out.append(os.path.join(ms_root, de.name))
     return sorted(out, key=lambda p: _natkey(Path(p).name))
 
+
 def _phasecenter(ms_path: str) -> SkyCoord:
     with _quiet_tables():
         with table(f"{ms_path}/FIELD", readonly=True) as t:
@@ -120,13 +122,37 @@ def _phasecenter(ms_path: str) -> SkyCoord:
     dec_dms = Angle(dec_rad, unit=u.rad).to_string(unit=u.deg,       sep=":")
     return SkyCoord(ra_hms, dec_dms, unit=(u.hourangle, u.deg), frame="icrs")
 
-def _freqs(ms_path: str):
+
+def _freqs(ms_path: str, rest_freq: float | u.Quantity = 1.42040575177e9 * u.Hz):
+    """
+    Read frequencies from a MeasurementSet and compute corresponding velocities.
+
+    Parameters
+    ----------
+    ms_path : str
+        Path to the MeasurementSet.
+    rest_freq : float or Quantity, optional
+        Rest frequency of the spectral line [Hz]. Default: 1.42040575177 GHz (H I 21cm line).
+
+    Returns
+    -------
+    freqs : ndarray (float64)
+        Channel frequencies [Hz].
+    vel   : ndarray (float64)
+        Velocities relative to rest frequency [km/s].
+    """
     with _quiet_tables():
         with table(f"{ms_path}/SPECTRAL_WINDOW", readonly=True) as t:
-            freqs = np.atleast_1d(np.squeeze(t.getcol("CHAN_FREQ"))).astype(np.float64)  # Hz
-    rest = 1.42040575177e9 * u.Hz
-    vel_q = ((rest - freqs * u.Hz) / rest * c_light)        # Quantity [m/s]
-    vel   = vel_q.to_value(u.km/u.s).astype(np.float64)     # km/s
+            freqs = np.atleast_1d(
+                np.squeeze(t.getcol("CHAN_FREQ"))
+            ).astype(np.float64)  # Hz
+
+    # normalize rest_freq to Quantity
+    rest_freq = rest_freq * u.Hz if np.isscalar(rest_freq) else rest_freq.to(u.Hz)
+
+    vel_q = ((rest_freq - freqs * u.Hz) / rest_freq * c_light)   # m/s
+    vel   = vel_q.to_value(u.km/u.s).astype(np.float64)          # km/s
+
     return freqs, vel
 
 # -------- helpers --------
@@ -283,6 +309,7 @@ def read_ms_block_I(
     uvmin: float = 0.0,               # in wavelengths (desired)
     uvmax: float = float("inf"),      # in wavelengths (desired)
     chan_sel=None,                    # None | slice | list[int] | np.ndarray[int]
+    rest_freq: float = 1.42040575177e9, # HI rest frequency as default value in unit of Hz
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
@@ -301,7 +328,7 @@ def read_ms_block_I(
     logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
 
     # ---------------- 2) Channel selection (unchanged) ----------------
-    all_freq, all_vel = _freqs(ms_list[0])
+    all_freq, all_vel = _freqs(ms_list[0], rest_freq)
     nchan_total = all_freq.size
     if chan_sel is None:
         chan_idx = np.arange(nchan_total, dtype=int)
@@ -432,6 +459,7 @@ def read_ms_blocks_I(
     uvmin: float = 0.0,
     uvmax: float = float("inf"),
     chan_sel=None,                      # None | slice | list[int] | np.ndarray[int]
+    rest_freq: float = 1.42040575177e9, # HI rest frequency as default value in unit of Hz
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     mode: str = "merge",                # "merge" | "stack" | "separate"
@@ -472,6 +500,7 @@ def read_ms_blocks_I(
             uvmin=uvmin,
             uvmax=uvmax,
             chan_sel=chan_sel,
+            rest_freq=rest_freq,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,
@@ -595,6 +624,7 @@ def iter_channel_slabs(
     uvmin: float = 0.0,
     uvmax: float = float("inf"),
     chan_sel=None,                 # None | slice | list[int] | np.ndarray[int]
+    rest_freq: float = 1.42040575177e9, # HI rest frequency as default value in unit of Hz
     slab: int = 64,                # max channels per slab
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
@@ -609,7 +639,7 @@ def iter_channel_slabs(
         and visI is a VisIData with shape (stop-start, nbeam, nvis_max).
     """
     ms_list = _list_ms_sorted(ms_dir)
-    all_freq, _ = _freqs(ms_list[0])
+    all_freq, _ = _freqs(ms_list[0], rest_freq)
     all_idx = np.arange(all_freq.size, dtype=int)
 
     # Normalize chan_sel -> explicit indices
@@ -639,6 +669,7 @@ def iter_channel_slabs(
             uvmin=uvmin,
             uvmax=uvmax,
             chan_sel=slice(start, stop),
+            rest_freq=rest_freq,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,            
@@ -651,6 +682,7 @@ def iter_blocks_chan_beam_I(
     uvmin: float = 0.0,
     uvmax: float = float("inf"),
     chan_sel=None,
+    rest_freq: float = 1.42040575177e9, # HI rest frequency as default value in unit of Hz
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
@@ -665,6 +697,7 @@ def iter_blocks_chan_beam_I(
             uvmin=uvmin,
             uvmax=uvmax,
             chan_sel=chan_sel,
+            rest_freq=rest_freq,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,
@@ -704,6 +737,7 @@ def iter_blocks_channel_slabs(
                 uvmin=uvmin,
                 uvmax=uvmax,
                 chan_sel=chan_sel,
+                rest_freq=rest_freq,
                 slab=slab,
                 keep_autocorr=keep_autocorr,
                 prefer_weight_spectrum=prefer_weight_spectrum,
@@ -723,6 +757,7 @@ def iter_blocks_channel_slabs(
                 uvmin=uvmin,
                 uvmax=uvmax,
                 chan_sel=chan_sel,
+                rest_freq=rest_freq,
                 slab=slab,
                 keep_autocorr=keep_autocorr,
                 prefer_weight_spectrum=prefer_weight_spectrum,
@@ -812,6 +847,7 @@ def iter_blocks_chan_beam_via_slabs(
             uvmin=uvmin,
             uvmax=uvmax,
             chan_sel=chan_sel,
+            rest_freq=rest_freq,
             slab=slab,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
@@ -842,26 +878,26 @@ class CasacoreReader:
     def list_ms(self, ms_dir: str) -> List[str]:
         return _list_ms_sorted(ms_dir)
 
-    def freq_grid(self, ms_dir: str):
+    def freq_grid(self, ms_dir: str, rest_freq: float):
         msl = self.list_ms(ms_dir)
         if not msl:
             raise FileNotFoundError(f"No .ms found in {ms_dir}")
-        freqs, _vel = _freqs(msl[0])
+        freqs, _vel = _freqs(msl[0], rest_freq)
         return freqs
 
     # --- Protocol methods ---
-    def read_block_I(self, ms_dir: str, **kwargs) -> VisIData:
-        return read_ms_block_I(
-            ms_dir,
-            uvmin=kwargs.get("uvmin", 0.0),
-            uvmax=kwargs.get("uvmax", float("inf")),
-            chan_sel=kwargs.get("chan_sel"),
-            keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
-            prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
-            n_workers=kwargs.get("n_workers", self.n_workers),
-            target_center=kwargs.get("target_center"),
-            target_radius=kwargs.get("target_radius"),
-        )
+    # def read_block_I(self, ms_dir: str, **kwargs) -> VisIData:
+    #     return read_ms_block_I(
+    #         ms_dir,
+    #         uvmin=kwargs.get("uvmin", 0.0),
+    #         uvmax=kwargs.get("uvmax", float("inf")),
+    #         chan_sel=kwargs.get("chan_sel"),
+    #         keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
+    #         prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
+    #         n_workers=kwargs.get("n_workers", self.n_workers),
+    #         target_center=kwargs.get("target_center"),
+    #         target_radius=kwargs.get("target_radius"),
+    #     )
 
     def read_blocks_I(self, ms_root: str, **kwargs) -> Union["VisIData", List["VisIData"]]:
         return read_ms_blocks_I(
@@ -869,6 +905,7 @@ class CasacoreReader:
             uvmin=kwargs.get("uvmin", 0.0),
             uvmax=kwargs.get("uvmax", float("inf")),
             chan_sel=kwargs.get("chan_sel"),
+            rest_freq=kwargs.get("rest_freq", 1.42040575177e9),
             keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
             prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
             mode=kwargs.get("mode", "merge"),
@@ -884,6 +921,7 @@ class CasacoreReader:
             uvmin=kwargs.get("uvmin", 0.0),
             uvmax=kwargs.get("uvmax", float("inf")),
             chan_sel=kwargs.get("chan_sel"),
+            rest_freq=kwargs.get("rest_freq", 1.42040575177e9),
             slab=kwargs.get("slab", 64),
             keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
             prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
@@ -895,7 +933,7 @@ class CasacoreReader:
 if __name__ == "__main__":
     # Example usage — adjust path + channels
     # ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir"
+    ms_dir = "/Users/antoine/Desktop/Synthesis/ivis/docs/tutorials/data_tutorials/msdir2"
 
     # # single shot load (channels 0..99)
     # visI = read_ms_block_I(
@@ -924,16 +962,17 @@ if __name__ == "__main__":
 
     # concat or merge
     print("Test #Concat all")
-    vis_all = read_ms_blocks_I(
+    I: VisIData = read_ms_blocks_I(
         ms_root=ms_dir,
         uvmin=20.0, uvmax=5000.0,
         chan_sel=slice(0, 4),
+        rest_freq=1.42040575177e9, #HI rest frequency in Hz
         keep_autocorr=False,
         prefer_weight_spectrum=True,
         mode="merge",
         n_workers=4,
     )
-    for c, b, I, sI, uu, vv, ww in vis_all.iter_chan_beam_I():
+    for c, b, Ib, sI, uu, vv, ww in I.iter_chan_beam_I():
         pass
 
     stop

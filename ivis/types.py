@@ -1,13 +1,13 @@
 # ivis/types.py
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, MISSING
 from typing import Iterator, Tuple
 import numpy as np
 from astropy.constants import c as c_light
 
 # -------------------- I-only container (channel-major) --------------------
 @dataclass
-class VisIData:
+class VisIData():
     # Axes / coords
     frequency: np.ndarray     # (nchan,) float64 [Hz]
     velocity:  np.ndarray     # (nchan,) float64 [km/s]
@@ -20,9 +20,42 @@ class VisIData:
     ww: np.ndarray            # (nbeam, nvis_max) float32  [meters]
 
     # I-only measurements (channel-major)
-    data_I:  np.ndarray       # (nchan, nbeam, nvis_max) complex64
-    sigma_I: np.ndarray       # (nchan, nbeam, nvis_max) float32
+    data_I:  np.ndarray       # (nchan, nbeam, nvis_max) complex64 [Jy]
+    sigma_I: np.ndarray       # (nchan, nbeam, nvis_max) float32 [Jy]
     flag_I:  np.ndarray       # (nchan, nbeam, nvis_max) bool
+
+
+    _units = {
+        "frequency": "[Hz]",
+        "velocity":  "[km/s]",
+        "centers":   "",
+        "nvis":      "",
+        "uu":        "[m]",
+        "vv":        "[m]",
+        "ww":        "[m]",
+        "data_I":    "[Jy]",
+        "sigma_I":   "[Jy]",
+        "flag_I":    "",
+    }
+    
+    def __repr__(self):
+        lines = [f"{self.__class__.__name__}("]
+        for f in fields(self):
+            val = getattr(self, f.name)
+            unit = self._units.get(f.name, "")
+            if isinstance(val, np.ndarray):
+                flat = val.ravel()
+                preview = np.array2string(flat[:3], separator=", ", threshold=5)
+                if flat.size > 3:
+                    preview = preview[:-1] + ", ...]"
+                lines.append(
+                    f"  {f.name:<10} {unit:<7}: array{val.shape}, dtype={val.dtype}, sample={preview}"
+                )
+            else:
+                lines.append(f"  {f.name:<10} {unit:<7}: {val!r}")
+        lines.append(")")
+        return "\n".join(lines)
+
 
     def __post_init__(self):
         self.frequency = np.asarray(self.frequency, dtype=np.float64)
