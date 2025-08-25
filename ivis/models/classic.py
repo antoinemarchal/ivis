@@ -24,10 +24,10 @@ class ClassicIViS3D(BaseModel):
         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
         ...
 
-    # --- helper to match old _lambda_to_radpix ---
-    @staticmethod
-    def _cellsize_arcsec_to_rad(cell_size_arcsec: float) -> float:
-        return cell_size_arcsec * np.pi / (180.0 * 3600.0)
+    # # --- helper to match old _lambda_to_radpix ---
+    # @staticmethod
+    # def _cellsize_arcsec_to_rad(cell_size_arcsec: float) -> float:
+    #     return cell_size_arcsec * np.pi / (180.0 * 3600.0)
 
     
     def loss(self, x, shape, device, vis_data, **kwargs):
