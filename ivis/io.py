@@ -9,6 +9,7 @@ for imaging in the IViS pipeline.
 import os
 import glob
 import sys
+from datetime import datetime
 import numpy as np
 from astropy import units as u
 from astropy import wcs
@@ -28,7 +29,7 @@ from ivis.utils import dutils, dcasacore
 from ivis.readers.base import Reader
 
 
-@dataclass #modified from MPol
+@dataclass #modified from MPol -- depreciated
 class VisData:
     """Container for visibility data used in the imaging pipeline."""
     uu: np.ndarray
@@ -65,8 +66,33 @@ class DataProcessor:
         self.path_sd = path_sd
         self.pathout = pathout
         logger.info("[Initialize DataProcessor ]")
-        
+        self._print_header()
 
+
+    def _print_header(self):
+        logger.info("-------------------------------------------------------------------------")
+        logger.info(f" Timestamp: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        logger.info("")  # blank line
+        
+        logo = r"""
+        _ _| \ \     / _)   ___| 
+          |   \ \   /   | \___ \ 
+          |    \ \ /    |       |
+        ___|    \_/    _| _____/ 
+        """.strip("\n")
+        
+        # log each line directly (no extra space!)
+        for line in logo.splitlines():
+            logger.info(line)
+            
+        logger.info(" Version 1.0.0")
+        logger.info(" IViS is released as open-source software")
+        logger.info(" Author: @amarchal")
+        logger.info(" Documentation: https://ivis-dev.readthedocs.io/en/latest/")
+        logger.info(" Github: https://github.com/antoinemarchal/ivis")
+        logger.info("-------------------------------------------------------------------------")
+            
+    
     def fixms(self): #fixme ran in parallel
         """
         Applies `fix_ms_dir` to all .ms files in the input path.
