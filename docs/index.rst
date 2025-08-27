@@ -1,5 +1,5 @@
-IViS
-====
+IViS 🌱
+=======
 
 **IViS** — Interferometric Visibility-domain Inversion Software
 
