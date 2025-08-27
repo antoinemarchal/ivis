@@ -101,4 +101,4 @@ Documentation
 .. note::
 
    If you use **IViS**, please cite our work and reference the
-   `IViS GitHub repository <https://github.com/antoinemarchal/ivis>`_. This work will be published either in JOSS or an astrophysical journal soon.
+   `IViS GitHub repository <https://github.com/antoinemarchal/ivis>`_. When IViS matures enough, it will be published in JOSS and/or an astrophysical journal.
