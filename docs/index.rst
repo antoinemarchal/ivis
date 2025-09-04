@@ -8,7 +8,7 @@ IViS 🌱
    <div style="text-align: justify; color: #dddddd; font-size: 16px; line-height: 1.6;">
 
    IViS is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
-   IViS seeks to lower the <u>energy footprint</u> of large imaging tasks and to support <u>"real-time" imaging</u>
+   IViS seeks to lower the energy footprint of large imaging tasks and to support "real-time" imaging
    (<span class="math">\(T_\text{imaging} \leq T_\text{obs}\)</span>). 
    
    Because of its intrinsic framework based on a regularized criterion, IViS — like MEM — is better suited for diffuse emission rather than point sources, whose flux tends to be spread by the regularizer. IViS was developed in the context of imaging H I spectral line data from the ASKAP and MeerKAT instruments.
