@@ -19,7 +19,7 @@ from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.logger import logger
 
-plt.ion() 
+plt.ion()
 
 # -------------------
 # Paths and WCS
