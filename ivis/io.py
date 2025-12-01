@@ -22,12 +22,12 @@ from dataclasses import dataclass
 import subprocess
 import tarfile
 import concurrent.futures
+from pathlib import Path
 from tqdm import tqdm as tqdm
 
 from ivis.logger import logger
 from ivis.utils import dutils, dcasacore
 from ivis.readers.base import Reader
-
 
 @dataclass #modified from MPol -- depreciated
 class VisData:
