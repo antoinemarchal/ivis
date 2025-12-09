@@ -121,13 +121,13 @@ def get_phasecenter_from_field(ms, field_id=0):
     return ra_hms, dec_dms
 
 #path ms data
-pathms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/79298/"
+pathms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/"
 msl = sorted(glob.glob(pathms+"*.ms"))
 #path beams
 path="/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/"
 BEAMS = sorted(glob.glob(path+"*.fits"))
 
-pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/79298/"
+pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/"
 
 for i in tqdm(range(len(msl))):
     name = msl[i]

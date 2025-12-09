@@ -3,3 +3,4 @@
 *.slurm~
 *.py~
 *.out
+plots/

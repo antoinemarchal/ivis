@@ -2,7 +2,7 @@ import os
 from astropy.io import fits
 import matplotlib.pyplot as plt
 
-root = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/79298"
+root = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/"
 
 ra_list = []
 dec_list = []
@@ -51,7 +51,7 @@ plt.grid(True)
 plt.tight_layout()
 
 # --- Save to file ---
-output_file = "beam_centers.png"
+output_file = "beam_centers_merge.png"
 plt.savefig(output_file, dpi=200)
 
 print(f"Saved figure to {output_file}")

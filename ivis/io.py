@@ -14,6 +14,7 @@ import numpy as np
 from astropy import units as u
 from astropy import wcs
 from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 from astropy.io import fits
 from scipy import optimize
 from radio_beam import Beam
@@ -91,7 +92,65 @@ class DataProcessor:
         logger.info(" Documentation: https://ivis-dev.readthedocs.io/en/latest/")
         logger.info(" Github: https://github.com/antoinemarchal/ivis")
         logger.info("-------------------------------------------------------------------------")
-            
+
+        
+    def make_imaging_header(
+        self,
+        skycoord: SkyCoord,
+        fov_deg: float = 10.0,
+        pix_arcsec: float = 7.0,
+        projection: str = "SIN",
+    ):
+        """
+        Create a FITS WCS header for 2D interferometric imaging.
+
+        Parameters
+        ----------
+        skycoord : SkyCoord
+            Sky coordinate of the phase center.
+        fov_deg : float, optional
+            Total field of view [deg]. Default = 5 deg.
+        pix_arcsec : float, optional
+            Pixel size in arcsec. Default = 7 arcsec.
+        projection : str, optional
+            WCS projection (SIN, TAN, CAR...). Default = "SIN".
+
+        Returns
+        -------
+        header : astropy.io.fits.Header
+        wcs : astropy.wcs.WCS
+        """
+
+        # Extract RA/DEC in degrees from SkyCoord
+        ra_center  = skycoord.icrs.ra.deg
+        dec_center = skycoord.icrs.dec.deg
+
+        # Pixel size in deg
+        pix_deg = pix_arcsec / 3600.0
+
+        # Image size in pixels
+        npix = int(round(fov_deg / pix_deg))
+
+        # Build WCS
+        w = WCS(naxis=2)
+        proj = projection.upper()
+
+        w.wcs.ctype = [f"RA---{proj}", f"DEC--{proj}"]
+        w.wcs.cunit = ["deg", "deg"]
+        w.wcs.crval = [ra_center, dec_center]          # phase center
+        w.wcs.crpix = [npix / 2.0, npix / 2.0]         # reference pixel
+        w.wcs.cdelt = [-pix_deg, pix_deg]             # RA left, DEC up
+
+        # Export header
+        header = w.to_header()
+        header["NAXIS"]  = 2
+        header["NAXIS1"] = npix
+        header["NAXIS2"] = npix
+        header["OBSRA"]  = ra_center
+        header["OBSDEC"] = dec_center
+
+        return header, w
+
     
     def fixms(self): #fixme ran in parallel
         """
