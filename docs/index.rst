@@ -42,8 +42,8 @@ To get started, we recommend using ``uv`` to manage packages and ``mamba`` to cr
 
    # Create the IViS environment
    mamba create -n ivis \
-     python=3.10 casacore=3.4.0 python-casacore=3.4.0 gsl=2.6 pip \
-     -c conda-forge -c pkgs/main
+   python=3.10 casacore python-casacore gsl pip \
+   -c conda-forge
 
    mamba activate ivis
 
