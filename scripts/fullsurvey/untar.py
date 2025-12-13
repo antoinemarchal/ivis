@@ -21,11 +21,11 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/stokesI-testfields/77022/"
+    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/incoming/79266/"
     
     path_beams = "./" #directory of primary beams
     path_sd = "./" #path single-dish data - dummy here
-    pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/stokesI-testfields/77022/" #path where data will be packaged and stored
+    pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/incoming/79266/" #path where data will be packaged and stored
 
     #create data processor
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)

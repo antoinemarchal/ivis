@@ -34,15 +34,20 @@ if __name__ == '__main__':
     #Define target header
     # cfield = SkyCoord(ra="5h36m41s", dec="-67d58m44s", frame="icrs")
     cfield = SkyCoord(ra="5h05m43.8s", dec="-70d05m48.5s", frame="icrs")
-    target_header, w = data_processor.make_imaging_header(cfield, fov_deg=12, pix_arcsec=4)
+    # target_header, w = data_processor.make_imaging_header(cfield, fov_deg=12, pix_arcsec=4)
+    target_header, w = data_processor.make_imaging_header(cfield, fov_deg=15)
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
-    # Optional: pre-compute PB and grid
-    # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_high.fits", fitsname_grid="grid_interp_high.fits")
+    # # Optional: pre-compute PB and grid
+    # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb2.fits", fitsname_grid="grid_interp2.fits")
 
+    # pb, grid = data_processor.read_pb_and_grid(
+    #     fitsname_pb="reproj_pb_high.fits",
+    #     fitsname_grid="grid_interp_high.fits"
+    # )
     pb, grid = data_processor.read_pb_and_grid(
-        fitsname_pb="reproj_pb_high.fits",
-        fitsname_grid="grid_interp_high.fits"
+        fitsname_pb="reproj_pb2.fits",
+        fitsname_grid="grid_interp2.fits"
     )
 
     # Dummy single-dish array and beam
@@ -55,7 +60,7 @@ if __name__ == '__main__':
     reader = CasacoreReader(
         prefer_weight_spectrum=False,
         keep_autocorr=False,
-        n_workers=8)
+        n_workers=24)
     
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
@@ -64,6 +69,8 @@ if __name__ == '__main__':
         # chan_sel=slice(765,766),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
+        target_center=cfield,
+        # target_radius=1*u.deg
     )
 
     # -------------------
@@ -74,7 +81,7 @@ if __name__ == '__main__':
     lambda_r = 1
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = "cpu"        # 0 for GPU, "cpu" for CPU
-    positivity = False
+    positivity = True
     init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
     
     # -------------------
@@ -107,7 +114,7 @@ if __name__ == '__main__':
     result = image_processor.process(model=model, units="Jy/arcsec^2")
 
     #Write output array on disk
-    fits.writeto(pathout + "output_0.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_1blocks_7arcsec_lambda_r_2_positivity_true_iter_20_new_PB_Nw_0.fits", result, target_header, overwrite=True)
 
     stop
     

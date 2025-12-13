@@ -121,7 +121,7 @@ def get_phasecenter_from_field(ms, field_id=0):
     return ra_hms, dec_dms
 
 #path ms data
-pathms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/"
+pathms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge1/"
 msl = sorted(glob.glob(pathms+"*.ms"))
 #path beams
 path="/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/"
@@ -177,7 +177,8 @@ for i in tqdm(range(len(msl))):
     hdr["CRVAL2"] = c.dec.value
 
     #apply rotation beam
-    pb_rot = ndimage.rotate(pb*tapper, -164.9592, reshape=False) * tapper #FIXME
+    # pb_rot = ndimage.rotate(pb*tapper, -164.9592, reshape=False) * tapper #FIXME
+    pb_rot = ndimage.rotate(pb*tapper, 140, reshape=False) * tapper #FIXME
 
     #Write on disk
     hdu0 = fits.PrimaryHDU(pb_rot, header=hdr)

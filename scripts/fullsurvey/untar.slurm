@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=untar
+#SBATCH --job-name=untar_78712-originalData
 #SBATCH --output=untar_%j.out
 #SBATCH --error=untar_%j.err
 #SBATCH --clusters=totoro
