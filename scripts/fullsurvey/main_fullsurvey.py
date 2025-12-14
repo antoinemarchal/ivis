@@ -65,8 +65,8 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
-        chan_sel=slice(810,811),
-        # chan_sel=slice(765,766),
+        # chan_sel=slice(810,811),
+        chan_sel=slice(765,766),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     # -------------------
     # User parameters
     # -------------------
-    max_its = 20
+    max_its = 25
     lambda_sd = 0
     lambda_r = 1
     cost_device = 0        # 0 for GPU, "cpu" for CPU
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     result = image_processor.process(model=model, units="Jy/arcsec^2")
 
     #Write output array on disk
-    fits.writeto(pathout + "output_1blocks_7arcsec_lambda_r_2_positivity_true_iter_20_new_PB_Nw_0.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits", result, target_header, overwrite=True)
 
     stop
     
