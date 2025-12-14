@@ -11,7 +11,7 @@ from radio_beam import Beam
 import torch
 from tqdm import tqdm as tqdm
 from reproject import reproject_interp
-from astropy.constants import c
+from astropy.constants import k_B, c
 from spectral_cube import SpectralCube
 from numpy.fft import fft2, ifft2, fftshift
 
@@ -22,6 +22,29 @@ from ivis.logger import logger
 from ivis.utils import dunits, dutils
 
 plt.ion()
+
+def K_to_jy_arcsec2(T_K, nu_hz):
+    """
+    Convert brightness temperature [K] -> Jy/arcsec^2
+    using Rayleigh–Jeans law (surface brightness).
+    """
+    T = np.asarray(T_K) * u.K
+    nu = np.asarray(nu_hz) * u.Hz
+
+    # Broadcast frequency if needed (for cubes)
+    if nu.ndim == 1 and T.ndim == 3:
+        nu = nu[:, None, None]
+
+    # Specific intensity per steradian
+    I_nu = (2 * k_B * nu**2 / c**2 * T) / u.sr
+
+    # Convert sr -> arcsec^2
+    I_jy_arcsec2 = I_nu.to(
+        u.Jy / u.arcsec**2,
+        equivalencies=u.dimensionless_angles()
+    )
+
+    return I_jy_arcsec2.value
 
 def interpolate_velocity_plane(cube, vel):
     """
@@ -100,8 +123,8 @@ if __name__ == '__main__':
     mask = np.where(pb_mean_full > 0.05, 1, np.nan)
 
     #Open IViS result
-    # fitsname="/Users/antoine/Desktop/fullsurvey/output_2blocks_7arcsec.fits"
-    fitsname="/Users/antoine/Desktop/fullsurvey/output_1blocks_7arcsec_lambda_r_1_positivity_true.fits"
+    fitsname="/Users/antoine/Desktop/fullsurvey/output_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
+    # fitsname="/Users/antoine/Desktop/fullsurvey/output_1blocks_7arcsec_lambda_r_1_positivity_true.fits"
     hdu = fits.open(fitsname)
     target_header = hdu[0].header
     w = wcs2D(target_header)
@@ -115,6 +138,15 @@ if __name__ == '__main__':
     w_sd = wcs2D(hdr_sd)
     # Load the sd data cube (downloaded earlier)
     cube_sd = SpectralCube.read(fitsname)
+
+    #Open ATCA data
+    fitsname="/Users/antoine/Desktop/fullsurvey/lmc.hi.K.LSR_231pm5kms.fits"
+    hdu_atca = fits.open(fitsname)
+    hdr_atca = hdu_atca[0].header
+    w_atca = wcs2D(hdr_atca)
+    # Load the sd data cube (downloaded earlier)
+    cube_atca = SpectralCube.read(fitsname)
+    beam_atca = Beam(1.66666656733E-02*u.deg,  1.66666656733E-02*u.deg, 1.e-12*u.deg)
     
     #Beam sd
     beam_sd = Beam(0.26666*u.deg,  0.26666*u.deg, 1.e-12*u.deg)
@@ -142,7 +174,7 @@ if __name__ == '__main__':
     # Interpolate the HI intensity at the exact velocity
 
     # Usage
-    target_velocity = 231.23153293 #* u.km/u.s
+    target_velocity = 231.23153293 #* u.km/u.s 253.2170684
     # hi_slice = interpolate_velocity_plane(cube_sd, target_velocity)
     # hi_slice_array = hi_slice.value
     # target_velocity = 231.3
@@ -179,3 +211,25 @@ if __name__ == '__main__':
     cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
     plt.savefig("./output_2blocks_7arcsec_lambda_r_1_positivity_true_gray_r.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
 
+    stop
+
+    #ATCA
+    hi_slice_atca = cube_atca.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
+    hi_slice_array_atca = hi_slice_atca.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
+    atca_K, footprint = reproject_interp((hi_slice_array_atca,w_atca.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
+    atca_K[atca_K != atca_K] = 0.        
+    # atca = atca_K / (beam_atca.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
+    I_atca = K_to_jy_arcsec2(atca_K, 1.42040575177e9)
+
+    #write plot on disk ATCA
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
+    ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    img = ax.imshow(I_atca*mask, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="gray_r")
+    ax.contour(pb_mean_full, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
+    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    cbar = fig.colorbar(img, cax=colorbar_ax)
+    cbar.ax.tick_params(labelsize=14.)
+    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
+    plt.savefig("./ATCA_+Parkesgray_r.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
