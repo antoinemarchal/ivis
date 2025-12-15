@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Interferometric Visibility-space Inversion Software"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
-authors = [{ name = "Antoine Marchal", email = "antoine.marchal@anu.edu.au" }]
+authors = [{ name = "Antoine Marchal", email = "antoine.marchal@cnrs.fr" }]
 license = { file = "LICENSE" }
 
 # Portable deps only. No torch. No casacore.
@@ -22,7 +22,6 @@ dependencies = [
   "psutil",
   "tqdm",
   "joblib",
-  "pywph"
 ]
 
 [project.optional-dependencies]
