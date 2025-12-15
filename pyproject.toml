@@ -39,13 +39,15 @@ gpu = [
   "cufinufft>=2.0"
 ]
 
+[project.optional-dependencies]
 docs = [
-  "sphinx",
-  "furo",
-  "sphinx-autodoc-typehints",
-  "myst-nb",
-  "myst-parser"
-]
+     "sphinx",
+     "furo",
+     "sphinx-autodoc-typehints",
+     "myst-nb",
+     "myst_parser",
+     "sphinx.ext.graphviz"
+     ]
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/ivis"
