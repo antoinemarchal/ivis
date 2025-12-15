@@ -64,7 +64,7 @@ class Imager3D:
             
         if self.positivity == True:
             logger.info('Optimizer bounded - Positivity == True')
-            logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
+            # logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
         else:
             logger.info('Optimizer not bounded - Positivity == False')
 
