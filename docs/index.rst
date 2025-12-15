@@ -39,20 +39,26 @@ To get started, we recommend using ``uv`` to manage packages and ``mamba`` to cr
 
    # Install mamba (if not already available)
    conda install mamba -n base -c conda-forge
-
+   
    # Create the IViS environment
-   mamba create -n ivis \
-   python=3.10 casacore python-casacore gsl pip \
-   -c conda-forge
-
-   mamba activate ivis
-
+   mamba create -n ivis -y -c conda-forge \
+   python=3.10 casacore python-casacore gsl \
+   numpy scipy astropy matplotlib \
+   reproject radio-beam psutil tqdm joblib \
+   pip
+   
+   conda activate ivis
+   
+   # Torch CUDA wheel
+   python -m pip install --upgrade pip
+   python -m pip install --index-url https://download.pytorch.org/whl/cu124 torch
+   
    # Install uv (if not already available)
    curl -LsSf https://astral.sh/uv/install.sh | sh
    export PATH="$HOME/.cargo/bin:$PATH"  # if needed
-
+   
    # Install IViS and dependencies using uv
-   uv pip install git+https://github.com/antoinemarchal/ivis.git
+   uv pip install "ivis[gpu] @ git+https://github.com/antoinemarchal/ivis.git"
 
 .. note::
 
