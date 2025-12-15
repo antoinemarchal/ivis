@@ -22,7 +22,7 @@ plt.ion()
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge2/"
+    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/"
     
     path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/" #directory of primary beams
     path_sd = "./" #path single-dish data - dummy here
@@ -66,7 +66,8 @@ if __name__ == '__main__':
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
         # chan_sel=slice(810,811),
-        chan_sel=slice(765,766),
+        # chan_sel=slice(765,766),
+        chan_sel=slice(1270,1271),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
@@ -114,7 +115,7 @@ if __name__ == '__main__':
     result = image_processor.process(model=model, units="Jy/arcsec^2")
 
     #Write output array on disk
-    fits.writeto(pathout + "output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0_TEST.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
 
     stop
     
