@@ -6,38 +6,46 @@ build-backend = "setuptools.build_meta"
 name = "ivis"
 version = "0.1.0"
 description = "Interferometric Visibility-space Inversion Software"
-authors = [
-    { name = "Antoine Marchal", email = "antoine.marchal@anu.edu.au" }
-]
-license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
+authors = [{ name = "Antoine Marchal", email = "antoine.marchal@anu.edu.au" }]
+license = { file = "LICENSE" }
 
+# Portable deps only. No torch. No casacore.
 dependencies = [
-    "numpy",
-    "scipy",
-    "astropy",
-    "torch",
-    "matplotlib",
-    "pytorch_finufft",
-    "finufft==2.3.0",	
-    "reproject",
-    "radio_beam",
-    "psutil",
-    "tqdm",
-    "joblib",
-    "pywph"
+  "numpy",
+  "scipy",
+  "astropy",
+  "matplotlib",
+  "reproject",
+  "radio-beam",
+  "psutil",
+  "tqdm",
+  "joblib",
+  "pywph"
 ]
 
 [project.optional-dependencies]
+# CPU NUFFT backend
+cpu = [
+  "finufft>=2.2",
+  "pytorch-finufft==0.1.0"
+]
+
+# GPU NUFFT backend (assumes torch already installed properly)
+gpu = [
+  "finufft>=2.2",
+  "pytorch-finufft==0.1.0",
+  "cufinufft>=2.0"
+]
+
 docs = [
-     "sphinx",
-     "furo",
-     "sphinx-autodoc-typehints",
-     "myst-nb",
-     "myst_parser",
-     "sphinx.ext.graphviz"
-     ]
+  "sphinx",
+  "furo",
+  "sphinx-autodoc-typehints",
+  "myst-nb",
+  "myst-parser"
+]
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/ivis"
