@@ -124,7 +124,8 @@ if __name__ == '__main__':
 
     #Open IViS result
     # fitsname="/Users/antoine/Desktop/fullsurvey/output_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
-    fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
+    # fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
+    fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
 
     # fitsname="/Users/antoine/Desktop/fullsurvey/output_1blocks_7arcsec_lambda_r_1_positivity_true.fits"
     hdu = fits.open(fitsname)
@@ -134,7 +135,7 @@ if __name__ == '__main__':
     shape = result[0].shape
     
     #Open SD data
-    fitsname="/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube_253pm5kms.fits"
+    fitsname="/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube_6pm5kms.fits"
     hdu_sd = fits.open(fitsname)
     hdr_sd = hdu_sd[0].header
     w_sd = wcs2D(hdr_sd)
@@ -176,7 +177,7 @@ if __name__ == '__main__':
     # Interpolate the HI intensity at the exact velocity
 
     # Usage
-    target_velocity = 253.2170684#* u.km/u.s 231.23153293
+    target_velocity = 6#253.2170684#* u.km/u.s 231.23153293
     # hi_slice = interpolate_velocity_plane(cube_sd, target_velocity)
     # hi_slice_array = hi_slice.value
     # target_velocity = 231.3
@@ -205,13 +206,13 @@ if __name__ == '__main__':
     ax.set_xlabel(r"RA (deg)", fontsize=18.)
     ax.set_ylabel(r"DEC (deg)", fontsize=18.)
     vmin, vmax = np.nanpercentile(result[0], (0.01, 99.99))
-    img = ax.imshow(corrected*mask, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
+    img = ax.imshow(corrected*mask, vmin=-3.e-5, vmax=0.8e-4, origin="lower", cmap="inferno")
     ax.contour(pb_mean_full, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
-    plt.savefig("/Users/antoine/Desktop/fullsurvey/output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig("/Users/antoine/Desktop/fullsurvey/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
 
     stop
 
