@@ -49,6 +49,113 @@ from astropy import wcs
 from astropy.modeling import models, fitting
 import matplotlib.pyplot as plt
 
+from ivis.logger import logger
+
+def gpu_mem_str(dev: torch.device) -> str:
+    """
+    Return a formatted string describing CUDA memory usage for a device.
+    Returns empty string if dev is not a CUDA device.
+    """
+    if dev.type != "cuda":
+        return ""
+
+    idx = dev.index if (dev.index is not None) else torch.cuda.current_device()
+
+    alloc = torch.cuda.memory_allocated(idx) / 1024**2
+    reserved = torch.cuda.memory_reserved(idx) / 1024**2
+    peak = torch.cuda.max_memory_allocated(idx) / 1024**2
+    total = torch.cuda.get_device_properties(idx).total_memory / 1024**2
+
+    return (
+        f"GPU[{idx}]: "
+        f"{alloc:.2f} MB alloc, "
+        f"{reserved:.2f} MB reserved, "
+        f"{peak:.2f} MB peak, "
+        f"{total:.2f} MB total"
+    )
+
+
+def get_device(spec="auto") -> torch.device:
+    """
+    Resolve a compute device from a flexible spec:
+      - "auto"       -> cuda:0 if available; else mps; else cpu
+      - "cpu"        -> cpu
+      - "cuda"       -> cuda:0 (if available)
+      - "cuda:i"     -> cuda:i if available
+      - "mps"        -> Apple MPS if available
+      - int i        -> cuda:i if available; else cpu
+      - torch.device -> returned as-is
+    """
+    # passthrough
+    if isinstance(spec, torch.device):
+        return spec
+
+    # int -> cuda:i if possible
+    if isinstance(spec, int):
+        if spec >= 0 and torch.cuda.is_available():
+            idx = int(spec)
+            if idx < torch.cuda.device_count():
+                logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
+                return torch.device(f"cuda:{idx}")
+            else:
+                logger.warning(
+                    f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0"
+                )
+                return torch.device("cuda:0")
+        logger.info("CUDA unavailable or invalid index; using CPU.")
+        return torch.device("cpu")
+
+    # string spec
+    if isinstance(spec, str):
+        s = spec.strip().lower()
+
+        if s in ("auto", ""):
+            if torch.cuda.is_available():
+                logger.info(f"Using GPU (auto) cuda:0 ({torch.cuda.get_device_name(0)})")
+                return torch.device("cuda:0")
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                logger.info("Using Apple MPS (auto).")
+                return torch.device("mps")
+            logger.info("Using CPU (auto).")
+            return torch.device("cpu")
+
+        if s == "cpu":
+            logger.info("Using CPU (user-specified).")
+            return torch.device("cpu")
+
+        if s == "mps":
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                logger.info("Using Apple MPS (user-specified).")
+                return torch.device("mps")
+            logger.warning("MPS requested but not available; falling back to CPU.")
+            return torch.device("cpu")
+
+        if s.startswith("cuda"):
+            if not torch.cuda.is_available():
+                logger.warning("CUDA requested but not available; falling back to CPU.")
+                return torch.device("cpu")
+
+            idx = 0
+            if ":" in s:
+                try:
+                    idx = int(s.split(":", 1)[1])
+                except Exception:
+                    logger.warning(
+                        f"Could not parse device index from '{spec}', defaulting to cuda:0."
+                    )
+                    idx = 0
+
+            if idx < torch.cuda.device_count():
+                logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
+                return torch.device(f"cuda:{idx}")
+
+            logger.warning(
+                f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0"
+            )
+            return torch.device("cuda:0")
+
+    logger.warning(f"Unrecognized device spec '{spec}'; defaulting to CPU.")
+    return torch.device("cpu")
 
 
 def _to_nchw(arr: np.ndarray, expect_complex: bool = False) -> torch.Tensor:

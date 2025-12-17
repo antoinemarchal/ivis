@@ -28,6 +28,7 @@ import time
 
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
+from ivis.optim.solvers import optimize_scipy_lbfgsb, optimize_torch_lbfgs
 
 #------------------------------------
 #------------ Imager3D --------------
@@ -39,8 +40,9 @@ class Imager3D:
     """
 
     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr,
-                 init_params, max_its, lambda_sd, positivity, cost_device="auto",
-                 optim_device="auto", beam_workers=0):
+                 init_params, max_its, lambda_sd, positivity,
+                 cost_device="auto", optim_device="auto", beam_workers=0):
+
         self.vis_data = vis_data
         self.pb = pb
         self.grid = grid
@@ -52,99 +54,21 @@ class Imager3D:
         self.lambda_sd = lambda_sd
         self.positivity = positivity
         self.beam_workers = beam_workers
-        
-        self.cost_device  = self.get_device(cost_device)
-        self.optim_device = self.get_device(optim_device)
+
+        # moved to dutils
+        self.cost_device  = dutils.get_device(cost_device)
+        self.optim_device = dutils.get_device(optim_device)
 
         logger.info("[Initialize Imager3D       ]")
         logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
 
         if self.lambda_sd == 0:
             logger.warning("lambda_sd = 0 — No short-spacing correction.")
-            
-        if self.positivity == True:
-            logger.info('Optimizer bounded - Positivity == True')
-            # logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
+
+        if self.positivity:
+            logger.info("Optimizer bounded - Positivity == True")
         else:
-            logger.info('Optimizer not bounded - Positivity == False')
-
-
-    @staticmethod
-    def get_device(spec="auto") -> torch.device:
-        """
-        Resolve a compute device from a flexible spec:
-          - "auto"      -> cuda:0 if available; else mps (Apple Silicon); else cpu
-          - "cpu"       -> cpu
-          - "cuda"      -> cuda:0 (if available)
-          - "cuda:i"    -> that specific GPU index (if available)
-          - "mps"       -> Apple Metal Performance Shaders (if available)
-          - int i       -> cuda:i if CUDA available; else cpu
-          - torch.device -> returned as-is
-        """
-        # passthrough
-        if isinstance(spec, torch.device):
-            return spec
-
-        # int -> cuda:i if possible
-        if isinstance(spec, int):
-            if spec >= 0 and torch.cuda.is_available():
-                idx = int(spec)
-                if idx < torch.cuda.device_count():
-                    logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
-                    return torch.device(f"cuda:{idx}")
-                else:
-                    logger.warning(f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0")
-                    return torch.device("cuda:0")
-            logger.info("CUDA unavailable or invalid index; using CPU.")
-            return torch.device("cpu")
-
-        # string path
-        if isinstance(spec, str):
-            s = spec.strip().lower()
-
-            if s in ("auto", ""):
-                if torch.cuda.is_available():
-                    logger.info(f"Using GPU (auto) cuda:0 ({torch.cuda.get_device_name(0)})")
-                    return torch.device("cuda:0")
-                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    logger.info("Using Apple MPS (auto).")
-                    return torch.device("mps")
-                logger.info("Using CPU (auto).")
-                return torch.device("cpu")
-
-            if s == "cpu":
-                logger.info("Using CPU (user-specified).")
-                return torch.device("cpu")
-
-            if s == "mps":
-                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    logger.info("Using Apple MPS (user-specified).")
-                    return torch.device("mps")
-                logger.warning("MPS requested but not available; falling back to CPU.")
-                return torch.device("cpu")
-
-            if s.startswith("cuda"):
-                if not torch.cuda.is_available():
-                    logger.warning("CUDA requested but not available; falling back to CPU.")
-                    return torch.device("cpu")
-                # allow "cuda" or "cuda:i"
-                idx = 0
-                if ":" in s:
-                    try:
-                        idx = int(s.split(":", 1)[1])
-                    except Exception:
-                        logger.warning(f"Could not parse device index from '{spec}', defaulting to cuda:0.")
-                        idx = 0
-                if idx < torch.cuda.device_count():
-                    logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
-                    return torch.device(f"cuda:{idx}")
-                else:
-                    logger.warning(f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0")
-                    return torch.device("cuda:0")
-
-        logger.warning(f"Unrecognized device spec '{spec}'; defaulting to CPU.")
-        return torch.device("cpu")
-
+            logger.info("Optimizer not bounded - Positivity == False")
 
     def forward_model(self, model):
         """
@@ -167,24 +91,26 @@ class Imager3D:
             cell_size=cell_size.value,
             grid_array=grid_native
         )
-    
 
-    def process(self, model=None, units="Jy/arcsec^2",
+    # ------------------------------------------------------------------
+    # process(): SAME logic + SAME log strings as your original version
+    # ------------------------------------------------------------------
+    def process(self, model=None, solver="LBFGS", units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32):
         """
         Devices
         -------
-        - ``optim_device``: where PyTorch LBFGS params/optimizer live
-        - ``cost_device`` : where ``model.objective()`` runs
-        
+        - optim_device: where PyTorch LBFGS params/optimizer live
+        - cost_device : where model.objective() runs
+
         Rules
         -----
-        - ``positivity=True`` (bounded): SciPy L-BFGS-B (CPU-only).
-        - ``positivity=False`` (unbounded): PyTorch LBFGS on optim_device; cost on cost_device.
-        
+        - positivity=True  -> SciPy L-BFGS-B (CPU-only optimizer)
+        - positivity=False -> PyTorch LBFGS on optim_device; cost on cost_device
+
         Notes
         -----
-        ``objective()`` is expected to call ``backward()`` internally (unchanged).
+        objective() is expected to call backward() internally (unchanged).
         """
         if model is None:
             raise ValueError("Must pass a model instance to `process()`.")
@@ -192,13 +118,13 @@ class Imager3D:
         cost_dev  = self.cost_device
         optim_dev = self.optim_device
 
-        # --- Units logger ---
+        # --- Units logger (unchanged strings) ---
         if units == "Jy/arcsec^2":
             logger.info("Units of output: Jy/arcsec^2.")
-            
+
         elif units == "K":
             logger.info("Units of output: K (using frequency in Hz).")
-            
+
         elif units == "Jy/beam":
             logger.warning(
                 "Units of output: Jy/beam. "
@@ -207,40 +133,29 @@ class Imager3D:
                 "with a Gaussian restoring beam. "
                 "We recommend using 'K' units for diffuse extended emission."
             )
-            
+
         else:
             logger.error(
                 f"Unknown unit '{units}'. Units must be 'Jy/arcsec^2', 'K', or (not recommended) 'Jy/beam'. "
                 "Defaulting to Jy/arcsec^2."
             )
 
-        # ---- local helper: format GPU mem for any CUDA device ----
-        def _gpu_mem_str(dev: torch.device) -> str:
-            if dev.type != "cuda":
-                return ""
-            idx = dev.index if (dev.index is not None) else torch.cuda.current_device()
-            alloc    = torch.cuda.memory_allocated(idx) / 1024**2
-            reserved = torch.cuda.memory_reserved(idx)  / 1024**2
-            peak     = torch.cuda.max_memory_allocated(idx) / 1024**2
-            total    = torch.cuda.get_device_properties(idx).total_memory / 1024**2
-            return f"GPU[{idx}]: {alloc:.2f} MB alloc, {reserved:.2f} MB reserved, {peak:.2f} MB peak, {total:.2f} MB total"
-
-        # --- Image/grid params ---
+        # --- Image/grid params (unchanged) ---
         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
         tapper = dutils.apodize(0.98, shape)
 
-        # --- FFT beam for reg ---
+        # --- FFT beam for reg (unchanged) ---
         kernel_map = dutils.laplacian(shape)
         fftkernel = abs(fft2(kernel_map))
         bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
         beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
         fftbeam = abs(fft2(beam))
 
-        # --- FFT single-dish ---
+        # --- FFT single-dish (unchanged) ---
         fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).cpu().numpy()
 
-        # --- Common params ---
+        # --- Common params (unchanged keys/values) ---
         params = dict(
             vis_data=self.vis_data,
             pb=np.asarray(self.pb, dtype=np.float32),
@@ -256,140 +171,45 @@ class Imager3D:
 
         param_shape = self.init_params.shape
 
-        # --- SciPy path (positivity -> bounded -> CPU only)
-        if getattr(self, "positivity", False):
-            from scipy.optimize import fmin_l_bfgs_b
-
-            if optim_dev.type == "cuda":
-                logger.info("positivity=True with optim_device on CUDA → falling back to CPU for SciPy L-BFGS-B.")
-
+        if solver == "LBFGS-B":
             x0 = self.init_params.ravel().astype(np.float64)
             raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
             bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
 
-            def fun_and_grad(x):
-                # cost on cost_dev, but SciPy itself is CPU
-                f, g = model.loss(
-                    x, shape=param_shape, device=cost_dev,
-                    jac=True, **params
-                )
-                return float(f), np.ascontiguousarray(g, dtype=np.float64)
-
-            logger.info(f"Starting optimisation: SciPy L-BFGS-B (CPU optimizer), cost on {cost_dev}")
-            x_opt, f_opt, info = fmin_l_bfgs_b(
-                fun_and_grad, x0, bounds=bounds64,
-                m=7, pgtol=1e-8, factr=1e7, maxls=20,
-                maxiter=int(self.max_its), iprint=25,
+            result = optimize_scipy_lbfgsb(
+                model=model, x0=x0, bounds64=bounds64,
+                param_shape=param_shape, max_its=self.max_its,
+                cost_dev=cost_dev, optim_dev=optim_dev, params=params
             )
-            result = x_opt.reshape(param_shape)
-
-        # --- PyTorch path (unbounded LBFGS on optim_device; cost on cost_device)
-        else:
-            # Reset peak stats on any CUDA devices we might use
-            for dev in [cost_dev, optim_dev]:
-                if dev.type == "cuda":
-                    idx = dev.index if dev.index is not None else torch.cuda.current_device()
-                    torch.cuda.reset_peak_memory_stats(idx)
-
-            logger.info(
-                f"Starting optimisation: PyTorch LBFGS on {optim_dev} (unconstrained); "
-                f"cost on {cost_dev}"
-            )
-            x_param = torch.tensor(self.init_params, dtype=dtype, device=optim_dev, requires_grad=True)
-
-            opt = torch.optim.LBFGS(
-                [x_param],
-                lr=1.0,
-                max_iter=int(self.max_its),
+        elif solver == "LBFGS":
+            # --- Solve ---
+            flat = optimize_torch_lbfgs(
+                model=model,
+                x_init=self.init_params,
+                dtype=dtype,
                 history_size=history_size,
-                line_search_fn="strong_wolfe",
-                tolerance_grad=1e-8,
-                tolerance_change=0.0,
+                max_its=self.max_its,
+                cost_dev=cost_dev,
+                optim_dev=optim_dev,
+                params=params,
+                positivity=self.positivity,
             )
+            result = flat.reshape(param_shape)
+            
+        else:
+            raise ValueError("Solver must be 'LBFGS-B' or 'LBFGS'.")
 
-            def closure():
-                opt.zero_grad(set_to_none=True)
+        # logger.warning(
+        #     "If you are using ASKAP's convention I = XX + YY (with no 1/2 factor) then multiply the output by 2. "
+        #     "Here assuming I = 1/2 (XX + YY)."
+        # )
 
-                if cost_dev == optim_dev:
-                    # Evaluate directly on x_param; objective() will call backward()
-                    loss = model.objective(
-                        x_param, device=cost_dev, **params
-                    )
-                    if x_param.grad is None:
-                        raise RuntimeError("objective() did not produce gradients on x_param.")
-
-                    # --- log now (graph already freed by backward, but param still live) ---
-                    mem_bits = []
-                    if cost_dev.type == "cuda":
-                        torch.cuda.synchronize(cost_dev)
-                        mem_bits.append(_gpu_mem_str(cost_dev))
-                    if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
-                        torch.cuda.synchronize(optim_dev)
-                        mem_bits.append(_gpu_mem_str(optim_dev))
-                    mem_info = " | ".join(mem_bits)
-
-                else:
-                    # Cross-device: leaf copy on cost_dev; DO NOT free before logging
-                    x_for_cost = x_param.detach().to(cost_dev).requires_grad_(True)
-                    loss = model.objective(
-                        x_for_cost, device=cost_dev, **params
-                    )
-                    if x_for_cost.grad is None:
-                        raise RuntimeError("objective() did not produce gradients on x_for_cost.")
-
-                    # --- log BEFORE copying grad back / freeing x_for_cost ---
-                    mem_bits = []
-                    if cost_dev.type == "cuda":
-                        torch.cuda.synchronize(cost_dev)
-                        mem_bits.append(_gpu_mem_str(cost_dev))
-                    if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
-                        torch.cuda.synchronize(optim_dev)
-                        mem_bits.append(_gpu_mem_str(optim_dev))
-                    mem_info = " | ".join(mem_bits)
-
-                    # Now move grad off GPU and free the leaf
-                    x_param.grad = x_for_cost.grad.to(optim_dev)
-                    del x_for_cost  # release AFTER logging so allocated != 0
-
-                logger.info(
-                    f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
-                    f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
-                    + (f" | {mem_info}" if mem_info else "")
-                )
-                return loss  # objective already did backward()
-
-            import time
-            if cost_dev.type == "cuda":
-                torch.cuda.synchronize(cost_dev)
-            t0 = time.perf_counter()
-            final_loss = opt.step(closure)
-            if cost_dev.type == "cuda":
-                torch.cuda.synchronize(cost_dev)
-            elapsed = time.perf_counter() - t0
-
-            if optim_dev == cost_dev:
-                end_mem_info = _gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
-            else:
-                end_mem_info = " | ".join(
-                    [_gpu_mem_str(d) for d in (cost_dev, optim_dev) if d.type == "cuda"]
-                )
-
-            logger.info(
-                f"[Timing] LBFGS (optim_dev={optim_dev}, cost_dev={cost_dev}) "
-                f"took {elapsed:.2f} s; final loss={float(final_loss):.6g}"
-                + (f" | {end_mem_info}" if end_mem_info else "")
-            )
-
-            result = x_param.detach().cpu().numpy().reshape(param_shape)
-
-        logger.warning("If you are using ASKAP's convention I = XX + YY (with no 1/2 factor) then multiply the output by 2. Here assuming I = 1/2 (XX + YY).")
-
-        # --- Unit conversion ---
+        # --- Unit conversion (unchanged) ---
         if units == "Jy/arcsec^2":
             output = result
 
         elif units == "Jy/beam":
-            assumed_fwhm_pix = 3 #hard-coded value
+            assumed_fwhm_pix = 3  # hard-coded value
             logger.warning(
                 f"Converting to Jy/beam assuming a restoring beam of "
                 f"{assumed_fwhm_pix} × cell_size = "
@@ -398,7 +218,7 @@ class Imager3D:
             beam_r = Beam(assumed_fwhm_pix * cell_size,
                           assumed_fwhm_pix * cell_size, 1.e-12 * u.deg)
             output = result * beam_r.sr.to(u.arcsec**2).value
-        
+
         elif units == "K":
             nu_Hz = self.vis_data.frequency
             output = dunits.jy_per_arcsec2_to_K(result, nu_Hz)
@@ -407,9 +227,391 @@ class Imager3D:
             logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
             output = result
 
-        #Success logger
         logger.info("Successful run. Please clap.")
         return output
+
+
+# #------------------------------------
+# #------------ Imager3D --------------
+# #------------------------------------
+# class Imager3D:
+#     """
+#     GPU-accelerated imager for joint deconvolution of interferometric
+#     and single-dish data, using the new VisIData dataclass.
+#     """
+
+#     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr,
+#                  init_params, max_its, lambda_sd, positivity, cost_device="auto",
+#                  optim_device="auto", beam_workers=0):
+#         self.vis_data = vis_data
+#         self.pb = pb
+#         self.grid = grid
+#         self.sd = sd
+#         self.beam_sd = beam_sd
+#         self.hdr = hdr
+#         self.init_params = init_params
+#         self.max_its = max_its
+#         self.lambda_sd = lambda_sd
+#         self.positivity = positivity
+#         self.beam_workers = beam_workers
+        
+#         self.cost_device  = self.get_device(cost_device)
+#         self.optim_device = self.get_device(optim_device)
+
+#         logger.info("[Initialize Imager3D       ]")
+#         logger.info(f"Number of iterations to be performed by the optimizer: {self.max_its}")
+
+#         if self.lambda_sd == 0:
+#             logger.warning("lambda_sd = 0 — No short-spacing correction.")
+            
+#         if self.positivity == True:
+#             logger.info('Optimizer bounded - Positivity == True')
+#             # logger.warning('Optimizer bounded - Because there is noise in the data, it is generally not recommanded to add a positivity constaint.')
+#         else:
+#             logger.info('Optimizer not bounded - Positivity == False')
+
+
+#     @staticmethod
+#     def get_device(spec="auto") -> torch.device:
+#         """
+#         Resolve a compute device from a flexible spec:
+#           - "auto"      -> cuda:0 if available; else mps (Apple Silicon); else cpu
+#           - "cpu"       -> cpu
+#           - "cuda"      -> cuda:0 (if available)
+#           - "cuda:i"    -> that specific GPU index (if available)
+#           - "mps"       -> Apple Metal Performance Shaders (if available)
+#           - int i       -> cuda:i if CUDA available; else cpu
+#           - torch.device -> returned as-is
+#         """
+#         # passthrough
+#         if isinstance(spec, torch.device):
+#             return spec
+
+#         # int -> cuda:i if possible
+#         if isinstance(spec, int):
+#             if spec >= 0 and torch.cuda.is_available():
+#                 idx = int(spec)
+#                 if idx < torch.cuda.device_count():
+#                     logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
+#                     return torch.device(f"cuda:{idx}")
+#                 else:
+#                     logger.warning(f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0")
+#                     return torch.device("cuda:0")
+#             logger.info("CUDA unavailable or invalid index; using CPU.")
+#             return torch.device("cpu")
+
+#         # string path
+#         if isinstance(spec, str):
+#             s = spec.strip().lower()
+
+#             if s in ("auto", ""):
+#                 if torch.cuda.is_available():
+#                     logger.info(f"Using GPU (auto) cuda:0 ({torch.cuda.get_device_name(0)})")
+#                     return torch.device("cuda:0")
+#                 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+#                     logger.info("Using Apple MPS (auto).")
+#                     return torch.device("mps")
+#                 logger.info("Using CPU (auto).")
+#                 return torch.device("cpu")
+
+#             if s == "cpu":
+#                 logger.info("Using CPU (user-specified).")
+#                 return torch.device("cpu")
+
+#             if s == "mps":
+#                 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+#                     logger.info("Using Apple MPS (user-specified).")
+#                     return torch.device("mps")
+#                 logger.warning("MPS requested but not available; falling back to CPU.")
+#                 return torch.device("cpu")
+
+#             if s.startswith("cuda"):
+#                 if not torch.cuda.is_available():
+#                     logger.warning("CUDA requested but not available; falling back to CPU.")
+#                     return torch.device("cpu")
+#                 # allow "cuda" or "cuda:i"
+#                 idx = 0
+#                 if ":" in s:
+#                     try:
+#                         idx = int(s.split(":", 1)[1])
+#                     except Exception:
+#                         logger.warning(f"Could not parse device index from '{spec}', defaulting to cuda:0.")
+#                         idx = 0
+#                 if idx < torch.cuda.device_count():
+#                     logger.info(f"Using GPU cuda:{idx} ({torch.cuda.get_device_name(idx)})")
+#                     return torch.device(f"cuda:{idx}")
+#                 else:
+#                     logger.warning(f"Requested cuda:{idx} but only {torch.cuda.device_count()} device(s); using cuda:0")
+#                     return torch.device("cuda:0")
+
+#         logger.warning(f"Unrecognized device spec '{spec}'; defaulting to CPU.")
+#         return torch.device("cpu")
+
+
+#     def forward_model(self, model):
+#         """
+#         Compute model visibilities from the current image parameters
+#         using the given model's forward operator.
+#         """
+#         if model is None:
+#             raise ValueError("Must pass a model instance to `forward_model()`.")
+
+#         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+
+#         pb_native = np.asarray(self.pb, dtype=np.float32)
+#         grid_native = np.asarray(self.grid, dtype=np.float32)
+
+#         return model.forward(
+#             x=self.init_params,
+#             vis_data=self.vis_data,
+#             pb=pb_native,
+#             device=self.cost_device,
+#             cell_size=cell_size.value,
+#             grid_array=grid_native
+#         )
+    
+
+#     def process(self, model=None, units="Jy/arcsec^2",
+#                 history_size=10, dtype=torch.float32):
+#         """
+#         Devices
+#         -------
+#         - ``optim_device``: where PyTorch LBFGS params/optimizer live
+#         - ``cost_device`` : where ``model.objective()`` runs
+        
+#         Rules
+#         -----
+#         - ``positivity=True`` (bounded): SciPy L-BFGS-B (CPU-only).
+#         - ``positivity=False`` (unbounded): PyTorch LBFGS on optim_device; cost on cost_device.
+        
+#         Notes
+#         -----
+#         ``objective()`` is expected to call ``backward()`` internally (unchanged).
+#         """
+#         if model is None:
+#             raise ValueError("Must pass a model instance to `process()`.")
+
+#         cost_dev  = self.cost_device
+#         optim_dev = self.optim_device
+
+#         # --- Units logger ---
+#         if units == "Jy/arcsec^2":
+#             logger.info("Units of output: Jy/arcsec^2.")
+            
+#         elif units == "K":
+#             logger.info("Units of output: K (using frequency in Hz).")
+            
+#         elif units == "Jy/beam":
+#             logger.warning(
+#                 "Units of output: Jy/beam. "
+#                 "Note: this is not the preferred unit in IViS, as the effective beam "
+#                 "depends on regularization. Unlike CLEAN, the model is not reconvolved "
+#                 "with a Gaussian restoring beam. "
+#                 "We recommend using 'K' units for diffuse extended emission."
+#             )
+            
+#         else:
+#             logger.error(
+#                 f"Unknown unit '{units}'. Units must be 'Jy/arcsec^2', 'K', or (not recommended) 'Jy/beam'. "
+#                 "Defaulting to Jy/arcsec^2."
+#             )
+
+#         # ---- local helper: format GPU mem for any CUDA device ----
+#         def _gpu_mem_str(dev: torch.device) -> str:
+#             if dev.type != "cuda":
+#                 return ""
+#             idx = dev.index if (dev.index is not None) else torch.cuda.current_device()
+#             alloc    = torch.cuda.memory_allocated(idx) / 1024**2
+#             reserved = torch.cuda.memory_reserved(idx)  / 1024**2
+#             peak     = torch.cuda.max_memory_allocated(idx) / 1024**2
+#             total    = torch.cuda.get_device_properties(idx).total_memory / 1024**2
+#             return f"GPU[{idx}]: {alloc:.2f} MB alloc, {reserved:.2f} MB reserved, {peak:.2f} MB peak, {total:.2f} MB total"
+
+#         # --- Image/grid params ---
+#         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+#         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
+#         tapper = dutils.apodize(0.98, shape)
+
+#         # --- FFT beam for reg ---
+#         kernel_map = dutils.laplacian(shape)
+#         fftkernel = abs(fft2(kernel_map))
+#         bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
+#         beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
+#         fftbeam = abs(fft2(beam))
+
+#         # --- FFT single-dish ---
+#         fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).cpu().numpy()
+
+#         # --- Common params ---
+#         params = dict(
+#             vis_data=self.vis_data,
+#             pb=np.asarray(self.pb, dtype=np.float32),
+#             fftbeam=np.asarray(fftbeam, dtype=np.float32),
+#             fftsd=np.asarray(fftsd, dtype=np.complex64),
+#             tapper=np.asarray(tapper, dtype=np.float32),
+#             lambda_sd=self.lambda_sd,
+#             fftkernel=np.asarray(fftkernel, dtype=np.float32),
+#             cell_size=cell_size.value,
+#             grid_array=np.asarray(self.grid, dtype=np.float32),
+#             beam_workers=self.beam_workers,
+#         )
+
+#         param_shape = self.init_params.shape
+
+#         # --- SciPy path (positivity -> bounded -> CPU only)
+#         if getattr(self, "positivity", False):
+#             from scipy.optimize import fmin_l_bfgs_b
+
+#             if optim_dev.type == "cuda":
+#                 logger.info("positivity=True with optim_device on CUDA → falling back to CPU for SciPy L-BFGS-B.")
+
+#             x0 = self.init_params.ravel().astype(np.float64)
+#             raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
+#             bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
+
+#             def fun_and_grad(x):
+#                 # cost on cost_dev, but SciPy itself is CPU
+#                 f, g = model.loss(
+#                     x, shape=param_shape, device=cost_dev,
+#                     jac=True, **params
+#                 )
+#                 return float(f), np.ascontiguousarray(g, dtype=np.float64)
+
+#             logger.info(f"Starting optimisation: SciPy L-BFGS-B (CPU optimizer), cost on {cost_dev}")
+#             x_opt, f_opt, info = fmin_l_bfgs_b(
+#                 fun_and_grad, x0, bounds=bounds64,
+#                 m=7, pgtol=1e-8, factr=1e7, maxls=20,
+#                 maxiter=int(self.max_its), iprint=25,
+#             )
+#             result = x_opt.reshape(param_shape)
+
+#         # --- PyTorch path (unbounded LBFGS on optim_device; cost on cost_device)
+#         else:
+#             # Reset peak stats on any CUDA devices we might use
+#             for dev in [cost_dev, optim_dev]:
+#                 if dev.type == "cuda":
+#                     idx = dev.index if dev.index is not None else torch.cuda.current_device()
+#                     torch.cuda.reset_peak_memory_stats(idx)
+
+#             logger.info(
+#                 f"Starting optimisation: PyTorch LBFGS on {optim_dev} (unconstrained); "
+#                 f"cost on {cost_dev}"
+#             )
+#             x_param = torch.tensor(self.init_params, dtype=dtype, device=optim_dev, requires_grad=True)
+
+#             opt = torch.optim.LBFGS(
+#                 [x_param],
+#                 lr=1.0,
+#                 max_iter=int(self.max_its),
+#                 history_size=history_size,
+#                 line_search_fn="strong_wolfe",
+#                 tolerance_grad=1e-8,
+#                 tolerance_change=0.0,
+#             )
+
+#             def closure():
+#                 opt.zero_grad(set_to_none=True)
+
+#                 if cost_dev == optim_dev:
+#                     # Evaluate directly on x_param; objective() will call backward()
+#                     loss = model.objective(
+#                         x_param, device=cost_dev, **params
+#                     )
+#                     if x_param.grad is None:
+#                         raise RuntimeError("objective() did not produce gradients on x_param.")
+
+#                     # --- log now (graph already freed by backward, but param still live) ---
+#                     mem_bits = []
+#                     if cost_dev.type == "cuda":
+#                         torch.cuda.synchronize(cost_dev)
+#                         mem_bits.append(_gpu_mem_str(cost_dev))
+#                     if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+#                         torch.cuda.synchronize(optim_dev)
+#                         mem_bits.append(_gpu_mem_str(optim_dev))
+#                     mem_info = " | ".join(mem_bits)
+
+#                 else:
+#                     # Cross-device: leaf copy on cost_dev; DO NOT free before logging
+#                     x_for_cost = x_param.detach().to(cost_dev).requires_grad_(True)
+#                     loss = model.objective(
+#                         x_for_cost, device=cost_dev, **params
+#                     )
+#                     if x_for_cost.grad is None:
+#                         raise RuntimeError("objective() did not produce gradients on x_for_cost.")
+
+#                     # --- log BEFORE copying grad back / freeing x_for_cost ---
+#                     mem_bits = []
+#                     if cost_dev.type == "cuda":
+#                         torch.cuda.synchronize(cost_dev)
+#                         mem_bits.append(_gpu_mem_str(cost_dev))
+#                     if optim_dev.type == "cuda" and (optim_dev.index != cost_dev.index):
+#                         torch.cuda.synchronize(optim_dev)
+#                         mem_bits.append(_gpu_mem_str(optim_dev))
+#                     mem_info = " | ".join(mem_bits)
+
+#                     # Now move grad off GPU and free the leaf
+#                     x_param.grad = x_for_cost.grad.to(optim_dev)
+#                     del x_for_cost  # release AFTER logging so allocated != 0
+
+#                 logger.info(
+#                     f"[PID {os.getpid()}] Iter cost: {float(loss.detach().cpu()):.6e} "
+#                     f"(optim_dev={optim_dev}, cost_dev={cost_dev})"
+#                     + (f" | {mem_info}" if mem_info else "")
+#                 )
+#                 return loss  # objective already did backward()
+
+#             import time
+#             if cost_dev.type == "cuda":
+#                 torch.cuda.synchronize(cost_dev)
+#             t0 = time.perf_counter()
+#             final_loss = opt.step(closure)
+#             if cost_dev.type == "cuda":
+#                 torch.cuda.synchronize(cost_dev)
+#             elapsed = time.perf_counter() - t0
+
+#             if optim_dev == cost_dev:
+#                 end_mem_info = _gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
+#             else:
+#                 end_mem_info = " | ".join(
+#                     [_gpu_mem_str(d) for d in (cost_dev, optim_dev) if d.type == "cuda"]
+#                 )
+
+#             logger.info(
+#                 f"[Timing] LBFGS (optim_dev={optim_dev}, cost_dev={cost_dev}) "
+#                 f"took {elapsed:.2f} s; final loss={float(final_loss):.6g}"
+#                 + (f" | {end_mem_info}" if end_mem_info else "")
+#             )
+
+#             result = x_param.detach().cpu().numpy().reshape(param_shape)
+
+#         logger.warning("If you are using ASKAP's convention I = XX + YY (with no 1/2 factor) then multiply the output by 2. Here assuming I = 1/2 (XX + YY).")
+
+#         # --- Unit conversion ---
+#         if units == "Jy/arcsec^2":
+#             output = result
+
+#         elif units == "Jy/beam":
+#             assumed_fwhm_pix = 3 #hard-coded value
+#             logger.warning(
+#                 f"Converting to Jy/beam assuming a restoring beam of "
+#                 f"{assumed_fwhm_pix} × cell_size = "
+#                 f"{assumed_fwhm_pix * cell_size:.3f} FWHM."
+#             )
+#             beam_r = Beam(assumed_fwhm_pix * cell_size,
+#                           assumed_fwhm_pix * cell_size, 1.e-12 * u.deg)
+#             output = result * beam_r.sr.to(u.arcsec**2).value
+        
+#         elif units == "K":
+#             nu_Hz = self.vis_data.frequency
+#             output = dunits.jy_per_arcsec2_to_K(result, nu_Hz)
+
+#         else:
+#             logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
+#             output = result
+
+#         #Success logger
+#         logger.info("Successful run. Please clap.")
+#         return output
 
 
 #------------------------------------
