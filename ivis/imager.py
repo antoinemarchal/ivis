@@ -103,7 +103,7 @@ class Imager3D:
         - optim_device: where PyTorch LBFGS params/optimizer live
         - cost_device : where model.objective() runs
 
-        Rules
+        Rules #FIXME
         -----
         - positivity=True  -> SciPy L-BFGS-B (CPU-only optimizer)
         - positivity=False -> PyTorch LBFGS on optim_device; cost on cost_device
@@ -171,7 +171,8 @@ class Imager3D:
 
         param_shape = self.init_params.shape
 
-        if solver == "LBFGS-B":
+        if self.positivity == True:
+            # if solver == "LBFGS-B":
             x0 = self.init_params.ravel().astype(np.float64)
             raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
             bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
@@ -181,7 +182,7 @@ class Imager3D:
                 param_shape=param_shape, max_its=self.max_its,
                 cost_dev=cost_dev, optim_dev=optim_dev, params=params
             )
-        elif solver == "LBFGS":
+        else:
             # --- Solve ---
             flat = optimize_torch_lbfgs(
                 model=model,
@@ -192,13 +193,9 @@ class Imager3D:
                 cost_dev=cost_dev,
                 optim_dev=optim_dev,
                 params=params,
-                positivity=self.positivity,
             )
             result = flat.reshape(param_shape)
             
-        else:
-            raise ValueError("Solver must be 'LBFGS-B' or 'LBFGS'.")
-
         # logger.warning(
         #     "If you are using ASKAP's convention I = XX + YY (with no 1/2 factor) then multiply the output by 2. "
         #     "Here assuming I = 1/2 (XX + YY)."

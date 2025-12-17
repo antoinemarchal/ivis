@@ -78,11 +78,11 @@ I: VisIData = reader.read_blocks_I(
 max_its = 20
 lambda_sd = 0
 lambda_r = 1
-lambda_pos = 1.e3
 cost_device = 0        # 0 for GPU, "cpu" for CPU
 optim_device = 0        # 0 for GPU, "cpu" for CPU
-positivity = False
-init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
+positivity = True
+# init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
+init_params = np.full((1, shape[0], shape[1]), 1.e-7, dtype=np.float32)
 
 # -------------------
 # Create Imager3D
@@ -106,13 +106,13 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3D(lambda_r=lambda_r, lambda_pos=lambda_pos, Nw=0)
+model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
 
 # -------------------
 # Run optimization
 # -------------------
 # base = image_processor.process(model=model, units="Jy/arcsec^2", down_factor=2, coarse_its=5, fine_its=10)
-base = image_processor.process(model=model, solver="LBFGS", units="K")
+base = image_processor.process(model=model, units="K")
 # # Save or inspect result
 # fits.writeto(pathout + "ivis_reconstruction.fits", base, target_header, overwrite=True)
 

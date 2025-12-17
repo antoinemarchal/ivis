@@ -23,8 +23,8 @@ class ClassicIViS3D(BaseModel):
         self.lambda_pos = lambda_pos
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
-    #FIXME
 
+        
     def loss(self, x, shape, device, vis_data, **kwargs):
         """
         Optimizer-friendly loss wrapper (returns loss and grad as numpy).
