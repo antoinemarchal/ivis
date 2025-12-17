@@ -39,7 +39,6 @@ gpu = [
   "cufinufft>=2.0"
 ]
 
-[project.optional-dependencies]
 docs = [
      "sphinx",
      "furo",
