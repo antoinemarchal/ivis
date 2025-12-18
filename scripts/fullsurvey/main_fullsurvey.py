@@ -67,14 +67,13 @@ if __name__ == '__main__':
     path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge1/"
     
     path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/" #directory of primary beams
-    path_sd = "./" #path single-dish data - dummy here
+    path_sd = "/totoro/anmarchal/data/parkes/" #path single-dish data - dummy here
     pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/products/merge/" #path where data will be packaged and stored
 
     #create data processor
     data_processor = DataProcessor(path_ms, path_beams, path_sd, pathout)
 
     #Define target header
-    # cfield = SkyCoord(ra="5h36m41s", dec="-67d58m44s", frame="icrs")
     cfield = SkyCoord(ra="5h05m43.8s", dec="-70d05m48.5s", frame="icrs")
     # target_header, w = data_processor.make_imaging_header(cfield, fov_deg=12, pix_arcsec=4)
     target_header, w = data_processor.make_imaging_header(cfield, fov_deg=15)
@@ -93,8 +92,10 @@ if __name__ == '__main__':
     )
 
     # Dummy single-dish array and beam
-    sd = np.zeros(shape, dtype=np.float32)
-    beam_sd = Beam(1 * u.deg, 1 * u.deg, 1.e-12 * u.deg)
+    hdu_sd = fits.open(path_sd+"gass_chan_765.fits")
+    sd = hdu_sd[0].data
+    # sd = np.zeros(shape, dtype=np.float32)
+    beam_sd = Beam(0.26666666666666666 * u.deg, 0.26666666666666666 * u.deg, 1.e-12 * u.deg)
 
     # -------------------
     # Read visibilities into VisIData dataclass
@@ -107,10 +108,10 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
-        # chan_sel=slice(810,811),
+        chan_sel=slice(810,811),
         # chan_sel=slice(765,766),
-        chan_sel=slice(1270,1271),
-        rest_freq=1.42040575177e9, #HI rest frequency in Hz
+        # chan_sel=slice(1270,1271),
+        # rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
         # target_radius=0.5*u.deg
@@ -122,11 +123,11 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0
     lambda_r = 1
-    lambda_pos = 1.e3
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = 0        # 0 for GPU, "cpu" for CPU
-    positivity = True
-    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
+    positivity = False
+    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) + 1e-6
+    init_params[0] = sd
     
     # -------------------
     # Create Imager3D
@@ -150,12 +151,12 @@ if __name__ == '__main__':
     # -------------------
     # Choose model
     # -------------------
-    model = ClassicIViS3D(lambda_r=lambda_r, lambda_pos=lambda_pos, Nw=0)
+    model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
     
     # -------------------
     # Run optimization
     # -------------------
-    result = image_processor.process(model=model, solver="LBFGS", units="K") #units="Jy/arcsec^2"
+    result = image_processor.process(model=model, units="K") #units="Jy/arcsec^2"
 
     v0 = float(I.velocity[0])
     dv = np.diff(I.velocity)[0]
