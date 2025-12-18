@@ -18,9 +18,8 @@ import pytorch_finufft
 #------------ ClassiCIViS3D ---------------
 #------------------------------------------
 class ClassicIViS3D(BaseModel):
-    def __init__(self, lambda_r=1, lambda_pos=1.e10, Nw=None, use_2pi=True, conj_data=True):
+    def __init__(self, lambda_r=1, Nw=None, use_2pi=True, conj_data=True):
         self.lambda_r = lambda_r
-        self.lambda_pos = lambda_pos
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
 
@@ -252,14 +251,6 @@ class ClassicIViS3D(BaseModel):
             Lr.backward()
             loss_scalar += Lr.item()
         
-        # one-sided quadratic penalty on negative pixels
-        if self.lambda_pos != 0.:
-            Npix = x.numel()
-            Lpos = self.lambda_pos * torch.sum(torch.clamp(-x, min=0.0)**2) * Npix
-            # Lpos = torch.sum(torch.clamp(-x, min=0.0)**2) * self.lambda_pos
-            Lpos.backward(retain_graph=True)
-            loss_scalar += Lpos.item()
-
         return torch.tensor(loss_scalar)
 
 

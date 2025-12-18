@@ -125,9 +125,9 @@ if __name__ == '__main__':
     lambda_r = 1
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = 0        # 0 for GPU, "cpu" for CPU
-    positivity = False
-    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) + 1e-6
-    init_params[0] = sd
+    positivity = True
+    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) #+ 1e-6
+    # init_params[0] = sd
     
     # -------------------
     # Create Imager3D
@@ -158,12 +158,13 @@ if __name__ == '__main__':
     # -------------------
     result = image_processor.process(model=model, units="K") #units="Jy/arcsec^2"
 
-    v0 = float(I.velocity[0])
-    dv = np.diff(I.velocity)[0]
-    hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=1, dv_kms=dv)    
+    # v0 = float(I.velocity[0])
+    # dv = np.diff(I.velocity)[0]
+    # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=1, dv_kms=dv)    
     
     #Write output array on disk
-    fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, hdr3, overwrite=True)
+    fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
+    # fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, hdr3, overwrite=True)
 
     
     stop
