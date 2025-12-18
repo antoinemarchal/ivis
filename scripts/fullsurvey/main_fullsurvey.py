@@ -122,10 +122,11 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0
     lambda_r = 1
+    lambda_pos = 1.e3
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = 0        # 0 for GPU, "cpu" for CPU
     positivity = True
-    init_params = np.zeros((2, shape[0], shape[1]), dtype=np.float32)
+    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
     
     # -------------------
     # Create Imager3D
@@ -149,12 +150,12 @@ if __name__ == '__main__':
     # -------------------
     # Choose model
     # -------------------
-    model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+    model = ClassicIViS3D(lambda_r=lambda_r, lambda_pos=lambda_pos, Nw=0)
     
     # -------------------
     # Run optimization
     # -------------------
-    result = image_processor.process(model=model, units="K") #units="Jy/arcsec^2"
+    result = image_processor.process(model=model, solver="LBFGS", units="K") #units="Jy/arcsec^2"
 
     v0 = float(I.velocity[0])
     dv = np.diff(I.velocity)[0]
