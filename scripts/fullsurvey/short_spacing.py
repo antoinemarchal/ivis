@@ -189,13 +189,10 @@ if __name__ == '__main__':
     target_hdr = w.to_header()
     sd_K, footprint = reproject_interp((hi_slice_array,w_sd.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
     sd_K[sd_K != sd_K] = 0.        
-    
-    sd = sd_K / (beam_sd.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
-    
-    # nu_Hz = 1.42040575177e9*u.Hz FIXME
-    # output = dunits.jy_per_arcsec2_to_K(result, nu_Hz)
-    # result = output[0]
-    
+        
+    nu_Hz = 1.42040575177e9*u.Hz #FIXME
+    sd = K_to_jy_arcsec2(sd_K,nu_Hz)
+        
     fftfield_low = fft2(sd * 1)
     fftfield_high = fft2(np.array(result[0]))
     corrected = ifft2(fftfield_low * fftbeam + fftfield_high * fftpsf_inv).real
