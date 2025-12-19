@@ -64,7 +64,7 @@ def promote_header_2d_to_3d_velocity(target_header_2d,
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge1/"
+    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/"
     
     path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/" #directory of primary beams
     path_sd = "/totoro/anmarchal/data/parkes/" #path single-dish data - dummy here
@@ -75,27 +75,22 @@ if __name__ == '__main__':
 
     #Define target header
     cfield = SkyCoord(ra="5h05m43.8s", dec="-70d05m48.5s", frame="icrs")
-    # target_header, w = data_processor.make_imaging_header(cfield, fov_deg=12, pix_arcsec=4)
     target_header, w = data_processor.make_imaging_header(cfield, fov_deg=15)
     shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
     # # Optional: pre-compute PB and grid
     # data_processor.compute_pb_and_grid(target_header, fitsname_pb="reproj_pb_low.fits", fitsname_grid="grid_interp_low.fits")
 
-    # pb, grid = data_processor.read_pb_and_grid(
-    #     fitsname_pb="reproj_pb_high.fits",
-    #     fitsname_grid="grid_interp_high.fits"
-    # )
     pb, grid = data_processor.read_pb_and_grid(
         fitsname_pb="reproj_pb2.fits",
         fitsname_grid="grid_interp2.fits"
     )
 
     # Dummy single-dish array and beam
-    hdu_sd = fits.open(path_sd+"gass_chan_765.fits")
-    sd = hdu_sd[0].data
-    # sd = np.zeros(shape, dtype=np.float32)
-    beam_sd = Beam(0.26666666666666666 * u.deg, 0.26666666666666666 * u.deg, 1.e-12 * u.deg)
+    # hdu_sd = fits.open(path_sd+"gass_chan_765.fits")
+    # sd = hdu_sd[0].data
+    sd = np.zeros(shape, dtype=np.float32)
+    beam_sd = Beam(1 * u.deg, 1 * u.deg, 1.e-12 * u.deg)
 
     # -------------------
     # Read visibilities into VisIData dataclass
@@ -108,10 +103,10 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
-        chan_sel=slice(810,811),
-        # chan_sel=slice(765,766),
+        # chan_sel=slice(810,813),
+        chan_sel=slice(765,795),
         # chan_sel=slice(1270,1271),
-        # rest_freq=1.42040575177e9, #HI rest frequency in Hz
+        rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
         # target_radius=0.5*u.deg
@@ -126,45 +121,57 @@ if __name__ == '__main__':
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = 0        # 0 for GPU, "cpu" for CPU
     positivity = True
-    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) #+ 1e-6
-    # init_params[0] = sd
-    
-    # -------------------
-    # Create Imager3D
-    # -------------------
-    image_processor = Imager3D(
-        vis_data=I,
-        pb=pb,
-        grid=grid,
-        sd=sd,
-        beam_sd=beam_sd,
-        hdr=target_header,
-        init_params=init_params,
-        max_its=max_its,
-        lambda_sd=lambda_sd,
-        positivity=positivity,
-        cost_device=cost_device,
-        optim_device=optim_device,
-        beam_workers=1
-    )
-    
+    init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) #+ 1.e-6 #not be exactly at bound
+
     # -------------------
     # Choose model
     # -------------------
     model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
-    
-    # -------------------
-    # Run optimization
-    # -------------------
-    result = image_processor.process(model=model, units="K") #units="Jy/arcsec^2"
 
-    # v0 = float(I.velocity[0])
-    # dv = np.diff(I.velocity)[0]
-    # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=1, dv_kms=dv)    
+    nchan = len(I.velocity)
+    cube = np.zeros((nchan,shape[0],shape[1]))
+    
+    for i in np.arange(nchan):
+        Ic = I.single_channel(i, copy=False)
+        
+        # -------------------
+        # Create Imager3D
+        # -------------------
+        image_processor = Imager3D(
+            vis_data=Ic, #iter over I
+            pb=pb,
+            grid=grid,
+            sd=sd,
+            beam_sd=beam_sd,
+            hdr=target_header,
+            init_params=init_params,
+            max_its=max_its,
+            lambda_sd=lambda_sd,
+            positivity=positivity,
+            cost_device=cost_device,
+            optim_device=optim_device,
+            beam_workers=1
+        )
+        
+        # -------------------
+        # Run optimization
+        # -------------------
+        result = image_processor.process(model=model, units="Jy/arcsec^2")
+
+        # #Update with previous chan and iter only 3
+        # init_params[0] = result[0]
+        # max_its = 3
+
+        #In Cube
+        cube[i] = result
+
+    v0 = float(I.velocity[0])
+    dv = np.diff(I.velocity)[0]
+    hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
     
     #Write output array on disk
-    fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
-    # fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, hdr3, overwrite=True)
+    # fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_chan_765_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
 
     
     stop
