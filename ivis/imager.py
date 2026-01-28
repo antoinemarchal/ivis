@@ -104,7 +104,7 @@ class Imager3D:
         - cost_device : where model.objective() runs
 
         Rules #FIXME
-        -----
+        ------------
         - positivity=True  -> SciPy L-BFGS-B (CPU-only optimizer)
         - positivity=False -> PyTorch LBFGS on optim_device; cost on cost_device
 
