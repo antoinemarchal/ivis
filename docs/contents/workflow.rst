@@ -28,21 +28,21 @@ IViS Workflow
 .. raw:: html
 
    <p style="color:#dddddd; text-align: justify;">
-   The final image cube is written to disk in physical units such as <code>Jy/beam</code>, <code>Jy/arcsec^2</code>, or <code>K</code>. This workflow supports <span style="color:#4db6ac;">GPU acceleration</span> and is designed to scale to large mosaics.
+   The final image cube is written to disk in physical units of <code>Jy/arcsec^2</code> or <code>K</code>. This workflow supports <span style="color:#4db6ac;">GPU acceleration</span> and is designed to scale to large mosaics.
    </p>
 
 The flowchart below summarizes the key modules and their data flow.
 
-
 .. graphviz::
 
    digraph ivis_workflow {
-       rankdir=LR;             // left-to-right layout
+       rankdir=TB;
        bgcolor="white";
        fontcolor="black";
-       fontsize=22;            // global font size
-       nodesep=0.8;
-       ranksep=0.8;
+       fontsize=22;
+       nodesep=0.35;
+       ranksep=1.2;
+       ratio=compress;
 
        node [
            shape=box,
@@ -52,73 +52,62 @@ The flowchart below summarizes the key modules and their data flow.
            fontcolor="black",
            fillcolor="white",
            margin=0.25,
-           penwidth=2           // thicker node borders
+           penwidth=2
        ];
 
-       // --- Main pipeline ---
-       PIPELINE   [label="Build your own pipeline", shape=box3d, color="#5c6bc0"];
-
-       // --- Inputs / config ---
+       // --- Nodes ---
        PATHS      [label="Paths & WCS", color="#b0bec5"];
        PARAMS     [label="User parameters\n(λ, iterations, devices, ...)", color="#b0bec5"];
 
-       // --- I/O stage ---
        CASAREAD   [label="CasacoreReader()\nread visibilities", color="#ffb74d"];
        VISDATA    [label="VisIData\n(dataclass)", color="#ff8a65"];
 
-       // --- PB + grid stage ---
        DATAPROC   [label="DataProcessor\n(PB + grid)", color="#ba68c8"];
        PBGRID     [label="PB + grid FITS", color="#ba68c8"];
 
-       // --- Optional single-dish ---
-       SD         [label="Single-dish map\n+ beam", color="#b0bec5"];
-
-       // --- Imager & model ---
+       MODEL      [label="Classic3D\n(model class)", color="#fbc02d"];
        IMAGER     [label="Imager3D\n(optimization loop)", color="#4fc3f7"];
-       MODEL      [label="ClassicIViS3D\n(model class)", color="#fbc02d"];
 
-       // --- Output ---
        IMAGE      [label="Image cube\n(K or Jy arcsec⁻²)", color="#b0bec5"];
 
-       // --- Edges (arrows) ---
+       // --- Links: ONLY label size increased ---
        edge [
            color="black",
            fontcolor="black",
-           fontsize=18
-           // default penwidth, so arrows not too thick
+           fontsize=22     // bigger link labels only
        ];
 
-       PIPELINE -> PATHS      [label="define"];
-       PIPELINE -> PARAMS     [label="set"];
-       PIPELINE -> CASAREAD   [label="import"];
-       PIPELINE -> DATAPROC   [label="import"];
-       PIPELINE -> MODEL      [label="select"];
-       PIPELINE -> IMAGER     [label="assemble"];
-
+       // --- Data flow ---
        PATHS    -> CASAREAD   [label="path_ms"];
        PATHS    -> DATAPROC   [label="beams, header"];
 
        CASAREAD -> VISDATA    [label="returns"];
        VISDATA  -> IMAGER     [label="visibilities"];
+
        DATAPROC -> PBGRID     [label="read/compute"];
        PBGRID   -> IMAGER     [label="pb + grid"];
-       SD       -> IMAGER     [label="short spacings"];
+
        MODEL    -> IMAGER     [label="forward + loss"];
        IMAGER   -> IMAGE      [label="writes"];
 
-       // --- Optional grouping for readability ---
+       // --- Invisible spine to enforce vertical ordering ---
+       PATHS    -> CASAREAD  [style=invis];
+       CASAREAD -> DATAPROC  [style=invis];
+       DATAPROC -> IMAGER   [style=invis];
+
+       // --- Clusters ---
        subgraph cluster_inputs {
-           label="Inputs & Config";
+           label="Configuration script";
            fontsize=18;
            style=dashed;
            color="#b0bec5";
            fontcolor="#5c6bc0";
-           penwidth=2;          // thicker dashed box
+           penwidth=2;
            PATHS; PARAMS;
        }
 
        subgraph cluster_io {
-           label="I/O";
+           label="Data Ingestion";
            fontsize=18;
            style=dashed;
            color="#ffb74d";
@@ -128,7 +117,7 @@ The flowchart below summarizes the key modules and their data flow.
        }
 
        subgraph cluster_pb {
-           label="PB & Grid";
+           label="Pre-processing";
            fontsize=18;
            style=dashed;
            color="#ba68c8";
@@ -138,14 +127,234 @@ The flowchart below summarizes the key modules and their data flow.
        }
 
        subgraph cluster_recon {
-           label="Reconstruction";
+           label="Optimization";
            fontsize=18;
            style=dashed;
            color="#4fc3f7";
            fontcolor="#4fc3f7";
            penwidth=2;
-           SD; IMAGER; MODEL; IMAGE;
+           MODEL; IMAGER; IMAGE;
        }
    }
 
+..
+   .. graphviz::
 
+      digraph ivis_workflow {
+	  rankdir=TB;
+	  bgcolor="white";
+	  fontcolor="black";
+	  fontsize=22;
+	  nodesep=0.35;
+	  ranksep=1.2;
+	  ratio=compress;
+
+	  node [
+	      shape=box,
+	      style=filled,
+	      fontname="Helvetica-Bold",
+	      fontsize=20,
+	      fontcolor="black",
+	      fillcolor="white",
+	      margin=0.25,
+	      penwidth=2
+	  ];
+
+	  // --- Nodes ---
+	  PIPELINE   [label="IViS workflow", shape=box3d, color="#5c6bc0"];
+
+	  PATHS      [label="Paths & WCS", color="#b0bec5"];
+	  PARAMS     [label="User parameters\n(λ, iterations, devices, ...)", color="#b0bec5"];
+
+	  CASAREAD   [label="CasacoreReader()\nread visibilities", color="#ffb74d"];
+	  VISDATA    [label="VisIData\n(dataclass)", color="#ff8a65"];
+
+	  DATAPROC   [label="DataProcessor\n(PB + grid)", color="#ba68c8"];
+	  PBGRID     [label="PB + grid FITS", color="#ba68c8"];
+
+	  MODEL      [label="Classic3D\n(model class)", color="#fbc02d"];
+	  IMAGER     [label="Imager3D\n(optimization loop)", color="#4fc3f7"];
+
+	  IMAGE      [label="Image cube\n(K or Jy arcsec⁻²)", color="#b0bec5"];
+
+	  edge [
+	      color="black",
+	      fontcolor="black",
+	      fontsize=18
+	  ];
+
+	  // --- Pipeline controls (only config-level) ---
+	  PIPELINE -> PATHS      [label="define"];
+	  PIPELINE -> PARAMS     [label="set"];
+	  PIPELINE -> MODEL      [label="select"];
+
+	  // --- Data flow ---
+	  PATHS    -> CASAREAD   [label="path_ms"];
+	  PATHS    -> DATAPROC   [label="beams, header"];
+
+	  CASAREAD -> VISDATA    [label="returns"];
+	  VISDATA  -> IMAGER     [label="visibilities"];
+
+	  DATAPROC -> PBGRID     [label="read/compute"];
+	  PBGRID   -> IMAGER     [label="pb + grid"];
+
+	  MODEL    -> IMAGER     [label="forward + loss"];
+	  IMAGER   -> IMAGE      [label="writes"];
+
+	  // --- Invisible spine to enforce vertical ordering ---
+	  PIPELINE -> PATHS     [style=invis];
+	  PATHS    -> CASAREAD  [style=invis];
+	  CASAREAD -> DATAPROC  [style=invis];
+	  DATAPROC -> IMAGER   [style=invis];
+
+	  // --- Clusters ---
+	  subgraph cluster_inputs {
+	      label="Configuration script";
+	      fontsize=18;
+	      style=dashed;
+	      color="#b0bec5";
+	      fontcolor="#5c6bc0";
+	      penwidth=2;
+	      PATHS; PARAMS;
+	  }
+
+	  subgraph cluster_io {
+	      label="Data Ingestion";
+	      fontsize=18;
+	      style=dashed;
+	      color="#ffb74d";
+	      fontcolor="#ffb74d";
+	      penwidth=2;
+	      CASAREAD; VISDATA;
+	  }
+
+	  subgraph cluster_pb {
+	      label="Pre-processing";
+	      fontsize=18;
+	      style=dashed;
+	      color="#ba68c8";
+	      fontcolor="#ba68c8";
+	      penwidth=2;
+	      DATAPROC; PBGRID;
+	  }
+
+	  subgraph cluster_recon {
+	      label="Optimization";
+	      fontsize=18;
+	      style=dashed;
+	      color="#4fc3f7";
+	      fontcolor="#4fc3f7";
+	      penwidth=2;
+	      MODEL; IMAGER; IMAGE;
+	  }
+      }
+
+..
+   .. graphviz::
+
+      digraph ivis_workflow {
+	  rankdir=LR;             // left-to-right layout
+	  bgcolor="white";
+	  fontcolor="black";
+	  fontsize=22;            // global font size
+	  nodesep=0.8;
+	  ranksep=0.8;
+
+	  node [
+	      shape=box,
+	      style=filled,
+	      fontname="Helvetica-Bold",
+	      fontsize=20,
+	      fontcolor="black",
+	      fillcolor="white",
+	      margin=0.25,
+	      penwidth=2           // thicker node borders
+	  ];
+
+	  // --- Main pipeline ---
+	  PIPELINE   [label="Build your own pipeline", shape=box3d, color="#5c6bc0"];
+
+	  // --- Inputs / config ---
+	  PATHS      [label="Paths & WCS", color="#b0bec5"];
+	  PARAMS     [label="User parameters\n(λ, iterations, devices, ...)", color="#b0bec5"];
+
+	  // --- I/O stage ---
+	  CASAREAD   [label="CasacoreReader()\nread visibilities", color="#ffb74d"];
+	  VISDATA    [label="VisIData\n(dataclass)", color="#ff8a65"];
+
+	  // --- PB + grid stage ---
+	  DATAPROC   [label="DataProcessor\n(PB + grid)", color="#ba68c8"];
+	  PBGRID     [label="PB + grid FITS", color="#ba68c8"];
+
+	  // --- Imager & model ---
+	  IMAGER     [label="Imager3D\n(optimization loop)", color="#4fc3f7"];
+	  MODEL      [label="Classic3D\n(model class)", color="#fbc02d"];
+
+	  // --- Output ---
+	  IMAGE      [label="Image cube\n(K or Jy arcsec⁻²)", color="#b0bec5"];
+
+	  // --- Edges (arrows) ---
+	  edge [
+	      color="black",
+	      fontcolor="black",
+	      fontsize=18
+	  ];
+
+	  PIPELINE -> PATHS      [label="define"];
+	  PIPELINE -> PARAMS     [label="set"];
+	  PIPELINE -> CASAREAD   [label="import"];
+	  PIPELINE -> DATAPROC   [label="import"];
+	  PIPELINE -> MODEL      [label="select"];
+	  PIPELINE -> IMAGER     [label="assemble"];
+
+	  PATHS    -> CASAREAD   [label="path_ms"];
+	  PATHS    -> DATAPROC   [label="beams, header"];
+
+	  CASAREAD -> VISDATA    [label="returns"];
+	  VISDATA  -> IMAGER     [label="visibilities"];
+	  DATAPROC -> PBGRID     [label="read/compute"];
+	  PBGRID   -> IMAGER     [label="pb + grid"];
+	  MODEL    -> IMAGER     [label="forward + loss"];
+	  IMAGER   -> IMAGE      [label="writes"];
+
+	  // --- Optional grouping for readability ---
+	  subgraph cluster_inputs {
+	      label="Inputs & Config";
+	      fontsize=18;
+	      style=dashed;
+	      color="#b0bec5";
+	      fontcolor="#5c6bc0";
+	      penwidth=2;
+	      PATHS; PARAMS;
+	  }
+
+	  subgraph cluster_io {
+	      label="I/O";
+	      fontsize=18;
+	      style=dashed;
+	      color="#ffb74d";
+	      fontcolor="#ffb74d";
+	      penwidth=2;
+	      CASAREAD; VISDATA;
+	  }
+
+	  subgraph cluster_pb {
+	      label="PB & Grid";
+	      fontsize=18;
+	      style=dashed;
+	      color="#ba68c8";
+	      fontcolor="#ba68c8";
+	      penwidth=2;
+	      DATAPROC; PBGRID;
+	  }
+
+	  subgraph cluster_recon {
+	      label="Reconstruction";
+	      fontsize=18;
+	      style=dashed;
+	      color="#4fc3f7";
+	      fontcolor="#4fc3f7";
+	      penwidth=2;
+	      IMAGER; MODEL; IMAGE;
+	  }
+      }   
