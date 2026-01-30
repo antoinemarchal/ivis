@@ -46,17 +46,32 @@ if __name__ == '__main__':
     #                                                 blocks='single',
     #                                                 max_workers=4)
 
-    vis_data = data_processor.read_vis_visidata(
-        uvmin=0.0,
-        uvmax=7000,
-        # target_channel=0,
-        chan_sel=slice(0, 1),
-        keep_autocorr=False,
-        prefer_weight_spectrum=False,
-        n_workers=4,
-    )
+    # vis_data = data_processor.read_vis_visidata(
+    #     uvmin=0.0,
+    #     uvmax=7000,
+    #     # target_channel=0,
+    #     chan_sel=slice(0, 1),
+    #     keep_autocorr=False,
+    #     prefer_weight_spectrum=False,
+    #     n_workers=4,
+    # )
     
     pb, grid = data_processor.read_pb_and_grid(fitsname_pb="reproj_pb_deconv.fits", fitsname_grid="grid_interp2.fits")
+
+    # -------------------
+    # Read visibilities into VisIData dataclass
+    # -------------------
+    reader = CasacoreReader(
+        prefer_weight_spectrum=False,
+        keep_autocorr=False,
+        n_workers=4)
+    
+    I: VisIData = reader.read_blocks_I(
+        ms_root=path_ms,
+        uvmin=0, uvmax=12000,
+        chan_sel=slice(950,951),
+        mode="merge",
+    )
     
     # #read single-dish data from "pathout" directory
     # sd, beam_sd = data_processor.read_sd()
@@ -81,7 +96,7 @@ if __name__ == '__main__':
     #create image processor
     init_params = np.zeros((1,shape[0],shape[1]))
     
-    image_processor = Imager3D(vis_data,      # visibilities
+    image_processor = Imager3D(I,      # visibilities
                                pb,            # array of primary beams
                                grid,          # array of interpolation grids
                                sd,            # single dish data in unit of Jy/arcsec^2
