@@ -104,7 +104,7 @@ if __name__ == '__main__':
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
         # chan_sel=slice(810,813),
-        chan_sel=slice(765,795),
+        chan_sel=slice(675,705), # 765, 795
         # chan_sel=slice(1270,1271),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
@@ -158,10 +158,6 @@ if __name__ == '__main__':
         # -------------------
         result = image_processor.process(model=model, units="Jy/arcsec^2")
 
-        # #Update with previous chan and iter only 3
-        # init_params[0] = result[0]
-        # max_its = 3
-
         #In Cube
         cube[i] = result
 
@@ -171,22 +167,19 @@ if __name__ == '__main__':
     
     #Write output array on disk
     # fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
-    fits.writeto(pathout + "output_chan_765_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
-
-    
-    stop
-    
-    #PLOT RESULT
-    pathout="./"
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
-    ax.set_xlabel(r"RA (deg)", fontsize=18.)
-    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
-    # vmin, vmax = np.nanpercentile(result[0], (0.008, 99.992))
-    img = ax.imshow(result[0], vmin=vmin, vmax=vmax, origin="lower", cmap="gray_r")
-    # ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
-    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
-    cbar = fig.colorbar(img, cax=colorbar_ax)
-    cbar.ax.tick_params(labelsize=14.)
-    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
-    plt.savefig(pathout + 'output_merge_full_765.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    fits.writeto(pathout + "output_chan_675_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
+        
+    # #PLOT RESULT
+    # pathout="./"
+    # fig = plt.figure(figsize=(10, 10))
+    # ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
+    # ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    # ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    # # vmin, vmax = np.nanpercentile(result[0], (0.008, 99.992))
+    # img = ax.imshow(result[0], vmin=vmin, vmax=vmax, origin="lower", cmap="gray_r")
+    # # ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
+    # colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    # cbar = fig.colorbar(img, cax=colorbar_ax)
+    # cbar.ax.tick_params(labelsize=14.)
+    # cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
+    # plt.savefig(pathout + 'output_merge_full_765.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
