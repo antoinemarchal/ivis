@@ -420,7 +420,7 @@ def read_ms_block_I(
         bl_m   = np.sqrt((UVW0**2 + UVW1**2 + UVW2**2))[:, None]   # (nrow_b, 1)
         # convert to wavelengths per channel
         bl_lam = bl_m * (frequency[None, :] / c_light.value)       # (nrow_b, nchan)
-        in_rng = (bl_lam >= uvmin) & (bl_lam <= uvmax)
+        in_rng = (bl_m >= uvmin) & (bl_m <= uvmax)
 
         fI |= ~in_rng
         sI[~in_rng] = np.inf
