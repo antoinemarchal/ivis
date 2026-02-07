@@ -485,7 +485,14 @@ class DataProcessor:
         input_shape = (1,1,shape_img[0],shape_img[1])        
 
         #get beam files 
-        filenames = sorted(glob.glob(self.path_beams+"*.fits"))
+        p = self.path_beams
+        if p.lower().endswith((".fits", ".fit", ".fts")):
+            filenames = [p]
+        else:
+            filenames = sorted(glob.glob(os.path.join(p, "*.fits")))
+        if not filenames:
+            raise FileNotFoundError(f"No beam FITS found for path_beams={p}")
+        
         n_beams = len(filenames)
         logger.info("number of beams:", n_beams)
         #compute shape of scaled primary beam
