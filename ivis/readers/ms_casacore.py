@@ -30,8 +30,17 @@ def _list_block_dirs(ms_root: str) -> list[str]:
     """
     Return a list of block directories under ms_root. A block directory is any
     directory (ms_root itself or its immediate subdirs) that contains at least one *.ms.
+
+    Accepts a single *.ms path (treated as a one-MS block).
     """
+    # --- NEW: allow passing a single MS directly
+    if ms_root.lower().endswith(".ms"):
+        if not os.path.isdir(ms_root):
+            raise FileNotFoundError(f"MS not found: {ms_root}")
+        return [ms_root]
+
     blocks = []
+
     # root itself as a block?
     if glob.glob(os.path.join(ms_root, "*.ms")):
         blocks.append(ms_root)
@@ -43,8 +52,11 @@ def _list_block_dirs(ms_root: str) -> list[str]:
             blocks.append(sub)
 
     if not blocks:
-        raise FileNotFoundError(f"No *.ms found in {ms_root} or its immediate subdirectories.")
+        raise FileNotFoundError(
+            f"No *.ms found in {ms_root} or its immediate subdirectories."
+        )
     return blocks
+
 
 def _check_same_freq_grid(blocks: list["VisIData"]) -> None:
     """Ensure all blocks have identical frequency arrays (required for concat)."""
@@ -59,6 +71,7 @@ def _check_same_freq_grid(blocks: list["VisIData"]) -> None:
 def _natkey(name: str):
     # Natural sort helper: "file2" < "file10"
     return [int(s) if s.isdigit() else s.lower() for s in re.split(r'(\d+)', name)]
+
 
 def _beamkey_by_c10(path: str):
     """
@@ -77,7 +90,16 @@ def _beamkey_by_c10(path: str):
 
 
 def _list_ms_sorted(ms_dir: str):
-    """List .ms directories in the same order as raw `ls` (lexicographic)."""
+    """List .ms directories in the same order as raw `ls` (lexicographic).
+    Accepts either a directory or a single .ms path.
+    """
+    # --- NEW: allow passing a single MS directly
+    if ms_dir.lower().endswith(".ms"):
+        if not os.path.isdir(ms_dir):
+            raise FileNotFoundError(f"MS not found: {ms_dir}")
+        return [ms_dir]
+
+    # --- Original behavior (unchanged)
     items = []
     with os.scandir(ms_dir) as it:
         for de in it:
@@ -88,6 +110,7 @@ def _list_ms_sorted(ms_dir: str):
     if not items:
         raise FileNotFoundError(f"No .ms found under {ms_dir}")
     return sorted(items)  # plain lexicographic, like `ls`
+
 
 def _list_ms_sorted_natural(ms_dir: str):
     """List .ms directories and sort by beam number (C10_#), then natural name."""
