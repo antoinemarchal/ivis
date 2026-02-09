@@ -384,7 +384,7 @@ def read_ms_block_I(
 
     logger.info(
         f"[BLOCK] Loading {len(ms_list)}/{nbeam_total} beam(s) from: {ms_dir} "
-        f"(beam_sel={sel.tolist()})"
+        # f"(beam_sel={sel.tolist()})"
     )
 
     # # ---------------- 1) Deterministic beam list (do NOT filter) ----------------
