@@ -232,6 +232,34 @@ def _coord_in_image(wcs_cel: WCS, shape: tuple, coord: SkyCoord) -> bool:
     x, y = wcs_cel.world_to_pixel(c_icrs)  # origin=0 convention
     return (0 <= x <= nx - 1) and (0 <= y <= ny - 1)
 
+
+def _normalize_beam_sel(beam_sel, nbeam_total: int) -> np.ndarray:
+    """
+    Return a sorted, unique array of beam indices in [0, nbeam_total).
+    Accepts: None, int, slice, Sequence[int].
+    """
+    if beam_sel is None:
+        return np.arange(nbeam_total, dtype=int)
+
+    if isinstance(beam_sel, int):
+        idx = np.array([beam_sel], dtype=int)
+
+    elif isinstance(beam_sel, slice):
+        idx = np.arange(nbeam_total, dtype=int)[beam_sel]
+
+    else:
+        idx = np.asarray(list(beam_sel), dtype=int)
+
+    if idx.size == 0:
+        raise ValueError("beam_sel selects 0 beams")
+
+    if np.any(idx < 0) or np.any(idx >= nbeam_total):
+        raise IndexError(f"beam_sel has indices outside [0, {nbeam_total-1}]")
+
+    # unique + sorted (keeps deterministic ordering)
+    return np.unique(idx)
+
+
 # ----------------------------- Public loader ------------------------------
 
 def _read_one_ms(ms_path: str,
@@ -338,6 +366,7 @@ def read_ms_block_I(
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
     target_center: "SkyCoord | None" = None,
     target_radius: "Angle | u.Quantity | float | None" = None,  # float ⇒ degrees
+    beam_sel=None,   # NEW: int | list[int] | slice | None
 ) -> "VisIData":
     """
     Load a directory of .ms files (one per beam) into an I-only, channel-major VisIData.
@@ -346,9 +375,21 @@ def read_ms_block_I(
     remove beam slots; we simply avoid reading DATA for out-of-radius beams and
     leave their slots empty (nvis=0, flag=True).
     """
-    # ---------------- 1) Deterministic beam list (do NOT filter) ----------------
-    ms_list = _list_ms_sorted(ms_dir)
-    logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
+    # ---------------- 1) Deterministic beam list ----------------
+    ms_list = _list_ms_sorted(ms_dir)          # or _list_ms_sorted_natural(ms_dir)
+    nbeam_total = len(ms_list)
+
+    sel = _normalize_beam_sel(beam_sel, nbeam_total) 
+    ms_list = [ms_list[i] for i in sel]              
+
+    logger.info(
+        f"[BLOCK] Loading {len(ms_list)}/{nbeam_total} beam(s) from: {ms_dir} "
+        f"(beam_sel={sel.tolist()})"
+    )
+
+    # # ---------------- 1) Deterministic beam list (do NOT filter) ----------------
+    # ms_list = _list_ms_sorted(ms_dir)
+    # logger.info(f"[BLOCK] Loading {len(ms_list)} beam(s) from: {ms_dir}")
 
     # ---------------- 2) Channel selection (unchanged) ----------------
     all_freq, all_vel = _freqs(ms_list[0], rest_freq)
@@ -490,6 +531,7 @@ def read_ms_blocks_I(
     target_center: "SkyCoord | None" = None,
     target_radius: "Angle | u.Quantity | float | None" = None,
     center_tol_deg: float = 1e-12,      # tolerance for center equality when mode="merge"
+    beam_sel=None, 
 ) -> "VisIData | List[VisIData]":
     """
     Load multiple ``blocks`` of observations located under ``ms_root``, then either:
@@ -529,6 +571,7 @@ def read_ms_blocks_I(
             n_workers=n_workers,
             target_center=target_center,
             target_radius=target_radius,
+            beam_sel=beam_sel
         )
         blocks.append(vi)
 
@@ -652,6 +695,7 @@ def iter_channel_slabs(
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
+    beam_sel=None
 ) -> Iterator[Tuple[int, int, VisIData]]:
     """
     Yield contiguous channel slabs so you can stream a big cube with low RAM.
@@ -696,6 +740,7 @@ def iter_channel_slabs(
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,            
+            beam_sel=beam_sel
         )
         yield start, stop, visI
         i = j
@@ -709,6 +754,7 @@ def iter_blocks_chan_beam_I(
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
+    beam_sel = None
 ):
     """
     Stream over (block_index, c, b, I, sI, uu, vv, ww) without concatenating.
@@ -724,7 +770,7 @@ def iter_blocks_chan_beam_I(
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
             n_workers=n_workers,
-
+            beam_sel=beam_sel
         )
         for c, b, I, sI, uu, vv, ww in vis.iter_chan_beam_I():
             yield bi, c, b, I, sI, uu, vv, ww
@@ -740,6 +786,7 @@ def iter_blocks_channel_slabs(
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,
     concat: bool = False,  # NEW: if True, concat slabs across blocks before yielding
+    beam_sel = None
 ):
     """
     Yield slabs for each block, or concatenated slabs if concat=True.
@@ -765,6 +812,7 @@ def iter_blocks_channel_slabs(
                 keep_autocorr=keep_autocorr,
                 prefer_weight_spectrum=prefer_weight_spectrum,
                 n_workers=n_workers,
+                beam_sel=beam_sel
             ):
                 yield bi, bdir, c0, c1, visI
                 # caller should del visI when done
@@ -785,6 +833,7 @@ def iter_blocks_channel_slabs(
                 keep_autocorr=keep_autocorr,
                 prefer_weight_spectrum=prefer_weight_spectrum,
                 n_workers=n_workers,
+                beam_sel=beam_sel
             ):
                 slab_accum[(c0, c1)].append(visI)
 
@@ -858,6 +907,7 @@ def iter_blocks_chan_beam_via_slabs(
     keep_autocorr: bool = False,
     prefer_weight_spectrum: bool = True,
     n_workers: int = 0,               # 0/1 = serial; >1 = parallel per-MS
+    beam_sel = None
 ):
     """
     Yield (bi, c_abs, b, I, sI, uu, vv, ww), streaming through slabs per block.
@@ -874,6 +924,7 @@ def iter_blocks_chan_beam_via_slabs(
             slab=slab,
             keep_autocorr=keep_autocorr,
             prefer_weight_spectrum=prefer_weight_spectrum,
+            beam_sel=beam_sel
         ):
             # iterate tiny chunks from the slab
             for c_rel in range(visI.data_I.shape[0]):
@@ -936,6 +987,7 @@ class CasacoreReader:
             center_tol_deg=kwargs.get("center_tol_deg", 1e-12),
             target_center=kwargs.get("target_center"),
             target_radius=kwargs.get("target_radius"),
+            beam_sel=kwargs.get("beam_sel"), 
         )
     
     def iter_channel_slabs(self, ms_dir: str, **kwargs) -> Iterator[Tuple[int, int, VisIData]]:
@@ -949,6 +1001,7 @@ class CasacoreReader:
             keep_autocorr=kwargs.get("keep_autocorr", self.keep_autocorr),
             prefer_weight_spectrum=kwargs.get("prefer_weight_spectrum", self.prefer_weight_spectrum),
             n_workers=kwargs.get("n_workers", self.n_workers),
+            beam_sel=kwargs.get("beam_sel"),
         )
 
 # ------------------------------- demo -------------------------------------

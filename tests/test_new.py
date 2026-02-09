@@ -68,6 +68,7 @@ I: VisIData = reader.read_blocks_I(
     uvmax=np.inf,
     chan_sel=slice(0, 1),
     rest_freq=1.42040575177e9, #HI rest frequency in Hz
+    beam_sel=None
     # target_center=center,
     # target_radius=1*u.deg,
 )
@@ -81,8 +82,7 @@ lambda_r = 1
 cost_device = 0        # 0 for GPU, "cpu" for CPU
 optim_device = 0        # 0 for GPU, "cpu" for CPU
 positivity = True
-# init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32)
-init_params = np.full((1, shape[0], shape[1]), 1.e-7, dtype=np.float32)
+init_params = np.full((1, shape[0], shape[1]), 0., dtype=np.float32)
 
 # -------------------
 # Create Imager3D
