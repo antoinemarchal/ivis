@@ -13,6 +13,8 @@ from ivis.io import DataProcessor
 from ivis.imager import Imager3D
 from ivis import logger
 from ivis.models import ClassicIViS3D
+from ivis.types import VisIData
+from ivis.readers import CasacoreReader
 
 import marchalib as ml #remove
 
@@ -68,8 +70,8 @@ if __name__ == '__main__':
     
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
-        uvmin=0, uvmax=12000,
-        chan_sel=slice(950,951),
+        uvmin=0, uvmax=np.inf,
+        chan_sel=slice(0,1),
         mode="merge",
     )
     
@@ -90,7 +92,7 @@ if __name__ == '__main__':
     lambda_sd = 0#10
     lambda_r = 20
     device = 0 #0 is GPU and "cpu" is CPU
-    positivity = False
+    positivity = True
     beam_workers = 1
 
     #create image processor
@@ -110,7 +112,7 @@ if __name__ == '__main__':
                                beam_workers
                                )
     # #get image
-    model = ClassicIViS3D(lambda_r=1, Nw=0)
+    model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
     
     result = image_processor.process(model=model, units="Jy/arcsec^2") #"Jy/arcsec^2" or "K"
 
@@ -132,6 +134,32 @@ if __name__ == '__main__':
     mask = np.where(pb_mean > 0.05, 1, np.nan)
 
     w_img = ml.wcs2D(target_header)
+
+    #Primary beam + pointings position
+    pathout="/priv/avatar/amarchal/ASKAP/IMAGING/plot/"
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_img)
+    ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    img = ax.imshow(np.zeros(mask.shape), vmin=0, vmax=1, origin="lower", cmap="inferno")
+    ax.contour(pb_mean, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
+    ax.scatter(
+        [c.ra.deg for c in I.centers],
+        [c.dec.deg for c in I.centers],
+        transform=ax.get_transform("icrs"),
+        s=100,
+        facecolors="none",
+        edgecolors="white",
+        linewidths=2.0,
+        zorder=10,
+    )
+    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    cbar = fig.colorbar(img, cax=colorbar_ax)
+    cbar.ax.tick_params(labelsize=14.)
+    cbar.set_label(r"$A_{\nu}(r)$", fontsize=18.)
+    plt.savefig(pathout + 'PB_ASKAP_SB30584_SB30625_SB30665.png', format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+
+    stop
 
     #PLOT RESULT
     pathout="/priv/avatar/amarchal/ASKAP/IMAGING/plot/"
