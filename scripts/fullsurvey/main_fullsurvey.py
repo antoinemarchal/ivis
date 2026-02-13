@@ -104,7 +104,7 @@ if __name__ == '__main__':
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
         # chan_sel=slice(810,813),
-        chan_sel=slice(675,705), # 765, 795
+        chan_sel=slice(795,796), # 765, 795
         # chan_sel=slice(1270,1271),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
@@ -161,13 +161,13 @@ if __name__ == '__main__':
         #In Cube
         cube[i] = result
 
-    v0 = float(I.velocity[0])
-    dv = np.diff(I.velocity)[0]
-    hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
+    # v0 = float(I.velocity[0])
+    # dv = np.diff(I.velocity)[0]
+    # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
     
     #Write output array on disk
-    # fits.writeto(pathout + "output_chan_TEST_10_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
-    fits.writeto(pathout + "output_chan_675_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
+    fits.writeto(pathout + "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
+    # fits.writeto(pathout + "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
         
     # #PLOT RESULT
     # pathout="./"
