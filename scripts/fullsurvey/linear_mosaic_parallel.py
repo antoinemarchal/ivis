@@ -9,15 +9,18 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # ===============================
 # PATHS / PARAMS (edit if needed)
 # ===============================
-TEMPLATE = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/result_deconv.fits"
-OUT_MOSAIC = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/linear_mosaic.fits"
-OUT_PBEFF  = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/pb_eff.fits"
+path = "/totoro/anmarchal/data/gaskap/fullsurvey/products/merge/"
+path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/"
 
-IMG_GLOB = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/linear/*.fits"
-PB_GLOB  = "/priv/avatar/amarchal/MPol-dev/examples/workflow/data/BEAMS/*.fits"
+TEMPLATE = path+"output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
+OUT_MOSAIC = path+"output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
+OUT_PBEFF  = path+"output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
+
+IMG_GLOB = path+"output_chan_795_linear/*.fits"
+PB_GLOB  = path_beams+"*.fits"
 
 PB_MIN = 0.0
-NPROC  = 32
+NPROC  = 12
 
 
 def _chunkify(lst, n):
