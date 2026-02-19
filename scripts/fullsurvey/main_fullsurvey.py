@@ -111,7 +111,7 @@ if __name__ == '__main__':
         target_center=cfield,
         # target_radius=0.5*u.deg
     )
-
+    
     # -------------------
     # User parameters
     # -------------------

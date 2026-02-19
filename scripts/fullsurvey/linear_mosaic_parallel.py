@@ -14,7 +14,7 @@ path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/"
 
 TEMPLATE = path+"output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
 OUT_MOSAIC = path+"output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
-OUT_PBEFF  = path+"output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
+OUT_PBEFF  = path+"output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
 
 IMG_GLOB = path+"output_chan_795_linear/*.fits"
 PB_GLOB  = path_beams+"*.fits"
