@@ -476,18 +476,32 @@ def read_ms_block_I(
     # Per-channel UV mask and channel-major transpose
     for b in range(nbeam):
         if nvis[b] == 0:
-            continue  # empty slot; already all flags=True
+            continue
+
         UVW0 = uu_list[b]; UVW1 = vv_list[b]; UVW2 = ww_list[b]
-        I    = I_list[b];  sI   = sI_list[b];  fI   = fI_list[b]   # (nrow_b, nchan)
+        I  = I_list[b]
+        sI = sI_list[b]
+        fI = fI_list[b]            # (nrow_b, nchan)
+        
+        bl_m = np.sqrt(UVW0**2 + UVW1**2 + UVW2**2)   # (nrow_b,)
+        in_row = (bl_m >= uvmin) & (bl_m <= uvmax)   # (nrow_b,)
+        
+        fI[~in_row, :] = True
+        sI[~in_row, :] = np.inf
+        
+    # for b in range(nbeam):
+    #     if nvis[b] == 0:
+    #         continue  # empty slot; already all flags=True
+    #     UVW0 = uu_list[b]; UVW1 = vv_list[b]; UVW2 = ww_list[b]
+    #     I    = I_list[b];  sI   = sI_list[b];  fI   = fI_list[b]   # (nrow_b, nchan)
 
-        # baseline length in meters for each row
-        bl_m   = np.sqrt((UVW0**2 + UVW1**2 + UVW2**2))[:, None]   # (nrow_b, 1)
-        # convert to wavelengths per channel
-        bl_lam = bl_m * (frequency[None, :] / c_light.value)       # (nrow_b, nchan)
-        in_rng = (bl_m >= uvmin) & (bl_m <= uvmax)
-
-        fI |= ~in_rng
-        sI[~in_rng] = np.inf
+    #     # baseline length in meters for each row
+    #     bl_m   = np.sqrt((UVW0**2 + UVW1**2 + UVW2**2))[:, None]   # (nrow_b, 1)
+    #     # convert to wavelengths per channel
+    #     bl_lam = bl_m * (frequency[None, :] / c_light.value)       # (nrow_b, nchan)
+    #     in_rng = (bl_m >= uvmin) & (bl_m <= uvmax)
+    #     fI |= ~in_rng
+    #     sI[~in_rng] = np.inf
 
         # to channel-major for this beam
         I_cb  = I.transpose(1, 0).astype(np.complex64)    # (nchan, nvis_b)
