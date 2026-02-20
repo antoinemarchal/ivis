@@ -23,6 +23,109 @@ from ivis.utils import dunits, dutils
 
 plt.ion()
 
+# ---------------------------------------------------------
+# Helper: build Fourier Gaussian from FWHM in pixels
+# ---------------------------------------------------------
+def gaussian_transfer_function(shape, fwhm_pix):
+    """
+    Return |B(k)| : Fourier transfer function of a Gaussian beam.
+
+    Parameters
+    ----------
+    shape : tuple
+        Image shape (ny, nx)
+    fwhm_pix : float
+        Beam FWHM in pixels
+
+    Returns
+    -------
+    tf : 2D ndarray
+        Fourier amplitude of beam (centered at FFT origin)
+    """
+    ny, nx = shape
+
+    ky = np.fft.fftfreq(ny)
+    kx = np.fft.fftfreq(nx)
+    kx, ky = np.meshgrid(kx, ky)
+
+    # Gaussian sigma in pixels
+    sigma = fwhm_pix / (2.0 * np.sqrt(2.0*np.log(2.0)))
+
+    # Fourier transform of Gaussian:
+    # exp( -2 pi^2 sigma^2 k^2 )
+    k2 = kx**2 + ky**2
+    tf = np.exp(-(2*np.pi**2)*(sigma**2)*k2)
+
+    return tf
+
+
+def feather_casa_like(sd, itf, fwhm_sd_pix, fwhm_int_pix,
+                      alpha=1.0,
+                      dc_from_sd=True,
+                      dc_radius=0,
+                      eps=1e-12):
+    """
+    CASA-like feathering in Fourier space:
+
+        F = F_it + T * (alpha*F_sd - F_it)
+          = (1-T)*F_it + T*alpha*F_sd
+
+    where T(k) transitions from 1 at low-k (SD) to 0 at high-k (INT),
+    derived from the beams.
+
+    Key fix vs your "true feathering":
+    - enforce DC (and optionally lowest modes) to come from SD.
+
+    Parameters
+    ----------
+    sd, itf : 2D arrays
+        Single-dish and interferometric restored images on same grid/units.
+    fwhm_sd_pix, fwhm_int_pix : float
+        Beam FWHM in pixels.
+    alpha : float
+        Flux scale factor for SD (often ~1). You can estimate with
+        estimate_alpha_overlap().
+    dc_from_sd : bool
+        If True, force k=0 (and optionally a small low-k disk) to be SD only.
+    dc_radius : int
+        If >0, also force a disk of radius dc_radius pixels around (0,0) in
+        FFT-grid index space to be SD only. (Often 0 or 1–3 is enough.)
+    """
+    shape = sd.shape
+    sd0 = np.nan_to_num(sd, nan=0.0)
+    it0 = np.nan_to_num(itf, nan=0.0)
+
+    F_sd = fft2(sd0)
+    F_it = fft2(it0)
+
+    B_sd = gaussian_transfer_function(shape, fwhm_sd_pix)
+    B_it = gaussian_transfer_function(shape, fwhm_int_pix)
+
+    # Taper: 1 at low k, 0 at high k.
+    # A very common robust choice is based on beam powers:
+    #   T = B_sd^2 / (B_sd^2 + B_it^2)
+    # But we will *override* DC to be SD-only (CASA behaviour).
+    T = (B_sd**2) / (B_sd**2 + B_it**2 + eps)
+
+    if dc_from_sd:
+        # Force DC exactly
+        T[0, 0] = 1.0
+
+        # Optionally also force a few lowest modes to SD-only.
+        # This helps if your INT solutions differ slightly at ultra-low k.
+        if dc_radius and dc_radius > 0:
+            yy, xx = np.indices(shape)
+            # FFT grid origin is at [0,0] for numpy FFT output
+            rr = np.sqrt(xx**2 + yy**2)
+            T[rr <= dc_radius] = 1.0
+
+    # CASA-like combination
+    F = F_it + T * (alpha * F_sd - F_it)
+
+    out = ifft2(F).real
+    return out
+
+
 def K_to_jy_arcsec2(T_K, nu_hz):
     """
     Convert brightness temperature [K] -> Jy/arcsec^2
@@ -116,26 +219,26 @@ def wcs2D(hdr):
 
 if __name__ == '__main__':
     #PB
-    fitsname="/Users/antoine/Desktop/fullsurvey/mask_7arcsec.fits"
+    fitsname="/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
     hdu = fits.open(fitsname)
     pb_mean_full = hdu[0].data
+    pb_mean_full /= np.max(pb_mean_full)
     #compute mask
     mask = np.where(pb_mean_full > 0.05, 1, np.nan)
 
     #Open IViS result
-    # fitsname="/Users/antoine/Desktop/fullsurvey/output_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
-    # fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_765_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_new_PB_Nw_0.fits"
-    fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
-
-    # fitsname="/Users/antoine/Desktop/fullsurvey/output_1blocks_7arcsec_lambda_r_1_positivity_true.fits"
+    # fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_795_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
+    fitsname="/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
     hdu = fits.open(fitsname)
     target_header = hdu[0].header
     w = wcs2D(target_header)
-    result = hdu[0].data #* 2 #ASKAP convention
-    shape = result[0].shape
+    result_K = hdu[0].data#[0] #ATTENTION cube vs image
+    nu_Hz = 1.42040575177e9*u.Hz #FIXME
+    result = K_to_jy_arcsec2(result_K, nu_Hz)
+    shape = result.shape
     
     #Open SD data
-    fitsname="/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube_6pm5kms.fits"
+    fitsname="/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube.fits"
     hdu_sd = fits.open(fitsname)
     hdr_sd = hdu_sd[0].header
     w_sd = wcs2D(hdr_sd)
@@ -164,52 +267,52 @@ if __name__ == '__main__':
     fftrbeam = abs(fft2(rbeam))
 
     #Beam sd    
-    #ATTENTION
-    bmaj = 1
+    bmaj = 0.5 #ATTENTION
     cdelt2 = np.abs(target_header["CDELT2"])
     bmaj_pix = bmaj / cdelt2 
     beam = gauss_beam(bmaj_pix, shape, 0, 0, FWHM=True)
     beam /= np.sum(beam)
-    fftbeam = abs((fft2(beam)))
-    
+    fftbeam = abs((fft2(beam)))    
     fftpsf_inv = 1-np.abs(fftbeam)
 
     # Interpolate the HI intensity at the exact velocity
-
     # Usage
-    target_velocity = 6#253.2170684#* u.km/u.s 231.23153293
-    # hi_slice = interpolate_velocity_plane(cube_sd, target_velocity)
-    # hi_slice_array = hi_slice.value
-    # target_velocity = 231.3
-    hi_slice = cube_sd.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
-    hi_slice_array = hi_slice.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
-    
+    target_velocity = 238.6#* u.km/u.s 231.23153293
+    hi_slice = interpolate_velocity_plane(cube_sd, target_velocity* u.km/u.s)
+    hi_slice_array = hi_slice.value
+    # hi_slice = cube_sd.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
+    # hi_slice_array = hi_slice.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
     #reproject on target_header
     w = wcs2D(target_header)
     target_hdr = w.to_header()
     sd_K, footprint = reproject_interp((hi_slice_array,w_sd.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
     sd_K[sd_K != sd_K] = 0.        
-        
-    nu_Hz = 1.42040575177e9*u.Hz #FIXME
     sd = K_to_jy_arcsec2(sd_K,nu_Hz)
         
-    fftfield_low = fft2(sd * 1)
-    fftfield_high = fft2(np.array(result[0]))
-    corrected = ifft2(fftfield_low * fftbeam + fftfield_high * fftpsf_inv).real
+    # fftfield_low = fft2(sd * 1)
+    # fftfield_high = fft2(np.array(result))
+    # corrected = ifft2(fftfield_low * fftbeam + fftfield_high * fftpsf_inv).real
+
+    bmaj_int_deg = 21*u.arcsec.to(u.deg)
+    bmaj_sd_deg = 16*u.arcmin.to(u.deg)
+    fwhm_sd_pix  = bmaj_sd_deg  / cdelt2
+    fwhm_int_pix = bmaj_int_deg / cdelt2
+    
+    # Feather
+    feathered = feather_casa_like(sd, result, fwhm_sd_pix, fwhm_int_pix)
 
     #write plot on disk
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
     ax.set_xlabel(r"RA (deg)", fontsize=18.)
     ax.set_ylabel(r"DEC (deg)", fontsize=18.)
-    vmin, vmax = np.nanpercentile(result[0], (0.01, 99.99))
-    img = ax.imshow(corrected*mask, vmin=-3.e-5, vmax=0.8e-4, origin="lower", cmap="inferno")
+    img = ax.imshow(feathered*mask, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
     ax.contour(pb_mean_full, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
-    plt.savefig("/Users/antoine/Desktop/fullsurvey/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig("/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
 
     stop
 
