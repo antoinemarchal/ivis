@@ -50,3 +50,11 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/ivis"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["ivis*"]
+exclude = ["testruns*"]
+
