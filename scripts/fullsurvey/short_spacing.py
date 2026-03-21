@@ -219,7 +219,7 @@ def wcs2D(hdr):
 
 if __name__ == '__main__':
     #PB
-    fitsname="/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
+    fitsname="/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
     hdu = fits.open(fitsname)
     pb_mean_full = hdu[0].data
     pb_mean_full /= np.max(pb_mean_full)
@@ -228,13 +228,15 @@ if __name__ == '__main__':
 
     #Open IViS result
     # fitsname="/Users/antoine/Desktop/fullsurvey/output_chan_795_30_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
-    fitsname="/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
+    fitsname="/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1488_6_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
+
+    # fitsname="/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
     hdu = fits.open(fitsname)
     target_header = hdu[0].header
     w = wcs2D(target_header)
-    result_K = hdu[0].data#[0] #ATTENTION cube vs image
+    result_K = hdu[0].data[0] #ATTENTION cube vs image
     nu_Hz = 1.42040575177e9*u.Hz #FIXME
-    result = K_to_jy_arcsec2(result_K, nu_Hz)
+    result = result_K#K_to_jy_arcsec2(result_K, nu_Hz)
     shape = result.shape
     
     #Open SD data
@@ -244,15 +246,6 @@ if __name__ == '__main__':
     w_sd = wcs2D(hdr_sd)
     # Load the sd data cube (downloaded earlier)
     cube_sd = SpectralCube.read(fitsname)
-
-    # #Open ATCA data
-    # fitsname="/Users/antoine/Desktop/fullsurvey/lmc.hi.K.LSR_231pm5kms.fits"
-    # hdu_atca = fits.open(fitsname)
-    # hdr_atca = hdu_atca[0].header
-    # w_atca = wcs2D(hdr_atca)
-    # # Load the sd data cube (downloaded earlier)
-    # cube_atca = SpectralCube.read(fitsname)
-    # beam_atca = Beam(1.66666656733E-02*u.deg,  1.66666656733E-02*u.deg, 1.e-12*u.deg)
     
     #Beam sd
     beam_sd = Beam(0.26666*u.deg,  0.26666*u.deg, 1.e-12*u.deg)
@@ -277,7 +270,8 @@ if __name__ == '__main__':
 
     # Interpolate the HI intensity at the exact velocity
     # Usage
-    target_velocity = 238.6#* u.km/u.s 231.23153293
+    target_velocity = -100#238.6#* u.km/u.s 231.23153293
+    
     hi_slice = interpolate_velocity_plane(cube_sd, target_velocity* u.km/u.s)
     hi_slice_array = hi_slice.value
     # hi_slice = cube_sd.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
@@ -301,6 +295,8 @@ if __name__ == '__main__':
     # Feather
     feathered = feather_casa_like(sd, result, fwhm_sd_pix, fwhm_int_pix)
 
+    stop
+    
     #write plot on disk
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
@@ -312,27 +308,63 @@ if __name__ == '__main__':
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
-    plt.savefig("/Users/antoine/Desktop/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig("/Users/antoine/Desktop/fullsurvey/inferno/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_JOINT.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
 
     stop
 
+    #Open ATCA data
+    fitsname="/Users/antoine/Desktop/fullsurvey/lmc.hi.K.LSR.fits"
+    hdu_atca = fits.open(fitsname)
+    hdr_atca = hdu_atca[0].header
+    w_atca = wcs2D(hdr_atca)
+    # Load the sd data cube (downloaded earlier)
+    cube_atca = SpectralCube.read(fitsname)
+    beam_atca = Beam(1.66666656733E-02*u.deg,  1.66666656733E-02*u.deg, 1.e-12*u.deg)
+
     #ATCA
-    hi_slice_atca = cube_atca.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
-    hi_slice_array_atca = hi_slice_atca.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
+    # hi_slice_atca = cube_atca.spectral_interpolate(np.array([target_velocity])*u.km/u.s)
+    hi_slice_array_atca = interpolate_velocity_plane(cube_atca, target_velocity* u.km/u.s)
+    # hi_slice_array_atca = hi_slice_atca.hdu.data[0]  # Convert the SpectralCube slice to a NumPy array
     atca_K, footprint = reproject_interp((hi_slice_array_atca,w_atca.to_header()), target_hdr, shape_out=(shape[0],shape[1]))
     atca_K[atca_K != atca_K] = 0.        
     # atca = atca_K / (beam_atca.sr).to(u.arcsec**2).value #convert Jy/beam to Jy/arcsec^2
     I_atca = K_to_jy_arcsec2(atca_K, 1.42040575177e9)
+    ASKAP, footprint = reproject_interp((feathered,target_hdr), w_atca.to_header(), shape_out=hi_slice_array_atca.shape)
+    
 
     #write plot on disk ATCA
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w)
     ax.set_xlabel(r"RA (deg)", fontsize=18.)
     ax.set_ylabel(r"DEC (deg)", fontsize=18.)
-    img = ax.imshow(I_atca*mask, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="gray_r")
+    img = ax.imshow(I_atca*mask, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
     ax.contour(pb_mean_full, linestyles="--", levels=[0.05, 0.1], colors=["w","w"])
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.)
     cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
-    plt.savefig("./ATCA_+Parkesgray_r.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+    plt.savefig("/Users/antoine/Desktop/fullsurvey/inferno/ATCA_+Parkes_inferno.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+
+    #write plot on disk ATCA
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_atca)
+    ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    img = ax.imshow(K_to_jy_arcsec2(hi_slice_array_atca, 1.42040575177e9), vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
+    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    cbar = fig.colorbar(img, cax=colorbar_ax)
+    cbar.ax.tick_params(labelsize=14.)
+    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
+    plt.savefig("/Users/antoine/Desktop/fullsurvey/inferno/ATCA_+Parkes_inferno_w_atca.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
+
+    #write plot on disk ATCA
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_axes([0.1,0.1,0.78,0.8], projection=w_atca)
+    ax.set_xlabel(r"RA (deg)", fontsize=18.)
+    ax.set_ylabel(r"DEC (deg)", fontsize=18.)
+    img = ax.imshow(ASKAP, vmin=-8.e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
+    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
+    cbar = fig.colorbar(img, cax=colorbar_ax)
+    cbar.ax.tick_params(labelsize=14.)
+    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.)
+    plt.savefig("/Users/antoine/Desktop/fullsurvey/inferno/ASKAP_+Parkes_inferno_w_atca.png", format='png', bbox_inches='tight', pad_inches=0.02, dpi=400)
