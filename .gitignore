@@ -13,10 +13,13 @@ ivis/jnk
 
 # Python artifacts
 __pycache__/
+.pytest_cache/
 *.out
 *.py~
+*~
 *.log
 *.tmp
+*.bak
 *.pyc
 *.pyo
 *.pyd
