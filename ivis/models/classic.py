@@ -22,6 +22,7 @@ class ClassicIViS3D(BaseModel):
         self.lambda_r = lambda_r
         self.Nw = None if (Nw is None or Nw <= 1) else (Nw if Nw % 2 == 1 else Nw+1)
         self.conj_data = conj_data  # match old pipeline that did np.conj(data)
+        self._interp_cache = {}
 
         
     def loss(self, x, shape, device, vis_data, **kwargs):
@@ -185,6 +186,265 @@ class ClassicIViS3D(BaseModel):
             model_vis[idx] = vis_bin
             
         return model_vis
+
+
+    def _adjoint_reprojection_autodiff(self, z2d, grid, image_shape, device):
+        """
+        Apply the adjoint of the grid_sample reprojection used in forward_beam.
+        """
+        grid_t = torch.from_numpy(np.asarray(grid)).to(device).float()
+
+        zt = torch.as_tensor(z2d, device=device)
+        if zt.ndim != 2:
+            raise ValueError(f"z2d must be 2D (H,W), got shape {tuple(zt.shape)}")
+        zt = zt.to(torch.complex64)
+
+        template = torch.zeros((1, 1, *image_shape), dtype=torch.float32, device=device, requires_grad=True)
+        repro = torch.nn.functional.grid_sample(
+            template, grid_t, mode='bilinear', align_corners=True
+        ).squeeze(0).squeeze(0)
+
+        grad_real = torch.autograd.grad(
+            torch.sum(repro * zt.real), template, retain_graph=True
+        )[0].squeeze(0).squeeze(0)
+        grad_imag = torch.autograd.grad(
+            torch.sum(repro * zt.imag), template
+        )[0].squeeze(0).squeeze(0)
+
+        return torch.complex(grad_real, grad_imag)
+
+
+    def _get_interp_cache(self, grid, image_shape, device):
+        grid_arr = np.asarray(grid)
+        grid_key = (
+            id(grid),
+            tuple(image_shape),
+            str(torch.device(device)),
+            tuple(grid_arr.shape),
+        )
+        cached = self._interp_cache.get(grid_key)
+        if cached is not None:
+            return cached
+
+        grid_t = torch.from_numpy(grid_arr).to(device).float()
+        if grid_t.ndim != 4 or grid_t.shape[0] != 1 or grid_t.shape[-1] != 2:
+            raise ValueError(f"grid must have shape (1,H,W,2), got {tuple(grid_t.shape)}")
+
+        hin, win = image_shape
+        gout_h, gout_w = grid_t.shape[1], grid_t.shape[2]
+        gx = grid_t[0, :, :, 0]
+        gy = grid_t[0, :, :, 1]
+
+        x = torch.zeros_like(gx) if win == 1 else 0.5 * (gx + 1.0) * (win - 1)
+        y = torch.zeros_like(gy) if hin == 1 else 0.5 * (gy + 1.0) * (hin - 1)
+
+        x0 = torch.floor(x).to(torch.int64)
+        y0 = torch.floor(y).to(torch.int64)
+        x1 = x0 + 1
+        y1 = y0 + 1
+
+        wx1 = x - x0.to(x.dtype)
+        wy1 = y - y0.to(y.dtype)
+        wx0 = 1.0 - wx1
+        wy0 = 1.0 - wy1
+
+        def corner(ix, iy, w):
+            valid = (ix >= 0) & (ix < win) & (iy >= 0) & (iy < hin)
+            idx = torch.zeros_like(ix, dtype=torch.int64)
+            idx[valid] = iy[valid] * win + ix[valid]
+            weight = torch.zeros_like(w, dtype=torch.float32)
+            weight[valid] = w[valid].float()
+            return idx.reshape(-1), weight.reshape(-1)
+
+        idx00, w00 = corner(x0, y0, wx0 * wy0)
+        idx10, w10 = corner(x1, y0, wx1 * wy0)
+        idx01, w01 = corner(x0, y1, wx0 * wy1)
+        idx11, w11 = corner(x1, y1, wx1 * wy1)
+
+        cached = {
+            "grid_t": grid_t,
+            "out_shape": (gout_h, gout_w),
+            "idx00": idx00,
+            "idx10": idx10,
+            "idx01": idx01,
+            "idx11": idx11,
+            "w00": w00,
+            "w10": w10,
+            "w01": w01,
+            "w11": w11,
+        }
+        self._interp_cache[grid_key] = cached
+        return cached
+
+
+    def _adjoint_reprojection_manual(self, z2d, grid, image_shape, device):
+        """
+        Apply the adjoint of bilinear grid_sample with align_corners=True and
+        zero padding by explicitly scattering interpolation weights.
+        """
+        zt = torch.as_tensor(z2d, device=device)
+        if zt.ndim != 2:
+            raise ValueError(f"z2d must be 2D (H,W), got shape {tuple(zt.shape)}")
+        zt = zt.to(torch.complex64)
+
+        cache = grid if isinstance(grid, dict) else self._get_interp_cache(grid, image_shape, device)
+        hin, win = image_shape
+        gout_h, gout_w = cache["out_shape"]
+        if zt.shape != (gout_h, gout_w):
+            raise ValueError(f"z2d shape {tuple(zt.shape)} does not match grid output shape {(gout_h, gout_w)}")
+
+        acc_real = torch.zeros(hin * win, dtype=torch.float32, device=device)
+        acc_imag = torch.zeros(hin * win, dtype=torch.float32, device=device)
+        flat_real = zt.real.reshape(-1)
+        flat_imag = zt.imag.reshape(-1)
+
+        for idx_name, w_name in (("idx00", "w00"), ("idx10", "w10"), ("idx01", "w01"), ("idx11", "w11")):
+            idx = cache[idx_name]
+            weight = cache[w_name]
+            acc_real.scatter_add_(0, idx, flat_real * weight)
+            acc_imag.scatter_add_(0, idx, flat_imag * weight)
+
+        return torch.complex(acc_real.view(hin, win), acc_imag.view(hin, win))
+
+
+    def _adjoint_reprojection(self, z2d, grid, image_shape, device):
+        """
+        Fast manual adjoint of the reprojection used in forward_beam.
+        """
+        return self._adjoint_reprojection_manual(z2d, grid, image_shape, device)
+
+
+    def adjoint_beam(self, y, pb, grid, uu, vv, ww, cell_size, image_shape, device):
+        """
+        Apply the adjoint of the per-beam forward operator.
+        """
+        yt = torch.as_tensor(y, device=device).to(torch.complex64).reshape(-1)
+        pb_shape = tuple(np.asarray(pb).shape)
+
+        cell_rad = cell_size * np.pi / (180.0 * 3600.0)
+        u_radpix = torch.from_numpy(uu).to(device).float() * (2.0 * np.pi * cell_rad)
+        v_radpix = torch.from_numpy(vv).to(device).float() * (2.0 * np.pi * cell_rad)
+
+        if self.Nw is None:
+            points = torch.stack([-v_radpix, u_radpix], dim=0)
+            dirty_pb = (cell_size**2) * pytorch_finufft.functional.finufft_type1(
+                points, yt, pb_shape, isign=-1, modeord=0
+            )
+        else:
+            wwa = torch.from_numpy(ww).to(device).float()
+            H, W = pb_shape
+            lx = torch.linspace(-W/2, W/2 - 1, W, device=device) * cell_rad
+            ly = torch.linspace(-H/2, H/2 - 1, H, device=device) * cell_rad
+            l, m = torch.meshgrid(lx, ly, indexing='xy')
+            r2 = l**2 + m**2
+
+            dirty_pb = torch.zeros(pb_shape, dtype=torch.complex64, device=device)
+            w_edges = torch.linspace(wwa.min(), wwa.max(), self.Nw + 1, device=device)
+            w_centers = 0.5 * (w_edges[:-1] + w_edges[1:])
+            bin_ids = torch.bucketize(wwa, w_edges) - 1
+            bin_ids = torch.clamp(bin_ids, 0, self.Nw - 1)
+
+            for j in range(self.Nw):
+                idx = (bin_ids == j).nonzero(as_tuple=True)[0]
+                if idx.numel() == 0:
+                    continue
+
+                points = torch.stack([-v_radpix[idx], u_radpix[idx]], dim=0)
+                dirty_bin = (cell_size**2) * pytorch_finufft.functional.finufft_type1(
+                    points, yt[idx], pb_shape, isign=-1, modeord=0
+                )
+                phase_adj = torch.exp(-1j * np.pi * w_centers[j] * r2)
+                dirty_pb = dirty_pb + dirty_bin * phase_adj
+
+        pb_t = torch.from_numpy(np.asarray(pb)).to(device).float()
+        return self._adjoint_reprojection(dirty_pb * pb_t, grid, image_shape, device)
+
+
+    def adjoint(
+        self,
+        vis,
+        vis_data,
+        device,
+        x_shape=None,
+        pb_list=None,
+        grid_list=None,
+        pb=None,
+        grid_array=None,
+        cell_size=None,
+        return_real: bool = False,
+    ):
+        """
+        Apply the adjoint of the full 3D forward model to visibilities.
+
+        Parameters
+        ----------
+        vis : np.ndarray or None
+            Input visibilities. Accepts either a cube with the same shape as
+            vis_data.data_I, or a flat vector ordered like iter_chan_beam_I().
+            If None, vis_data.data_I is used.
+        return_real : bool, optional
+            If True, return only the real part of the adjoint image cube.
+        """
+        dev = torch.device(device)
+
+        if x_shape is None:
+            if vis_data is None or not hasattr(vis_data, "data_I"):
+                raise ValueError("Need x_shape or vis_data.data_I to infer image cube shape.")
+            x_shape = (vis_data.data_I.shape[0],) + tuple(np.asarray(pb_list[0] if pb_list is not None else pb[0]).shape)
+
+        if len(x_shape) != 3:
+            raise ValueError(f"x_shape must be (nchan, H, W), got {x_shape}")
+        nchan, H, W = x_shape
+
+        nbeam = len(vis_data.centers)
+        if pb_list is None:
+            if pb is None:
+                raise ValueError("Need pb_list or pb array")
+            pb_list = [pb[b] for b in range(nbeam)]
+        if grid_list is None:
+            if grid_array is None:
+                raise ValueError("Need grid_list or grid_array")
+            grid_list = [grid_array[b] for b in range(nbeam)]
+
+        vis_in = vis_data.data_I if vis is None else vis
+        use_cube = hasattr(vis_in, "shape") and tuple(vis_in.shape) == tuple(vis_data.data_I.shape)
+        use_flat = not use_cube
+
+        if use_flat:
+            flat_vis = np.asarray(vis_in, dtype=np.complex64).reshape(-1)
+            offset = 0
+
+        out = torch.zeros((nchan, H, W), dtype=torch.complex64, device=dev)
+
+        for c, b, Icb, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
+            if use_cube:
+                nv = int(vis_data.nvis[b])
+                flg = np.asarray(vis_data.flag_I[c, b, :nv], dtype=bool)
+                y = np.asarray(vis_in[c, b, :nv], dtype=np.complex64)[~flg]
+            else:
+                block_size = Icb.size
+                y = flat_vis[offset:offset + block_size]
+                if y.size != block_size:
+                    raise ValueError("Flat visibility vector is shorter than expected from vis_data.")
+                offset += block_size
+
+            out[c] = out[c] + self.adjoint_beam(
+                y=y,
+                pb=pb_list[b],
+                grid=grid_list[b],
+                uu=uu,
+                vv=vv,
+                ww=ww,
+                cell_size=cell_size,
+                image_shape=(H, W),
+                device=dev,
+            )
+
+        if use_flat and offset != flat_vis.size:
+            raise ValueError("Flat visibility vector is longer than expected from vis_data.")
+
+        result = out.real if return_real else out
+        return result.detach().cpu().numpy().astype(np.float32 if return_real else np.complex64)
 
 
     def objective(self, x, vis_data, device,
@@ -534,7 +794,3 @@ class ClassicIViS(BaseModel):
             print_gpu_memory(device)
 
         return torch.tensor(loss_scalar)
-
-
-
-

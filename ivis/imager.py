@@ -92,6 +92,30 @@ class Imager3D:
             grid_array=grid_native
         )
 
+    def adjoint_model(self, model, vis=None, return_real=False):
+        """
+        Apply the adjoint of the model forward operator to a visibility cube or
+        flat visibility vector. If vis is None, uses self.vis_data.data_I.
+        """
+        if model is None:
+            raise ValueError("Must pass a model instance to `adjoint_model()`.")
+
+        cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
+
+        pb_native = np.asarray(self.pb, dtype=np.float32)
+        grid_native = np.asarray(self.grid, dtype=np.float32)
+
+        return model.adjoint(
+            vis=vis,
+            vis_data=self.vis_data,
+            pb=pb_native,
+            device=self.cost_device,
+            cell_size=cell_size.value,
+            grid_array=grid_native,
+            x_shape=self.init_params.shape,
+            return_real=return_real,
+        )
+
     # ------------------------------------------------------------------
     # process(): SAME logic + SAME log strings as your original version
     # ------------------------------------------------------------------
