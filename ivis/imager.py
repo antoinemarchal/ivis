@@ -70,7 +70,7 @@ class Imager3D:
         else:
             logger.info("Optimizer not bounded - Positivity == False")
 
-    def forward_model(self, model):
+    def forward_model(self, model, x=None):
         """
         Compute model visibilities from the current image parameters
         using the given model's forward operator.
@@ -82,9 +82,10 @@ class Imager3D:
 
         pb_native = np.asarray(self.pb, dtype=np.float32)
         grid_native = np.asarray(self.grid, dtype=np.float32)
+        x_model = self.init_params if x is None else x
 
         return model.forward(
-            x=self.init_params,
+            x=x_model,
             vis_data=self.vis_data,
             pb=pb_native,
             device=self.cost_device,
@@ -94,7 +95,7 @@ class Imager3D:
 
     def adjoint_model(self, model, vis=None, return_real=False):
         """
-        Apply the adjoint of the model forward operator to a visibility cube or
+        Apply the backward/adjoint of the model forward operator to a visibility cube or
         flat visibility vector. If vis is None, uses self.vis_data.data_I.
         """
         if model is None:
@@ -104,6 +105,18 @@ class Imager3D:
 
         pb_native = np.asarray(self.pb, dtype=np.float32)
         grid_native = np.asarray(self.grid, dtype=np.float32)
+
+        if hasattr(model, "backward"):
+            return model.backward(
+                vis=vis,
+                vis_data=self.vis_data,
+                pb=pb_native,
+                device=self.cost_device,
+                cell_size=cell_size.value,
+                grid_array=grid_native,
+                x_shape=self.init_params.shape,
+                return_real=return_real,
+            )
 
         return model.adjoint(
             vis=vis,
@@ -766,7 +779,7 @@ class Imager:
         return idmin, idmax
 
 
-    def forward_model(self, model):
+    def forward_model(self, model, x=None):
         """
         Compute model visibilities from an input image using the provided model's forward operator.
 
@@ -775,6 +788,8 @@ class Imager:
         model : object
             A model instance (e.g., ClassicIViS) that implements a `.forward(...)` method
             to simulate visibilities from image-domain parameters.
+        x : np.ndarray or None, optional
+            Image parameters to forward-project. If None, uses ``self.init_params``.
 
         Returns
         -------
@@ -810,9 +825,10 @@ class Imager:
         # Native arrays
         pb_native = np.asarray(self.pb, dtype=np.float32)
         grid_native = np.asarray(self.grid, dtype=np.float32)
+        x_model = self.init_params if x is None else x
         
         return model.forward(
-            x=self.init_params,
+            x=x_model,
             data=self.vis_data.data,
             uu=uu_radpix,
             vv=vv_radpix,
