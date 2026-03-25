@@ -112,3 +112,161 @@ def optimize_torch_lbfgs(*, model, x_init, dtype, history_size, max_its,
 
     return x_param.detach().cpu().numpy()
 
+
+def optimize_torch_cg(*, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
+                      tol=1e-6, atol=0.0):
+    if not hasattr(model, "apply_normal_operator") or not hasattr(model, "quadratic_rhs"):
+        raise TypeError("CG solver requires model.apply_normal_operator() and model.quadratic_rhs().")
+
+    if optim_dev != cost_dev:
+        logger.info(f"CG uses the cost device for operator applications; solving on {cost_dev}.")
+
+    logger.info(f"Starting optimisation: Conjugate Gradient on {cost_dev}")
+
+    x = torch.tensor(x_init, dtype=dtype, device=cost_dev)
+    rhs = model.quadratic_rhs(x_shape=tuple(x.shape), device=cost_dev, **params).to(dtype)
+
+    def apply_a(v):
+        return model.apply_normal_operator(v, device=cost_dev, **params).to(dtype)
+
+    if cost_dev.type == "cuda":
+        torch.cuda.synchronize(cost_dev)
+    t0 = time.perf_counter()
+
+    r = rhs - apply_a(x)
+    p = r.clone()
+    rr = torch.sum(r * r)
+    rhs_norm = torch.linalg.vector_norm(rhs).item()
+    threshold = max(float(atol), float(tol) * rhs_norm)
+
+    iter_count = 0
+    for k in range(1, int(max_its) + 1):
+        Ap = apply_a(p)
+        denom = torch.sum(p * Ap)
+        denom_value = float(denom.detach().cpu())
+        if abs(denom_value) < 1e-30:
+            logger.warning(f"[CG] Breakdown at iter {k}: p^T A p is too small ({denom_value:.3e}).")
+            iter_count = k - 1
+            break
+
+        alpha = rr / denom
+        x = x + alpha * p
+        r = r - alpha * Ap
+
+        res_norm = torch.linalg.vector_norm(r).item()
+        logger.info(
+            f"[PID {os.getpid()}] [CG Iter {k}/{max_its}] residual={res_norm:.6e}"
+        )
+        iter_count = k
+        if res_norm <= threshold:
+            break
+
+        rr_new = torch.sum(r * r)
+        beta = rr_new / rr
+        p = r + beta * p
+        rr = rr_new
+
+    final_loss = float(model.objective(x, device=cost_dev, **params).detach().cpu())
+    if cost_dev.type == "cuda":
+        torch.cuda.synchronize(cost_dev)
+    elapsed = time.perf_counter() - t0
+
+    end_mem_info = dutils.gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
+    logger.info(
+        f"[Timing] CG (cost_dev={cost_dev}) took {elapsed:.2f} s; "
+        f"final loss={final_loss:.6g}; iterations={iter_count}"
+        + (f" | {end_mem_info}" if end_mem_info else "")
+    )
+
+    return x.detach().cpu().numpy()
+
+
+def _estimate_lipschitz(*, model, x_shape, dtype, cost_dev, params, power_iters=10):
+    v = torch.randn(x_shape, dtype=dtype, device=cost_dev)
+    v_norm = torch.linalg.vector_norm(v)
+    if float(v_norm.detach().cpu()) == 0.0:
+        v = torch.ones(x_shape, dtype=dtype, device=cost_dev)
+        v_norm = torch.linalg.vector_norm(v)
+    v = v / v_norm
+
+    rayleigh = 1.0
+    for _ in range(max(1, int(power_iters))):
+        Av = model.apply_normal_operator(v, device=cost_dev, **params).to(dtype)
+        Av_norm = torch.linalg.vector_norm(Av)
+        avn = float(Av_norm.detach().cpu())
+        if avn == 0.0:
+            return 1.0
+        v = Av / Av_norm
+        rayleigh = float(torch.sum(v * model.apply_normal_operator(v, device=cost_dev, **params).to(dtype)).detach().cpu())
+
+    return max(rayleigh, 1e-12)
+
+
+def optimize_torch_fista(*, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
+                         positivity=False, tol=1e-6, power_iters=10):
+    if not hasattr(model, "apply_normal_operator") or not hasattr(model, "quadratic_rhs"):
+        raise TypeError("FISTA solver requires model.apply_normal_operator() and model.quadratic_rhs().")
+
+    if optim_dev != cost_dev:
+        logger.info(f"FISTA uses the cost device for operator applications; solving on {cost_dev}.")
+
+    logger.info(
+        f"Starting optimisation: FISTA on {cost_dev}" + (" with positivity projection" if positivity else "")
+    )
+
+    x = torch.tensor(x_init, dtype=dtype, device=cost_dev)
+    y = x.clone()
+    rhs = model.quadratic_rhs(x_shape=tuple(x.shape), device=cost_dev, **params).to(dtype)
+    lipschitz = 1.2 * _estimate_lipschitz(
+        model=model,
+        x_shape=tuple(x.shape),
+        dtype=dtype,
+        cost_dev=cost_dev,
+        params=params,
+        power_iters=power_iters,
+    )
+    step = 1.0 / lipschitz
+    logger.info(f"[FISTA] Estimated Lipschitz constant={lipschitz:.6e}; step={step:.6e}")
+
+    if cost_dev.type == "cuda":
+        torch.cuda.synchronize(cost_dev)
+    t0 = time.perf_counter()
+
+    t_k = 1.0
+    iter_count = 0
+
+    for k in range(1, int(max_its) + 1):
+        grad = model.apply_normal_operator(y, device=cost_dev, **params).to(dtype) - rhs
+        x_next = y - step * grad
+        if positivity:
+            x_next.clamp_(min=0)
+
+        t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * t_k * t_k))
+        y = x_next + ((t_k - 1.0) / t_next) * (x_next - x)
+
+        dx = torch.linalg.vector_norm(x_next - x).item()
+        x_norm = max(torch.linalg.vector_norm(x_next).item(), 1e-12)
+        rel_change = dx / x_norm
+        logger.info(
+            f"[PID {os.getpid()}] [FISTA Iter {k}/{max_its}] rel_change={rel_change:.6e}"
+        )
+
+        x = x_next
+        t_k = t_next
+        iter_count = k
+        if rel_change <= tol:
+            break
+
+    final_loss = float(model.objective(x, device=cost_dev, **params).detach().cpu())
+    if cost_dev.type == "cuda":
+        torch.cuda.synchronize(cost_dev)
+    elapsed = time.perf_counter() - t0
+
+    end_mem_info = dutils.gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
+    logger.info(
+        f"[Timing] FISTA (cost_dev={cost_dev}, positivity={positivity}) took {elapsed:.2f} s; "
+        f"final loss={final_loss:.6g}; iterations={iter_count}"
+        + (f" | {end_mem_info}" if end_mem_info else "")
+    )
+
+    return x.detach().cpu().numpy()

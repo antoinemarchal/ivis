@@ -28,7 +28,12 @@ import time
 
 from ivis.logger import logger
 from ivis.utils import dunits, dutils
-from ivis.optim.solvers import optimize_scipy_lbfgsb, optimize_torch_lbfgs
+from ivis.optim.solvers import (
+    optimize_scipy_lbfgsb,
+    optimize_torch_cg,
+    optimize_torch_fista,
+    optimize_torch_lbfgs,
+)
 
 #------------------------------------
 #------------ Imager3D --------------
@@ -208,29 +213,64 @@ class Imager3D:
 
         param_shape = self.init_params.shape
 
-        if self.positivity == True:
-            # if solver == "LBFGS-B":
-            x0 = self.init_params.ravel().astype(np.float64)
-            raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
-            bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
+        solver_name = str(solver).upper()
 
-            result = optimize_scipy_lbfgsb(
-                model=model, x0=x0, bounds64=bounds64,
-                param_shape=param_shape, max_its=self.max_its,
-                cost_dev=cost_dev, optim_dev=optim_dev, params=params
-            )
+        if self.positivity == True:
+            if solver_name == "FISTA":
+                flat = optimize_torch_fista(
+                    model=model,
+                    x_init=self.init_params,
+                    dtype=dtype,
+                    max_its=self.max_its,
+                    cost_dev=cost_dev,
+                    optim_dev=optim_dev,
+                    params=params,
+                    positivity=True,
+                )
+                result = flat.reshape(param_shape)
+            else:
+                x0 = self.init_params.ravel().astype(np.float64)
+                raw_bounds = dutils.ROHSA_bounds(param_shape, lb_amp=0, ub_amp=np.inf)
+                bounds64 = [(float(lo), float(hi)) for (lo, hi) in raw_bounds]
+
+                result = optimize_scipy_lbfgsb(
+                    model=model, x0=x0, bounds64=bounds64,
+                    param_shape=param_shape, max_its=self.max_its,
+                    cost_dev=cost_dev, optim_dev=optim_dev, params=params
+                )
         else:
-            # --- Solve ---
-            flat = optimize_torch_lbfgs(
-                model=model,
-                x_init=self.init_params,
-                dtype=dtype,
-                history_size=history_size,
-                max_its=self.max_its,
-                cost_dev=cost_dev,
-                optim_dev=optim_dev,
-                params=params,
-            )
+            if solver_name == "CG":
+                flat = optimize_torch_cg(
+                    model=model,
+                    x_init=self.init_params,
+                    dtype=dtype,
+                    max_its=self.max_its,
+                    cost_dev=cost_dev,
+                    optim_dev=optim_dev,
+                    params=params,
+                )
+            elif solver_name == "FISTA":
+                flat = optimize_torch_fista(
+                    model=model,
+                    x_init=self.init_params,
+                    dtype=dtype,
+                    max_its=self.max_its,
+                    cost_dev=cost_dev,
+                    optim_dev=optim_dev,
+                    params=params,
+                    positivity=False,
+                )
+            else:
+                flat = optimize_torch_lbfgs(
+                    model=model,
+                    x_init=self.init_params,
+                    dtype=dtype,
+                    history_size=history_size,
+                    max_its=self.max_its,
+                    cost_dev=cost_dev,
+                    optim_dev=optim_dev,
+                    params=params,
+                )
             result = flat.reshape(param_shape)
             
         # logger.warning(
