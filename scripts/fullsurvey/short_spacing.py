@@ -12,12 +12,15 @@ from spectral_cube import SpectralCube
 INPUT_PATHS = [
     "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits",
     "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
 ]
 SD_CUBE_PATH = "/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube.fits"
 NU_HZ = 1.42040575177e9
-TARGET_VELOCITY = 238.6 * u.km / u.s
+TARGET_VELOCITIES = [238.6, 238.6, 6.4905] * u.km / u.s
 INT_FWHM_DEG = (21 * u.arcsec).to(u.deg).value
 SD_FWHM_DEG = (16 * u.arcmin).to(u.deg).value
+SHORT_SPACING_METHOD = "legacy_fft"
+LEGACY_SD_BEAM_FWHM_DEG = 0.5
 
 
 def gaussian_transfer_function(shape, fwhm_pix):
@@ -36,6 +39,50 @@ def feather_casa_like(sd, itf, fwhm_sd_pix, fwhm_int_pix, eps=1e-12):
     taper = (b_sd**2) / (b_sd**2 + b_itf**2 + eps)
     taper[0, 0] = 1.0
     return ifft2(f_itf + taper * (f_sd - f_itf)).real
+
+
+def gauss_beam(sigma, shape, cx=0.0, cy=0.0, fwhm=False):
+    ny, nx = shape
+    x = np.arange(nx)
+    y = np.arange(ny)
+    ymap, xmap = np.meshgrid(x, y)
+
+    if (nx % 2) == 0:
+        xmap = xmap - nx / 2.0
+    else:
+        xmap = xmap - (nx - 1.0) / 2.0
+
+    if (ny % 2) == 0:
+        ymap = ymap - ny / 2.0
+    else:
+        ymap = ymap - (ny - 1.0) / 2.0
+
+    radius = np.sqrt((xmap - cx) ** 2.0 + (ymap - cy) ** 2.0)
+
+    if fwhm:
+        sigma = sigma / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+
+    return np.exp(-0.5 * radius**2.0 / sigma**2.0)
+
+
+def legacy_fft_short_spacing(sd, itf, target_header, sd_beam_fwhm_deg=LEGACY_SD_BEAM_FWHM_DEG):
+    shape = sd.shape
+    cdelt2 = abs(target_header["CDELT2"])
+
+    restored_fwhm_pix = INT_FWHM_DEG / cdelt2
+    restored_beam = gauss_beam(restored_fwhm_pix, shape, fwhm=True)
+    restored_beam /= np.sum(restored_beam)
+    _ = np.abs(fft2(restored_beam))
+
+    sd_fwhm_pix = sd_beam_fwhm_deg / cdelt2
+    beam = gauss_beam(sd_fwhm_pix, shape, fwhm=True)
+    beam /= np.sum(beam)
+    fftbeam = np.abs(fft2(beam))
+    fftpsf_inv = 1.0 - fftbeam
+
+    fftfield_low = fft2(np.nan_to_num(sd, nan=0.0))
+    fftfield_high = fft2(np.nan_to_num(itf, nan=0.0))
+    return ifft2(fftfield_low * fftbeam + fftfield_high * fftpsf_inv).real
 
 
 def k_to_jy_arcsec2(data_k, nu_hz):
@@ -85,34 +132,42 @@ def write_like(path, data, header):
 
 
 if __name__ == "__main__":
-    with fits.open(INPUT_PATHS[0]) as hdul:
-        ref_header = hdul[0].header.copy()
-        ref_shape = first_plane(hdul[0].data).shape
+    if len(INPUT_PATHS) != len(TARGET_VELOCITIES):
+        raise ValueError("INPUT_PATHS and TARGET_VELOCITIES must have the same length.")
 
     sd_cube = SpectralCube.read(SD_CUBE_PATH)
-    sd_plane = interpolate_velocity_plane(sd_cube, TARGET_VELOCITY)
     sd_header = wcs2d(fits.getheader(SD_CUBE_PATH)).to_header()
-    sd_regrid_k, _ = reproject_interp(
-        (sd_plane, sd_header),
-        wcs2d(ref_header).to_header(),
-        shape_out=ref_shape,
-    )
-    sd_regrid = k_to_jy_arcsec2(np.nan_to_num(sd_regrid_k, nan=0.0), NU_HZ)
 
-    for input_path in INPUT_PATHS:
+    for input_path, target_velocity in zip(INPUT_PATHS, TARGET_VELOCITIES):
         with fits.open(input_path) as hdul:
             target_header = hdul[0].header.copy()
             image = first_plane(hdul[0].data)
             if "LINEAR" in os.path.basename(input_path):
                 image = k_to_jy_arcsec2(image, NU_HZ)
 
-        pixel_scale_deg = abs(target_header["CDELT2"])
-        feathered = feather_casa_like(
-            sd_regrid,
-            image,
-            SD_FWHM_DEG / pixel_scale_deg,
-            INT_FWHM_DEG / pixel_scale_deg,
+        sd_plane = interpolate_velocity_plane(sd_cube, target_velocity)
+        sd_regrid_k, _ = reproject_interp(
+            (sd_plane, sd_header),
+            wcs2d(target_header).to_header(),
+            shape_out=image.shape,
         )
+        sd_regrid = k_to_jy_arcsec2(np.nan_to_num(sd_regrid_k, nan=0.0), NU_HZ)
+
+        pixel_scale_deg = abs(target_header["CDELT2"])
+        if SHORT_SPACING_METHOD == "legacy_fft":
+            feathered = legacy_fft_short_spacing(
+                sd_regrid,
+                image,
+                target_header,
+                sd_beam_fwhm_deg=LEGACY_SD_BEAM_FWHM_DEG,
+            )
+        else:
+            feathered = feather_casa_like(
+                sd_regrid,
+                image,
+                SD_FWHM_DEG / pixel_scale_deg,
+                INT_FWHM_DEG / pixel_scale_deg,
+            )
 
         output_root = os.path.splitext(input_path)[0]
         output_header = image_header(target_header)
