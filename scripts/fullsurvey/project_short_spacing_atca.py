@@ -18,6 +18,9 @@ NU_HZ = 1.42040575177e9
 OUTPUT_DIR = "/Users/antoine/Desktop/fullsurvey/inferno"
 ATCA_REGRID_FITS = os.path.join(OUTPUT_DIR, "ATCA_regrid_on_ASKAP.fits")
 ASKAP_ON_ATCA_FITS = os.path.join(OUTPUT_DIR, "ASKAP_+Parkes_on_ATCA.fits")
+VMIN = -8.0e-5
+VMAX = 1.5e-4
+PLOT_SCALE = 1.0e3
 
 
 def wcs2D(hdr):
@@ -71,6 +74,12 @@ def first_plane(data):
     return np.asarray(data[0] if data.ndim == 3 else data, dtype=float)
 
 
+def image_header(header):
+    out = wcs2D(header).to_header()
+    out["BUNIT"] = "Jy / arcsec2"
+    return out
+
+
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -104,46 +113,34 @@ if __name__ == "__main__":
         (feathered, target_hdr), w_atca.to_header(), shape_out=hi_slice_array_atca.shape
     )
 
-    fits.PrimaryHDU(data=np.asarray(I_atca, dtype=np.float32), header=target_hdr).writeto(
+    fits.PrimaryHDU(
+        data=np.asarray(I_atca, dtype=np.float32),
+        header=image_header(target_header),
+    ).writeto(
         ATCA_REGRID_FITS, overwrite=True
     )
-    fits.PrimaryHDU(data=np.asarray(ASKAP, dtype=np.float32), header=w_atca.to_header()).writeto(
+    fits.PrimaryHDU(
+        data=np.asarray(ASKAP, dtype=np.float32),
+        header=image_header(hdr_atca),
+    ).writeto(
         ASKAP_ON_ATCA_FITS, overwrite=True
     )
 
     fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=w)
-    ax.set_xlabel(r"RA (deg)", fontsize=18.0)
-    ax.set_ylabel(r"DEC (deg)", fontsize=18.0)
-    img = ax.imshow(I_atca * mask, vmin=-8.0e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
-    ax.contour(pb_mean_full, linestyles="--", levels=[0.05, 0.1], colors=["w", "w"])
-    colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
-    cbar = fig.colorbar(img, cax=colorbar_ax)
-    cbar.ax.tick_params(labelsize=14.0)
-    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.0)
-    plt.savefig(
-        "/Users/antoine/Desktop/fullsurvey/inferno/ATCA_+Parkes_inferno.png",
-        format="png",
-        bbox_inches="tight",
-        pad_inches=0.02,
-        dpi=400,
-    )
-
-    fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=w_atca)
-    ax.set_xlabel(r"RA (deg)", fontsize=18.0)
-    ax.set_ylabel(r"DEC (deg)", fontsize=18.0)
+    ax.set_xlabel(r"RA", fontsize=18.0)
+    ax.set_ylabel(r"DEC", fontsize=18.0)
     img = ax.imshow(
-        K_to_jy_arcsec2(hi_slice_array_atca, NU_HZ),
-        vmin=-8.0e-5,
-        vmax=1.5e-4,
+        K_to_jy_arcsec2(hi_slice_array_atca, NU_HZ) * PLOT_SCALE,
+        vmin=VMIN * PLOT_SCALE,
+        vmax=VMAX * PLOT_SCALE,
         origin="lower",
         cmap="inferno",
     )
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.0)
-    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.0)
+    cbar.set_label(r"$T_b\ (\mathrm{mJy}\,\mathrm{arcsec}^{-2})$", fontsize=18.0)
     plt.savefig(
         "/Users/antoine/Desktop/fullsurvey/inferno/ATCA_+Parkes_inferno_w_atca.png",
         format="png",
@@ -154,13 +151,19 @@ if __name__ == "__main__":
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=w_atca)
-    ax.set_xlabel(r"RA (deg)", fontsize=18.0)
-    ax.set_ylabel(r"DEC (deg)", fontsize=18.0)
-    img = ax.imshow(ASKAP, vmin=-8.0e-5, vmax=1.5e-4, origin="lower", cmap="inferno")
+    ax.set_xlabel(r"RA", fontsize=18.0)
+    ax.set_ylabel(r"DEC", fontsize=18.0)
+    img = ax.imshow(
+        ASKAP * PLOT_SCALE,
+        vmin=VMIN * PLOT_SCALE,
+        vmax=VMAX * PLOT_SCALE,
+        origin="lower",
+        cmap="inferno",
+    )
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.0)
-    cbar.set_label(r"$T_b$ (Jy/arcsec^2)", fontsize=18.0)
+    cbar.set_label(r"$T_b\ (\mathrm{mJy}\,\mathrm{arcsec}^{-2})$", fontsize=18.0)
     plt.savefig(
         "/Users/antoine/Desktop/fullsurvey/inferno/ASKAP_+Parkes_inferno_w_atca.png",
         format="png",

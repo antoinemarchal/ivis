@@ -76,8 +76,8 @@ def color_limits_for_path(path):
 def plot_image(data, header, pb, output_path, vmin, vmax):
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=wcs2d(header))
-    ax.set_xlabel(r"RA (deg)", fontsize=18.0)
-    ax.set_ylabel(r"DEC (deg)", fontsize=18.0)
+    ax.set_xlabel(r"RA", fontsize=18.0)
+    ax.set_ylabel(r"DEC", fontsize=18.0)
     img = ax.imshow(data * PLOT_SCALE, vmin=vmin * PLOT_SCALE, vmax=vmax * PLOT_SCALE, origin="lower", cmap=CMAP)
     ax.contour(pb, linestyles="--", levels=[0.05, 0.1], colors=["w", "w"])
     x0, y0, width, height = centered_subimage_bounds(data.shape, SUBIMAGE_FRACTION)
