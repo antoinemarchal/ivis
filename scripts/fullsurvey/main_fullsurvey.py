@@ -104,8 +104,8 @@ if __name__ == '__main__':
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
         # chan_sel=slice(810,811),
-        chan_sel=slice(1488, 1508), # 765, 795
-        # chan_sel=slice(1270,1271),
+        # chan_sel=slice(1488, 1490), # 765, 795
+        chan_sel=slice(1270,1271),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     lambda_r = 1
     cost_device = 0        # 0 for GPU, "cpu" for CPU
     optim_device = 0        # 0 for GPU, "cpu" for CPU
-    positivity = False #ATTENTION
+    positivity = True #ATTENTION
     init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) #+ 1.e-6 #not be exactly at bound
 
     # -------------------
@@ -162,13 +162,13 @@ if __name__ == '__main__':
         #In Cube
         cube[i] = result
 
-    v0 = float(I.velocity[0])
-    dv = np.diff(I.velocity)[0]
-    hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
+    # v0 = float(I.velocity[0])
+    # dv = np.diff(I.velocity)[0]
+    # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
     
     #Write output array on disk
-    # fits.writeto(pathout + "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
-    fits.writeto(pathout + "output_chan_1488_20_2blocks_7arcsec_lambda_r_1_positivity_false_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
+    fits.writeto(pathout + "output_chan_1270_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
+    # fits.writeto(pathout + "output_chan_1488_2_2blocks_7arcsec_lambda_r_1_positivity_true_iter_100_Nw_7.fits", cube, hdr3, overwrite=True)
         
     # #PLOT RESULT
     # pathout="./"
