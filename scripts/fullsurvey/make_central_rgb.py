@@ -1,25 +1,31 @@
 import os
+import re
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import colors
 from astropy.io import fits
 from astropy.wcs import WCS
 
 
-OUTPUT_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAP/central_rgb_exports"
 PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
 INPUT_CUBE_PATH = (
     "/Users/antoine/Desktop/IVIS_paper/ASKAP/"
-    "output_chan_1267_6_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing_cube.fits"
+    "output_chan_1267_6_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing_cube.fits" #792
 )
-OUTPUT_DIRECT_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_direct.png"
-OUTPUT_SMOOTHED_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_smoothed.png"
-OUTPUT_COMPARISON_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_comparison.png"
-GAMMA = 0.5
-LOW_PERCENTILE = 5.0
-HIGH_PERCENTILE = 99.7
-SATURATION_BOOST = 1.55
-CONTRAST_BOOST = 1.35
+input_cube_name = os.path.basename(INPUT_CUBE_PATH)
+channel_match = re.search(r"chan_(\d+)", input_cube_name)
+channel_suffix = channel_match.group(1) if channel_match else "unknown"
+OUTPUT_DIR = f"/Users/antoine/Desktop/IVIS_paper/ASKAP/central_rgb_exports_{channel_suffix}"
+OUTPUT_SUFFIX = f"_{channel_suffix}"
+OUTPUT_DIRECT_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_direct{OUTPUT_SUFFIX}.png"
+OUTPUT_SMOOTHED_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_smoothed{OUTPUT_SUFFIX}.png"
+OUTPUT_COMPARISON_PNG_PATH = f"{OUTPUT_DIR}/central_rgb_comparison{OUTPUT_SUFFIX}.png"
+GAMMA = 0.5  # previous: 0.8
+LOW_PERCENTILE = 5.0  # previous: 14.0
+HIGH_PERCENTILE = 99.7  # previous: 99.85
+SATURATION_BOOST = 1.55  # previous: 1.3
+CONTRAST_BOOST = 1.35  # previous: 0.84
 
 
 def normalize(img, vmin, vmax, gamma):
@@ -53,20 +59,27 @@ def rgb_legend_image(height=300, width=24):
     return legend
 
 
-def draw_rgb_legend(fig, labels):
+def draw_rgb_legend(fig):
     cax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
-    cax.imshow(rgb_legend_image(), origin="lower", aspect="auto")
-    cax.set_xticks([])
-    cax.set_yticks([0, 150, 299])
-    cax.set_yticklabels([labels["B"], labels["G"], labels["R"]], fontsize=14.0)
-    cax.yaxis.tick_right()
-    cax.set_ylabel(r"$v_{\mathrm{LSR}}\ (\mathrm{km}\,\mathrm{s}^{-1})$", fontsize=18.0, rotation=270, labelpad=22)
-    cax.yaxis.set_label_position("right")
+    cax.set_facecolor("white")
+    mappable = plt.cm.ScalarMappable(
+        norm=colors.Normalize(vmin=0.0, vmax=1.0),
+        cmap=colors.ListedColormap(["white", "white"]),
+    )
+    cbar = fig.colorbar(mappable, cax=cax)
+    cbar.set_ticks([0.0, 0.5, 1.0])
+    cbar.ax.tick_params(labelsize=14.0, colors="white", length=3)
+    cbar.set_label(
+        r"$T_b\ (\mathrm{mJy}\,\mathrm{arcsec}^{-2})$",
+        fontsize=18.0,
+        color="white",
+    )
+    cbar.outline.set_edgecolor("white")
     for spine in cax.spines.values():
-        spine.set_visible(True)
+        spine.set_color("white")
 
 
-def save_rgb_figure(path, rgb, wcs_2d, labels, pb):
+def save_rgb_figure(path, rgb, wcs_2d, pb):
     fig = plt.figure(figsize=(10, 10), facecolor="white")
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=wcs_2d)
     ax.set_facecolor("white")
@@ -74,12 +87,12 @@ def save_rgb_figure(path, rgb, wcs_2d, labels, pb):
     ax.contour(pb, linestyles="--", levels=[0.05, 0.1], colors=["w", "w"])
     ax.set_xlabel("RA", fontsize=18.0)
     ax.set_ylabel("DEC", fontsize=18.0)
-    draw_rgb_legend(fig, labels)
-    fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.02)
+    draw_rgb_legend(fig)
+    fig.savefig(path, dpi=400, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
 
-def save_comparison_figure(path, rgb_direct, rgb_smoothed, wcs_2d, labels_left, labels_right, pb):
+def save_comparison_figure(path, rgb_direct, rgb_smoothed, wcs_2d, pb):
     fig = plt.figure(figsize=(22, 10), facecolor="white")
     axes = [
         fig.add_axes([0.05, 0.1, 0.33, 0.8], projection=wcs_2d),
@@ -95,17 +108,24 @@ def save_comparison_figure(path, rgb_direct, rgb_smoothed, wcs_2d, labels_left, 
         fig.add_axes([0.40, 0.11, 0.02, 0.78]),
         fig.add_axes([0.89, 0.11, 0.02, 0.78]),
     ]
-    for cax, labels in zip(legend_axes, [labels_left, labels_right]):
-        cax.imshow(rgb_legend_image(), origin="lower", aspect="auto")
-        cax.set_xticks([])
-        cax.set_yticks([0, 150, 299])
-        cax.set_yticklabels([labels["B"], labels["G"], labels["R"]], fontsize=14.0)
-        cax.yaxis.tick_right()
-        cax.set_ylabel(r"$v_{\mathrm{LSR}}\ (\mathrm{km}\,\mathrm{s}^{-1})$", fontsize=18.0, rotation=270, labelpad=22)
-        cax.yaxis.set_label_position("right")
+    for cax in legend_axes:
+        cax.set_facecolor("white")
+        mappable = plt.cm.ScalarMappable(
+            norm=colors.Normalize(vmin=0.0, vmax=1.0),
+            cmap=colors.ListedColormap(["white", "white"]),
+        )
+        cbar = fig.colorbar(mappable, cax=cax)
+        cbar.set_ticks([0.0, 0.5, 1.0])
+        cbar.ax.tick_params(labelsize=14.0, colors="white", length=3)
+        cbar.set_label(
+            r"$T_b\ (\mathrm{mJy}\,\mathrm{arcsec}^{-2})$",
+            fontsize=18.0,
+            color="white",
+        )
+        cbar.outline.set_edgecolor("white")
         for spine in cax.spines.values():
-            spine.set_visible(True)
-    fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.02)
+            spine.set_color("white")
+    fig.savefig(path, dpi=400, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
 
@@ -118,6 +138,39 @@ def robust_limits(images, low_percentile, high_percentile):
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
         raise ValueError("Invalid display limits derived from the selected channels.")
     return float(vmin), float(vmax)
+
+
+def read_cube_metadata(path):
+    with fits.open(path, memmap=True) as hdul:
+        data = hdul[0].data
+        header = hdul[0].header.copy()
+        shape = data.shape
+    return header, shape
+
+
+def load_cube_channels(path, channel_indices):
+    unique_indices = sorted(set(channel_indices))
+    planes = {}
+    with fits.open(path, memmap=True) as hdul:
+        data = hdul[0].data
+        for idx in unique_indices:
+            planes[idx] = np.asarray(data[idx], dtype=float)
+    return planes
+
+
+def make_rgb_image(red, green, blue):
+    vmin, vmax = robust_limits([blue, green, red], LOW_PERCENTILE, HIGH_PERCENTILE)
+    rgb = finalize_rgb(
+        np.stack(
+            [
+                normalize(red, vmin, vmax, GAMMA),
+                normalize(green, vmin, vmax, GAMMA),
+                normalize(blue, vmin, vmax, GAMMA),
+            ],
+            axis=-1,
+        )
+    )
+    return rgb, vmin, vmax
 
 
 def make_rgb_labels(values=None, unit="", channels=None):
@@ -137,17 +190,15 @@ def make_rgb_labels(values=None, unit="", channels=None):
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    with fits.open(INPUT_CUBE_PATH) as hdul:
-        cube = np.asarray(hdul[0].data, dtype=float)
-        header = hdul[0].header.copy()
+    header, cube_shape = read_cube_metadata(INPUT_CUBE_PATH)
     with fits.open(PB_PATH) as hdul:
         pb = np.asarray(hdul[0].data, dtype=float)
     pb /= np.nanmax(pb)
 
-    if cube.ndim != 3:
-        raise ValueError(f"Expected a 3D cube, got shape {cube.shape}.")
+    if len(cube_shape) != 3:
+        raise ValueError(f"Expected a 3D cube, got shape {cube_shape}.")
 
-    nchan = cube.shape[0]
+    nchan = cube_shape[0]
     if nchan < 4:
         raise ValueError("Need at least 4 channels to build the smoothed RGB image.")
 
@@ -156,56 +207,31 @@ if __name__ == "__main__":
         raise ValueError("Central channel does not have both adjacent channels available.")
 
     i = max(0, min((nchan - 4) // 2, nchan - 4))
+    channels_to_load = [center - 1, center, center + 1, i, i + 1, i + 2, i + 3]
+    planes = load_cube_channels(INPUT_CUBE_PATH, channels_to_load)
 
-    blue_direct = cube[center - 1]
-    green_direct = cube[center]
-    red_direct = cube[center + 1]
-    vmin_direct, vmax_direct = robust_limits(
-        [blue_direct, green_direct, red_direct], LOW_PERCENTILE, HIGH_PERCENTILE
-    )
-    rgb_direct = finalize_rgb(
-        np.stack(
-            [
-                normalize(red_direct, vmin_direct, vmax_direct, GAMMA),
-                normalize(green_direct, vmin_direct, vmax_direct, GAMMA),
-                normalize(blue_direct, vmin_direct, vmax_direct, GAMMA),
-            ],
-            axis=-1,
-        )
-    )
+    blue_direct = planes[center - 1]
+    green_direct = planes[center]
+    red_direct = planes[center + 1]
+    rgb_direct, vmin_direct, vmax_direct = make_rgb_image(red_direct, green_direct, blue_direct)
 
-    blue = 0.5 * (cube[i] + cube[i + 1])
-    green = 0.5 * (cube[i + 1] + cube[i + 2])
-    red = 0.5 * (cube[i + 2] + cube[i + 3])
-    vmin_smoothed, vmax_smoothed = robust_limits(
-        [blue, green, red], LOW_PERCENTILE, HIGH_PERCENTILE
-    )
-
-    rgb_smoothed = finalize_rgb(
-        np.stack(
-            [
-                normalize(red, vmin_smoothed, vmax_smoothed, GAMMA),
-                normalize(green, vmin_smoothed, vmax_smoothed, GAMMA),
-                normalize(blue, vmin_smoothed, vmax_smoothed, GAMMA),
-            ],
-            axis=-1,
-        )
-    )
+    blue = 0.5 * (planes[i] + planes[i + 1])
+    green = 0.5 * (planes[i + 1] + planes[i + 2])
+    red = 0.5 * (planes[i + 2] + planes[i + 3])
+    rgb_smoothed, vmin_smoothed, vmax_smoothed = make_rgb_image(red, green, blue)
 
     wcs_2d = WCS(header).celestial
     spectral_values = spectral_values_from_header(header, nchan)
     if spectral_values is None:
         direct_labels = make_rgb_labels(channels=(center - 1, center, center + 1))
         smoothed_labels = make_rgb_labels(channels=(f"{i}-{i+1}", f"{i+1}-{i+2}", f"{i+2}-{i+3}"))
-        save_rgb_figure(OUTPUT_DIRECT_PNG_PATH, rgb_direct, wcs_2d, direct_labels, pb)
-        save_rgb_figure(OUTPUT_SMOOTHED_PNG_PATH, rgb_smoothed, wcs_2d, smoothed_labels, pb)
+        save_rgb_figure(OUTPUT_DIRECT_PNG_PATH, rgb_direct, wcs_2d, pb)
+        save_rgb_figure(OUTPUT_SMOOTHED_PNG_PATH, rgb_smoothed, wcs_2d, pb)
         save_comparison_figure(
             OUTPUT_COMPARISON_PNG_PATH,
             rgb_direct,
             rgb_smoothed,
             wcs_2d,
-            direct_labels,
-            smoothed_labels,
             pb,
         )
         print(f"Using direct channels: B={center-1}, G={center}, R={center+1}")
@@ -225,15 +251,13 @@ if __name__ == "__main__":
             values=(blue_val, green_val, red_val),
             unit=unit,
         )
-        save_rgb_figure(OUTPUT_DIRECT_PNG_PATH, rgb_direct, wcs_2d, direct_labels, pb)
-        save_rgb_figure(OUTPUT_SMOOTHED_PNG_PATH, rgb_smoothed, wcs_2d, smoothed_labels, pb)
+        save_rgb_figure(OUTPUT_DIRECT_PNG_PATH, rgb_direct, wcs_2d, pb)
+        save_rgb_figure(OUTPUT_SMOOTHED_PNG_PATH, rgb_smoothed, wcs_2d, pb)
         save_comparison_figure(
             OUTPUT_COMPARISON_PNG_PATH,
             rgb_direct,
             rgb_smoothed,
             wcs_2d,
-            direct_labels,
-            smoothed_labels,
             pb,
         )
         print(

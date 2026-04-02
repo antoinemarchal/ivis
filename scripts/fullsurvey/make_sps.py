@@ -22,6 +22,7 @@ LOW_VEL_JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_1270_vel_6.4905_2bl
 OUTPUT_PATH = os.path.join(ASKAP_DIR, "SPS_ASKAP.png")
 OUTPUT_PATH_LINEAR = os.path.join(ASKAP_DIR, "SPS_ASKAP_linear.png")
 OUTPUT_PATH_LOW_VEL = os.path.join(ASKAP_DIR, "SPS_ASKAP_low_vel.png")
+PRODUCTS_DIR = os.path.join(ASKAP_DIR, "products")
 
 NU_HZ = 1.42040575177e9
 LAMBDA_M = 0.211
@@ -83,7 +84,40 @@ def D_to_k(D):
     return D / (LAMBDA_M * ARCMIN_PER_RAD)
 
 
+def save_products(path, **arrays):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    np.savez(path, **arrays)
+
+
+def plot_sps(output_path, series, ylim):
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    for item in series:
+        ax.plot(
+            item["ks"],
+            item["sps"],
+            color=item["color"],
+            linestyle=item["linestyle"],
+            linewidth=item.get("linewidth"),
+            marker=item.get("marker"),
+            markersize=item.get("markersize"),
+            label=item["label"],
+        )
+    ax.set_xlabel(r"$k$ (arcmin$^{-1}$)", fontsize=16)
+    ax.set_ylabel(r"$P(k)$ [(Jy arcsec$^{-2}$)$^2$]", fontsize=16)
+    ax.set_ylim(ylim)
+    secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
+    secax.set_xlabel(r"$D$ (m)", fontsize=16)
+    ax.legend()
+    plt.savefig(output_path, format="png", bbox_inches="tight", pad_inches=0.02)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
+    os.makedirs(PRODUCTS_DIR, exist_ok=True)
+
     joint, header = load_image(JOINT_PATH)
     joint_ss, _ = load_image(JOINT_SS_PATH)
     joint_sd, _ = load_image(JOINT_SD_PATH)
@@ -118,49 +152,132 @@ if __name__ == "__main__":
     ks_low_vel_joint_ss, sps1d_low_vel_joint_ss = compute_sps(low_vel_joint_ss, pb_eff, header)
     low_vel_sd_mask = k_to_D(ks_low_vel_sd) <= SD_MAX_D_M
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.plot(ks_sd[sd_mask], sps1d_sd[sd_mask], color="green", linestyle="-", linewidth=2, label="SD regrid")
-    ax.plot(ks_joint, sps1d_joint, marker=".", markersize=8.0, color="black", linestyle="None", label="Joint deconvolution")
-    ax.plot(ks_joint_ss, sps1d_joint_ss, marker=".", markersize=8.0, color="red", linestyle="None", label="Joint + short spacing")
-    ax.set_xlabel(r"$k$ (arcmin$^{-1}$)", fontsize=16)
-    ax.set_ylabel(r"$P(k)$ [(Jy arcsec$^{-2}$)$^2$]", fontsize=16)
-    # ax.set_xlim([1.0e-3, 1.0e1])
-    ax.set_ylim([1.0e-14, 1.0e-2])
-    secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
-    secax.set_xlabel(r"$D$ (m)", fontsize=16)
-    ax.legend()
-    plt.savefig(OUTPUT_PATH, format="png", bbox_inches="tight", pad_inches=0.02)
+    save_products(
+        os.path.join(PRODUCTS_DIR, "sps_askap_joint.npz"),
+        ks_sd=ks_sd,
+        sps1d_sd=sps1d_sd,
+        sd_mask=sd_mask,
+        ks_joint=ks_joint,
+        sps1d_joint=sps1d_joint,
+        ks_joint_ss=ks_joint_ss,
+        sps1d_joint_ss=sps1d_joint_ss,
+    )
+    save_products(
+        os.path.join(PRODUCTS_DIR, "sps_askap_linear.npz"),
+        ks_sd=ks_sd,
+        sps1d_sd=sps1d_sd,
+        sd_mask=sd_mask,
+        ks_linear=ks_linear,
+        sps1d_linear=sps1d_linear,
+        ks_linear_ss=ks_linear_ss,
+        sps1d_linear_ss=sps1d_linear_ss,
+    )
+    save_products(
+        os.path.join(PRODUCTS_DIR, "sps_askap_low_vel.npz"),
+        ks_low_vel_sd=ks_low_vel_sd,
+        sps1d_low_vel_sd=sps1d_low_vel_sd,
+        low_vel_sd_mask=low_vel_sd_mask,
+        ks_low_vel_joint=ks_low_vel_joint,
+        sps1d_low_vel_joint=sps1d_low_vel_joint,
+        ks_low_vel_joint_ss=ks_low_vel_joint_ss,
+        sps1d_low_vel_joint_ss=sps1d_low_vel_joint_ss,
+    )
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.plot(ks_sd[sd_mask], sps1d_sd[sd_mask], color="green", linestyle="-", linewidth=2, label="SD regrid")
-    ax.plot(ks_linear, sps1d_linear, marker=".", markersize=8.0, color="k", linestyle="None", label="Linear mosaicking")
-    ax.plot(ks_linear_ss, sps1d_linear_ss, marker=".", markersize=8.0, color="r", linestyle="None", label="Linear + short spacing")
-    ax.set_xlabel(r"$k$ (arcmin$^{-1}$)", fontsize=16)
-    ax.set_ylabel(r"$P(k)$ [(Jy arcsec$^{-2}$)$^2$]", fontsize=16)
-    # ax.set_xlim([1.0e-3, 1.0e1])
-    ax.set_ylim([1.0e-14, 1.0e-2])
-    secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
-    secax.set_xlabel(r"$D$ (m)", fontsize=16)
-    ax.legend()
-    plt.savefig(OUTPUT_PATH_LINEAR, format="png", bbox_inches="tight", pad_inches=0.02)
+    plot_sps(
+        OUTPUT_PATH,
+        [
+            {
+                "ks": ks_sd[sd_mask],
+                "sps": sps1d_sd[sd_mask],
+                "color": "green",
+                "linestyle": "-",
+                "linewidth": 2,
+                "label": "SD regrid",
+            },
+            {
+                "ks": ks_joint,
+                "sps": sps1d_joint,
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Joint deconvolution",
+            },
+            {
+                "ks": ks_joint_ss,
+                "sps": sps1d_joint_ss,
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Joint + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.plot(ks_low_vel_sd[low_vel_sd_mask], sps1d_low_vel_sd[low_vel_sd_mask], color="green", linestyle="-", linewidth=2, label="SD regrid")
-    ax.plot(ks_low_vel_joint, sps1d_low_vel_joint, marker=".", markersize=8.0, color="black", linestyle="None", label="Joint deconvolution")
-    ax.plot(ks_low_vel_joint_ss, sps1d_low_vel_joint_ss, marker=".", markersize=8.0, color="red", linestyle="None", label="Joint + short spacing")
-    ax.set_xlabel(r"$k$ (arcmin$^{-1}$)", fontsize=16)
-    ax.set_ylabel(r"$P(k)$ [(Jy arcsec$^{-2}$)$^2$]", fontsize=16)
-    ax.set_ylim([1.0e-14, 1.0e-2])
-    secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
-    secax.set_xlabel(r"$D$ (m)", fontsize=16)
-    ax.legend()
-    plt.savefig(OUTPUT_PATH_LOW_VEL, format="png", bbox_inches="tight", pad_inches=0.02)
+    plot_sps(
+        OUTPUT_PATH_LINEAR,
+        [
+            {
+                "ks": ks_sd[sd_mask],
+                "sps": sps1d_sd[sd_mask],
+                "color": "green",
+                "linestyle": "-",
+                "linewidth": 2,
+                "label": "SD regrid",
+            },
+            {
+                "ks": ks_linear,
+                "sps": sps1d_linear,
+                "color": "k",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Linear mosaicking",
+            },
+            {
+                "ks": ks_linear_ss,
+                "sps": sps1d_linear_ss,
+                "color": "r",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Linear + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_LOW_VEL,
+        [
+            {
+                "ks": ks_low_vel_sd[low_vel_sd_mask],
+                "sps": sps1d_low_vel_sd[low_vel_sd_mask],
+                "color": "green",
+                "linestyle": "-",
+                "linewidth": 2,
+                "label": "SD regrid",
+            },
+            {
+                "ks": ks_low_vel_joint,
+                "sps": sps1d_low_vel_joint,
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Joint deconvolution",
+            },
+            {
+                "ks": ks_low_vel_joint_ss,
+                "sps": sps1d_low_vel_joint_ss,
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "Joint + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
