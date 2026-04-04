@@ -1,11 +1,13 @@
 import ivis
+import importlib
 import numpy as np
+import sys
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from radio_beam import Beam
+import types
 
 from ivis.imager import Imager3D
-from ivis.models import Classic3D
 from ivis.types import VisIData
 
 
@@ -24,9 +26,28 @@ def _identity_grid(height, width):
     return np.stack([xx, yy], axis=-1)[None, ...]
 
 
-def test_get_started_forward_model_smoke():
+def _install_fake_pytorch_finufft(monkeypatch):
+    def finufft_type2(points, c, isign=1, modeord=0):
+        return c.new_zeros(points.shape[1], dtype=c.dtype)
+
+    def finufft_type1(points, y, out_shape, isign=-1, modeord=0):
+        return y.new_zeros(out_shape, dtype=y.dtype)
+
+    fake_module = types.SimpleNamespace(
+        functional=types.SimpleNamespace(
+            finufft_type1=finufft_type1,
+            finufft_type2=finufft_type2,
+        )
+    )
+    monkeypatch.setitem(sys.modules, "pytorch_finufft", fake_module)
+
+
+def test_get_started_forward_model_smoke(monkeypatch):
     height = width = 8
     nvis = 4
+
+    _install_fake_pytorch_finufft(monkeypatch)
+    Classic3D = importlib.import_module("ivis.models").Classic3D
 
     vis_data = VisIData(
         frequency=np.array([1.4e9]),
