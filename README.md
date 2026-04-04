@@ -9,6 +9,8 @@
 
 [![Documentation Status](https://readthedocs.org/projects/ivis-dev/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
 [![Tests](https://github.com/antoinemarchal/ivis/actions/workflows/tests.yml/badge.svg)](https://github.com/antoinemarchal/ivis/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/python-3.10-blue.svg)
+![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)
 
 **IViS** is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
 
