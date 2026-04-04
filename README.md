@@ -8,6 +8,7 @@
 </pre>
 
 [![Documentation Status](https://readthedocs.org/projects/ivis-dev/badge/?version=latest)](https://ivis-dev.readthedocs.io/en/latest/)
+[![Tests](https://github.com/antoinemarchal/ivis/actions/workflows/tests.yml/badge.svg)](https://github.com/antoinemarchal/ivis/actions/workflows/tests.yml)
 
 **IViS** is a fast, GPU-accelerated non-linear deconvolution tool for radio interferometry, scalable to large mosaics and hyperspectral cubes.
 
@@ -49,4 +50,3 @@ export PATH="$HOME/.cargo/bin:$PATH"  # if needed
 # Install IViS and dependencies using uv
 uv pip install "ivis[gpu] @ git+https://github.com/antoinemarchal/ivis.git"
 ```
-
