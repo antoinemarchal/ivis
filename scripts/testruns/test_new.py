@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 
 from ivis.io import DataProcessor
 from ivis.readers import CasacoreReader
-from ivis.models import ClassicIViS3D
+from ivis.models import Classic3D
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.logger import logger
@@ -24,12 +24,12 @@ plt.ion()
 # -------------------
 # Paths and WCS
 # -------------------
-path_ms = "../docs/tutorials/data_tutorials/ivis_data/msl_mw/"
-path_beams = "../docs/tutorials/data_tutorials/ivis_data/BEAMS/"
+path_ms = "../../docs/tutorials/data_tutorials/ivis_data/msl_mw"#msdir2/"#
+path_beams = "../../docs/tutorials/data_tutorials/ivis_data/BEAMS/"
 path_sd = None
-pathout = "../docs/tutorials/data_tutorials/ivis_data/"
+pathout = "../../docs/tutorials/data_tutorials/ivis_data/"
 
-filename = "../docs/tutorials/data_tutorials/ivis_data/MW-C10_mom0th_NHI.fits"
+filename = "../../docs/tutorials/data_tutorials/ivis_data/MW-C10_mom0th_NHI.fits"
 target_header = fits.open(filename)[0].header
 shape = (target_header["NAXIS2"], target_header["NAXIS1"])
 
@@ -106,7 +106,7 @@ image_processor = Imager3D(
 # -------------------
 # Choose model
 # -------------------
-model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+model = Classic3D(lambda_r=lambda_r)
 
 # -------------------
 # Run optimization
