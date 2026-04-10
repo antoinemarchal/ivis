@@ -13,7 +13,7 @@ import time
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.models import ClassicIViS3D
+from ivis.models import ClassicIViS3D, Classic3D
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.readers import CasacoreReader
@@ -103,9 +103,7 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
-        # chan_sel=slice(810,811),
-        # chan_sel=slice(1488, 1490), # 765, 795
-        chan_sel=slice(1270,1271),
+        chan_sel=slice(792,798),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
@@ -127,7 +125,8 @@ if __name__ == '__main__':
     # -------------------
     # Choose model
     # -------------------
-    model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+    # model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+    model = Classic3D(lambda_r=lambda_r)
 
     nchan = len(I.velocity)
     cube = np.zeros((nchan,shape[0],shape[1]))
@@ -162,13 +161,13 @@ if __name__ == '__main__':
         #In Cube
         cube[i] = result
 
-    # v0 = float(I.velocity[0])
-    # dv = np.diff(I.velocity)[0]
-    # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
+    v0 = float(I.velocity[0])
+    dv = np.diff(I.velocity)[0]
+    hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
     
     #Write output array on disk
-    fits.writeto(pathout + "output_chan_1270_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", result, target_header, overwrite=True)
-    # fits.writeto(pathout + "output_chan_1488_2_2blocks_7arcsec_lambda_r_1_positivity_true_iter_100_Nw_7.fits", cube, hdr3, overwrite=True)
+    # fits.writeto(pathout + "output_chan_1270_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_NEW.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_chan_792_6_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
         
     # #PLOT RESULT
     # pathout="./"
