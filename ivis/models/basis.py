@@ -361,6 +361,28 @@ class BasisSpectralModel(BaseModel):
         blocks = self._prepare_channel_beam_blocks(vis_data=vis_data, device=dev)
 
         if self.assume_channel_invariant_operator:
+            need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
+            channel_cache = []
+            for c in range(nchan):
+                weights = basis[:, c]
+                need_x2d = (lambda_pos > 0.0) or need_sd_fft
+                x2d = torch.sum(x * weights[:, None, None], dim=0) if need_x2d else None
+                xfft2 = tfft2(x2d * tapper_t) if need_sd_fft else None
+                channel_cache.append((weights, x2d, xfft2))
+
+                if lambda_pos > 0.0:
+                    loss = loss + lambda_pos * torch.sum(torch.clamp(-x2d, min=0.0) ** 2)
+
+                if need_sd_fft:
+                    fftsd_c = fftsd if fftsd.ndim == 2 else fftsd[c]
+                    fftsd_t = torch.from_numpy(fftsd_c).to(dev)
+                    model_sd = (cell_size**2) * xfft2 * fftbeam_t
+                    Lsd = 0.5 * (
+                        torch.nansum((model_sd.real - fftsd_t.real) ** 2)
+                        + torch.nansum((model_sd.imag - fftsd_t.imag) ** 2)
+                    ) * lambda_sd
+                    loss = loss + Lsd
+
             for b in range(nbeam):
                 hk_stack = self._build_invariant_beam_cache(
                     x=x,
@@ -375,19 +397,7 @@ class BasisSpectralModel(BaseModel):
                     block = blocks[c][b]
                     if block is None:
                         continue
-                    weights = basis[:, c]
-                    need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
-                    need_x2d = (lambda_pos > 0.0) or need_sd_fft
-                    x2d = torch.sum(x * weights[:, None, None], dim=0) if need_x2d else None
-
-                    if lambda_pos > 0.0:
-                        loss = loss + lambda_pos * torch.sum(torch.clamp(-x2d, min=0.0) ** 2)
-
-                    if need_sd_fft:
-                        xfft2 = tfft2(x2d * tapper_t)
-                    else:
-                        xfft2 = None
-
+                    weights, _, _ = channel_cache[c]
                     model_vis = torch.einsum(
                         "k,kn->n",
                         weights.to(hk_stack.dtype),
@@ -407,17 +417,6 @@ class BasisSpectralModel(BaseModel):
 
                     if verbose:
                         print_gpu_memory(device)
-
-                    if lambda_sd > 0.0 and fftsd is not None:
-                        fftsd_c = fftsd if fftsd.ndim == 2 else fftsd[c]
-                        fftsd_t = torch.from_numpy(fftsd_c).to(dev)
-
-                        model_sd = (cell_size**2) * xfft2 * fftbeam_t
-                        Lsd = 0.5 * (
-                            torch.nansum((model_sd.real - fftsd_t.real) ** 2)
-                            + torch.nansum((model_sd.imag - fftsd_t.imag) ** 2)
-                        ) * lambda_sd
-                        loss = loss + Lsd
                 del hk_stack
         else:
             for c in range(nchan):
