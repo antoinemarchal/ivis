@@ -11,9 +11,10 @@ from ivis.models.operators import forward_beam, resolve_pb_grid_lists
 from ivis.models.utils.gpu import print_gpu_memory
 
 
-class BasisSpectralModel(BaseModel):
+# LRSB: Low-Rank Spectral Basis
+class LRSB(BaseModel):
     """
-    Generic spectral basis model driven by a user-supplied basis matrix.
+    Low-rank spectral basis model driven by a user-supplied basis matrix.
 
     The basis must have shape (nbasis, nchan).
     """
@@ -21,7 +22,6 @@ class BasisSpectralModel(BaseModel):
     def __init__(
         self,
         basis,
-        k=None,
         lambda_r=1.0,
         lambda_pos=0.0,
         conj_data=True,
@@ -32,22 +32,12 @@ class BasisSpectralModel(BaseModel):
         if basis_arr.ndim != 2:
             raise ValueError("basis must have shape (nbasis, nchan).")
 
-        max_k, _ = basis_arr.shape
-        if k is None:
-            k = max_k
-        k = int(k)
-        if k <= 0:
-            raise ValueError("k must be a positive integer.")
-        if k > max_k:
-            raise ValueError(f"k={k} exceeds available basis atoms ({max_k}).")
-
-        self.k = k
         self.lambda_r = float(lambda_r)
         self.lambda_pos = float(lambda_pos)
         self.conj_data = conj_data
         self.assume_channel_invariant_operator = bool(assume_channel_invariant_operator)
         self.reference_channel = int(reference_channel)
-        self._basis_np = basis_arr[:k].astype(np.float32, copy=False)
+        self._basis_np = basis_arr.astype(np.float32, copy=False)
         self._basis_cache = {}
 
     @property
