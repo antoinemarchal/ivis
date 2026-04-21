@@ -470,3 +470,200 @@ class LRSB(BaseModel):
 
         loss.backward()
         return loss
+
+
+class LRSBMemory(LRSB):
+    """
+    Memory-streaming LRSB variant.
+
+    LRSB stores a smaller coefficient cube than Classic3D, but its objective
+    still accumulates one large autograd graph by default. This variant
+    backpropagates independent loss blocks as soon as they are computed.
+    """
+
+    def _backward_loss(self, loss, loss_value):
+        loss.backward()
+        return loss_value + loss.detach()
+
+    def _channel_image(self, x, weights):
+        return torch.sum(x * weights[:, None, None], dim=0)
+
+    def objective(
+        self,
+        x,
+        vis_data,
+        device,
+        primary_beam_list=None,
+        primary_beam=None,
+        pb_list=None,
+        grid_list=None,
+        pb=None,
+        grid_array=None,
+        cell_size=None,
+        fftsd=None,
+        fftbeam=None,
+        tapper=None,
+        lambda_sd=0.0,
+        lambda_pos=None,
+        fftkernel=None,
+        beam_workers=4,
+        verbose=False,
+        **_,
+    ):
+        dev = torch.device(device)
+        if x.ndim != 3:
+            raise ValueError(f"x must have shape (nbasis, H, W), got {tuple(x.shape)}")
+        if x.shape[0] != self.nbasis:
+            raise ValueError(f"Expected x.shape[0] == nbasis={self.nbasis}, got {x.shape[0]}")
+
+        x.requires_grad_(True)
+        if x.is_leaf and x.grad is not None:
+            x.grad.zero_()
+
+        dtype = x.dtype
+        primary_beam_list, grid_list = resolve_pb_grid_lists(
+            vis_data,
+            pb_list=primary_beam_list if primary_beam_list is not None else pb_list,
+            grid_list=grid_list,
+            pb=primary_beam if primary_beam is not None else pb,
+            grid_array=grid_array,
+        )
+
+        nchan = vis_data.frequency.shape[0]
+        nbeam = vis_data.uu.shape[0]
+        if nchan != self.nchan:
+            raise ValueError(f"Expected nchan={self.nchan} from basis, got {nchan}.")
+
+        loss_value = torch.zeros((), device=dev, dtype=dtype)
+        lambda_pos = self.lambda_pos if lambda_pos is None else float(lambda_pos)
+        tapper_t = torch.from_numpy(tapper).to(dev, dtype=dtype) if tapper is not None else None
+        fftbeam_t = torch.from_numpy(fftbeam).to(dev) if fftbeam is not None else None
+        fftkernel_t = torch.from_numpy(fftkernel).to(dev) if fftkernel is not None else None
+        basis = self._get_basis(device=dev, dtype=dtype)
+        blocks = self._prepare_channel_beam_blocks(vis_data=vis_data, device=dev)
+        need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
+
+        for c in range(nchan):
+            weights = basis[:, c]
+
+            if lambda_pos > 0.0:
+                x2d = self._channel_image(x, weights)
+                Lpos = lambda_pos * torch.sum(torch.clamp(-x2d, min=0.0) ** 2)
+                loss_value = self._backward_loss(Lpos, loss_value)
+                del x2d, Lpos
+
+            if need_sd_fft:
+                fftsd_c = fftsd if fftsd.ndim == 2 else fftsd[c]
+                fftsd_t = torch.from_numpy(fftsd_c).to(dev)
+                x2d = self._channel_image(x, weights)
+                xfft2 = tfft2(x2d * tapper_t)
+                model_sd = (cell_size**2) * xfft2 * fftbeam_t
+                Lsd = 0.5 * (
+                    torch.nansum((model_sd.real - fftsd_t.real) ** 2)
+                    + torch.nansum((model_sd.imag - fftsd_t.imag) ** 2)
+                ) * lambda_sd
+                loss_value = self._backward_loss(Lsd, loss_value)
+                del fftsd_t, x2d, xfft2, model_sd, Lsd
+
+        if self.assume_channel_invariant_operator:
+            for b in range(nbeam):
+                hk_stack = self._build_invariant_beam_cache(
+                    x=x,
+                    vis_data=vis_data,
+                    beam_index=b,
+                    device=dev,
+                    primary_beam_list=primary_beam_list,
+                    grid_list=grid_list,
+                    cell_size=cell_size,
+                )
+                beam_loss = torch.zeros((), device=dev, dtype=dtype)
+
+                for c in range(nchan):
+                    block = blocks[c][b]
+                    if block is None:
+                        continue
+
+                    weights = basis[:, c]
+                    model_vis = torch.einsum(
+                        "k,kn->n",
+                        weights.to(hk_stack.dtype),
+                        hk_stack[:, block["good_t"]],
+                    )
+                    I_use = block["I"].conj() if self.conj_data else block["I"]
+                    vis_real = torch.from_numpy(I_use.real).to(dev)
+                    vis_imag = torch.from_numpy(I_use.imag).to(dev)
+                    sig = torch.from_numpy(block["sI"]).to(dev)
+                    sig = torch.clamp(sig, min=1e-6)
+
+                    residual_real = (model_vis.real - vis_real) / sig
+                    residual_imag = (model_vis.imag - vis_imag) / sig
+                    J = torch.sum(residual_real**2 + residual_imag**2)
+                    beam_loss = beam_loss + 0.5 * J
+
+                    if verbose:
+                        print_gpu_memory(device)
+
+                    del model_vis, vis_real, vis_imag, sig, residual_real, residual_imag, J
+
+                if beam_loss.requires_grad:
+                    loss_value = self._backward_loss(beam_loss, loss_value)
+                else:
+                    loss_value = loss_value + beam_loss.detach()
+                del hk_stack, beam_loss
+        else:
+            for c in range(nchan):
+                weights = basis[:, c]
+
+                for b in range(nbeam):
+                    block = blocks[c][b]
+                    if block is None:
+                        continue
+
+                    x2d = self._channel_image(x, weights)
+                    model_vis = forward_beam(
+                        x2d=x2d,
+                        primary_beam=primary_beam_list[b],
+                        grid=grid_list[b],
+                        uu=block["uu"],
+                        vv=block["vv"],
+                        ww=block["ww"],
+                        cell_size=cell_size,
+                        device=dev,
+                    )
+
+                    I_use = block["I"].conj() if self.conj_data else block["I"]
+                    vis_real = torch.from_numpy(I_use.real).to(dev)
+                    vis_imag = torch.from_numpy(I_use.imag).to(dev)
+                    sig = torch.from_numpy(block["sI"]).to(dev)
+                    sig = torch.clamp(sig, min=1e-6)
+
+                    residual_real = (model_vis.real - vis_real) / sig
+                    residual_imag = (model_vis.imag - vis_imag) / sig
+                    J = torch.sum(residual_real**2 + residual_imag**2)
+                    block_loss = 0.5 * J
+                    loss_value = self._backward_loss(block_loss, loss_value)
+
+                    if verbose:
+                        print_gpu_memory(device)
+
+                    del (
+                        x2d,
+                        model_vis,
+                        vis_real,
+                        vis_imag,
+                        sig,
+                        residual_real,
+                        residual_imag,
+                        J,
+                        block_loss,
+                    )
+
+        if self.lambda_r > 0.0 and fftkernel is not None:
+            for k in range(self.nbasis):
+                coeff_fft2 = tfft2(x[k] * tapper_t)
+                conv = (cell_size**2) * coeff_fft2 * fftkernel_t
+                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
+                loss_value = self._backward_loss(Lr, loss_value)
+                del coeff_fft2, conv, Lr
+
+        return loss_value
