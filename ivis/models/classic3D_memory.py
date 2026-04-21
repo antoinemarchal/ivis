@@ -87,7 +87,8 @@ class Classic3DMemory(Classic3D):
             for c in range(x.shape[0]):
                 fftsd_c = fftsd_t[c] if fftsd_t.ndim == x.ndim else fftsd_t
                 fftbeam_c = fftbeam_t[c] if fftbeam_t.ndim == x.ndim else fftbeam_t
-                xfft2 = tfft2(x[c] * tapper_t)
+                tapper_c = tapper_t[c] if tapper_t.ndim == x.ndim else tapper_t
+                xfft2 = tfft2(x[c] * tapper_c)
                 model_sd = (cell_size**2) * xfft2 * fftbeam_c
                 Lsd = 0.5 * (
                     torch.nansum((model_sd.real - fftsd_c.real) ** 2)
@@ -95,7 +96,7 @@ class Classic3DMemory(Classic3D):
                 ) * lambda_sd
                 Lsd.backward()
                 loss_value = loss_value + Lsd.detach()
-                del fftsd_c, fftbeam_c, xfft2, model_sd, Lsd
+                del fftsd_c, fftbeam_c, tapper_c, xfft2, model_sd, Lsd
             del fftsd_t, fftbeam_t, tapper_t
 
         if self.lambda_r > 0.0 and fftkernel is not None:
@@ -103,12 +104,13 @@ class Classic3DMemory(Classic3D):
             fftkernel_t = torch.from_numpy(fftkernel).to(device)
             for c in range(x.shape[0]):
                 fftkernel_c = fftkernel_t[c] if fftkernel_t.ndim == x.ndim else fftkernel_t
-                xfft2 = tfft2(x[c] * tapper_t)
+                tapper_c = tapper_t[c] if tapper_t.ndim == x.ndim else tapper_t
+                xfft2 = tfft2(x[c] * tapper_c)
                 conv = (cell_size**2) * xfft2 * fftkernel_c
                 Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
                 Lr.backward()
                 loss_value = loss_value + Lr.detach()
-                del fftkernel_c, xfft2, conv, Lr
+                del fftkernel_c, tapper_c, xfft2, conv, Lr
             del tapper_t, fftkernel_t
 
         return loss_value
