@@ -152,3 +152,74 @@ def test_classic3d_memory_matches_classic3d_objective_and_gradient(monkeypatch):
 
     assert torch.allclose(loss_memory, loss_classic.detach(), rtol=1e-6, atol=1e-5)
     assert torch.allclose(grad_memory, grad_classic, rtol=1e-6, atol=1e-5)
+
+
+def test_lrsb_memory_matches_lrsb_objective_and_gradient(monkeypatch):
+    torch = importlib.import_module("torch")
+    lrsb_mod = importlib.import_module("ivis.models.lrsb")
+    LRSB = lrsb_mod.LRSB
+    LRSBMemory = lrsb_mod.LRSBMemory
+
+    def fake_forward_beam(x2d, primary_beam, grid, uu, vv, ww, cell_size, device):
+        flat = x2d.reshape(-1)
+        idx = torch.arange(len(uu), device=device) % flat.numel()
+        return flat[idx].to(torch.complex64) * torch.tensor(0.75 + 0.25j, device=device)
+
+    monkeypatch.setattr(lrsb_mod, "forward_beam", fake_forward_beam)
+
+    nchan, nbasis, nbeam, nvis = 3, 2, 2, 4
+    height = width = 3
+    vis_data = VisIData(
+        frequency=np.array([1.4e9, 1.41e9, 1.42e9]),
+        velocity=np.array([0.0, 1.0, 2.0]),
+        centers=np.array([SkyCoord(0 * u.deg, 0 * u.deg), SkyCoord(1 * u.deg, 1 * u.deg)]),
+        nvis=np.array([nvis, nvis]),
+        uu=np.ones((nbeam, nvis), dtype=np.float32),
+        vv=np.ones((nbeam, nvis), dtype=np.float32),
+        ww=np.zeros((nbeam, nvis), dtype=np.float32),
+        data_I=(
+            np.arange(nchan * nbeam * nvis, dtype=np.float32).reshape(nchan, nbeam, nvis)
+            + 1j * np.ones((nchan, nbeam, nvis), dtype=np.float32)
+        ).astype(np.complex64),
+        sigma_I=np.full((nchan, nbeam, nvis), 2.0, dtype=np.float32),
+        flag_I=np.zeros((nchan, nbeam, nvis), dtype=bool),
+    )
+
+    basis = np.array(
+        [
+            [1.0, 0.5, -0.25],
+            [0.0, 0.75, 1.25],
+        ],
+        dtype=np.float32,
+    )
+    x0 = np.linspace(-0.5, 1.0, nbasis * height * width, dtype=np.float32).reshape(
+        nbasis, height, width
+    )
+    common_params = dict(
+        vis_data=vis_data,
+        device="cpu",
+        pb=np.ones((nbeam, height, width), dtype=np.float32),
+        grid_array=np.zeros((nbeam, 1, height, width, 2), dtype=np.float32),
+        cell_size=1.0,
+        lambda_sd=0.0,
+        fftkernel=None,
+    )
+
+    for invariant in (False, True):
+        model_params = dict(
+            basis=basis,
+            lambda_r=0.0,
+            lambda_pos=0.3,
+            assume_channel_invariant_operator=invariant,
+        )
+
+        x_lrsb = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
+        loss_lrsb = LRSB(**model_params).objective(x_lrsb, **common_params)
+        grad_lrsb = x_lrsb.grad.detach().clone()
+
+        x_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
+        loss_memory = LRSBMemory(**model_params).objective(x_memory, **common_params)
+        grad_memory = x_memory.grad.detach().clone()
+
+        assert torch.allclose(loss_memory, loss_lrsb.detach(), rtol=1e-6, atol=1e-5)
+        assert torch.allclose(grad_memory, grad_lrsb, rtol=1e-6, atol=1e-5)
