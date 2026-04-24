@@ -472,6 +472,140 @@ class LRSB(BaseModel):
         return loss
 
 
+class LRSB_C(LRSB):
+    """
+    LRSB variant with explicit continuum basis functions.
+
+    This augments the learned line basis with fixed smooth spectral modes.
+    By default, it adds a single flat continuum mode psi_0(nu) = 1.
+    """
+
+    def __init__(
+        self,
+        basis,
+        continuum_basis=None,
+        continuum_order=0,
+        frequency=None,
+        reference_frequency=None,
+        orthogonalize_continuum=False,
+        **kwargs,
+    ):
+        line_basis = np.asarray(basis, dtype=np.float32)
+        if line_basis.ndim != 2:
+            raise ValueError("basis must have shape (nbasis, nchan).")
+
+        continuum_arr = self._prepare_continuum_basis(
+            nchan=line_basis.shape[1],
+            continuum_basis=continuum_basis,
+            continuum_order=continuum_order,
+            frequency=frequency,
+            reference_frequency=reference_frequency,
+            line_basis=line_basis,
+            orthogonalize=orthogonalize_continuum,
+        )
+
+        self._line_basis_np = line_basis.astype(np.float32, copy=False)
+        self._continuum_basis_np = continuum_arr.astype(np.float32, copy=False)
+        self._continuum_order = int(continuum_arr.shape[0] - 1)
+        self._reference_frequency = (
+            None if reference_frequency is None else float(reference_frequency)
+        )
+        hybrid_basis = np.concatenate((self._line_basis_np, self._continuum_basis_np), axis=0)
+        super().__init__(basis=hybrid_basis, **kwargs)
+
+    @staticmethod
+    def _prepare_continuum_basis(
+        nchan,
+        continuum_basis,
+        continuum_order,
+        frequency,
+        reference_frequency,
+        line_basis,
+        orthogonalize,
+    ):
+        if continuum_basis is None:
+            order = int(continuum_order)
+            if order < 0:
+                raise ValueError("continuum_order must be >= 0.")
+
+            if order == 0:
+                continuum_arr = np.ones((1, nchan), dtype=np.float32)
+            else:
+                if frequency is None:
+                    raise ValueError("frequency is required when continuum_order > 0.")
+
+                freq = np.asarray(frequency, dtype=np.float32)
+                if freq.ndim != 1 or freq.shape[0] != nchan:
+                    raise ValueError(f"frequency must have shape ({nchan},), got {freq.shape}.")
+
+                nu_ref = float(np.mean(freq) if reference_frequency is None else reference_frequency)
+                if nu_ref == 0.0:
+                    raise ValueError("reference_frequency must be non-zero.")
+
+                xnu = (freq - nu_ref) / nu_ref
+                continuum_arr = np.stack([xnu**m for m in range(order + 1)], axis=0).astype(
+                    np.float32,
+                    copy=False,
+                )
+        else:
+            continuum_arr = np.asarray(continuum_basis, dtype=np.float32)
+            if continuum_arr.ndim == 1:
+                continuum_arr = continuum_arr[None, :]
+
+        if continuum_arr.ndim != 2:
+            raise ValueError("continuum_basis must have shape (ncont, nchan).")
+        if continuum_arr.shape[1] != nchan:
+            raise ValueError(
+                f"continuum_basis must have nchan={nchan}, got {continuum_arr.shape[1]}."
+            )
+
+        if orthogonalize and line_basis.size > 0:
+            line_basis_t = line_basis.T
+            pseudo_inv = np.linalg.pinv(line_basis_t)
+            projected = (line_basis_t @ pseudo_inv @ continuum_arr.T).T
+            continuum_arr = continuum_arr - projected
+
+        return continuum_arr
+
+    @property
+    def line_nbasis(self):
+        return int(self._line_basis_np.shape[0])
+
+    @property
+    def continuum_nbasis(self):
+        return int(self._continuum_basis_np.shape[0])
+
+    @property
+    def continuum_basis(self):
+        return self._continuum_basis_np
+
+    @property
+    def continuum_order(self):
+        return self._continuum_order
+
+    @property
+    def reference_frequency(self):
+        return self._reference_frequency
+
+    def split_coeffs(self, x):
+        if torch.is_tensor(x):
+            return x[: self.line_nbasis], x[self.line_nbasis :]
+        coeffs = np.asarray(x)
+        return coeffs[: self.line_nbasis], coeffs[self.line_nbasis :]
+
+    def reconstruct_line_cube(self, x, device=None, return_numpy=False):
+        line_coeffs, _ = self.split_coeffs(x)
+        line_model = LRSB(basis=self._line_basis_np)
+        return line_model.reconstruct_cube(line_coeffs, device=device, return_numpy=return_numpy)
+
+    def reconstruct_continuum_cube(self, x, device=None, return_numpy=False):
+        _, continuum_coeffs = self.split_coeffs(x)
+        continuum_model = LRSB(basis=self._continuum_basis_np)
+        return continuum_model.reconstruct_cube(
+            continuum_coeffs, device=device, return_numpy=return_numpy
+        )
+
+
 class LRSBMemory(LRSB):
     """
     Memory-streaming LRSB variant.
@@ -667,3 +801,33 @@ class LRSBMemory(LRSB):
                 del coeff_fft2, conv, Lr
 
         return loss_value
+
+
+class LRSB_CMemory(LRSBMemory, LRSB_C):
+    """
+    Memory-streaming LRSB_C variant.
+
+    This combines the hybrid line+continuum basis construction from LRSB_C
+    with the blockwise backward pass from LRSBMemory.
+    """
+
+    def __init__(
+        self,
+        basis,
+        continuum_basis=None,
+        continuum_order=0,
+        frequency=None,
+        reference_frequency=None,
+        orthogonalize_continuum=False,
+        **kwargs,
+    ):
+        LRSB_C.__init__(
+            self,
+            basis=basis,
+            continuum_basis=continuum_basis,
+            continuum_order=continuum_order,
+            frequency=frequency,
+            reference_frequency=reference_frequency,
+            orthogonalize_continuum=orthogonalize_continuum,
+            **kwargs,
+        )
