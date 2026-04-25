@@ -357,7 +357,7 @@ class LRSB(BaseModel):
             need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
             channel_cache = []
             for c in range(nchan):
-                weights = basis[:, c]
+                weights = self._weights_for_channel(basis, c)
                 need_x2d = (lambda_pos > 0.0) or need_sd_fft
                 x2d = torch.sum(x * weights[:, None, None], dim=0) if need_x2d else None
                 xfft2 = tfft2(x2d * tapper_t) if need_sd_fft else None
@@ -413,7 +413,7 @@ class LRSB(BaseModel):
                 del hk_stack
         else:
             for c in range(nchan):
-                weights = basis[:, c]
+                weights = self._weights_for_channel(basis, c)
                 need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
                 x2d = torch.sum(x * weights[:, None, None], dim=0)
 
@@ -493,7 +493,7 @@ class LRSB_C(LRSB):
         continuum_order=0,
         frequency=None,
         reference_frequency=None,
-        orthogonalize_continuum=False,
+        continuum_only_channels=None,
         lambda_r_line_factor=1.0,
         lambda_r_cont_factor=1.0,
         **kwargs,
@@ -509,7 +509,6 @@ class LRSB_C(LRSB):
             frequency=frequency,
             reference_frequency=reference_frequency,
             line_basis=line_basis,
-            orthogonalize=orthogonalize_continuum,
         )
 
         self._line_basis_np = line_basis.astype(np.float32, copy=False)
@@ -517,6 +516,10 @@ class LRSB_C(LRSB):
         self._continuum_order = int(continuum_arr.shape[0] - 1)
         self._reference_frequency = (
             None if reference_frequency is None else float(reference_frequency)
+        )
+        self._continuum_only_channels = self._prepare_channel_mask(
+            nchan=line_basis.shape[1],
+            channels=continuum_only_channels,
         )
         self.lambda_r_line_factor = float(lambda_r_line_factor)
         self.lambda_r_cont_factor = float(lambda_r_cont_factor)
@@ -531,7 +534,6 @@ class LRSB_C(LRSB):
         frequency,
         reference_frequency,
         line_basis,
-        orthogonalize,
     ):
         if continuum_basis is None:
             order = int(continuum_order)
@@ -569,13 +571,29 @@ class LRSB_C(LRSB):
                 f"continuum_basis must have nchan={nchan}, got {continuum_arr.shape[1]}."
             )
 
-        if orthogonalize and line_basis.size > 0:
-            line_basis_t = line_basis.T
-            pseudo_inv = np.linalg.pinv(line_basis_t)
-            projected = (line_basis_t @ pseudo_inv @ continuum_arr.T).T
-            continuum_arr = continuum_arr - projected
-
         return continuum_arr
+
+    @staticmethod
+    def _prepare_channel_mask(nchan, channels):
+        mask = np.zeros(nchan, dtype=bool)
+        if channels is None:
+            return mask
+
+        idx = np.asarray(channels)
+        if idx.dtype == bool:
+            if idx.shape != (nchan,):
+                raise ValueError(
+                    f"Boolean continuum_only_channels mask must have shape ({nchan},), got {idx.shape}."
+                )
+            return idx.astype(bool, copy=True)
+
+        idx = np.asarray(idx, dtype=np.int64).ravel()
+        if idx.size == 0:
+            return mask
+        if np.any(idx < 0) or np.any(idx >= nchan):
+            raise ValueError(f"continuum_only_channels must be within [0, {nchan - 1}].")
+        mask[idx] = True
+        return mask
 
     @property
     def line_nbasis(self):
@@ -596,6 +614,10 @@ class LRSB_C(LRSB):
     @property
     def reference_frequency(self):
         return self._reference_frequency
+
+    @property
+    def continuum_only_channels(self):
+        return self._continuum_only_channels.copy()
 
     def _lambda_r_for_basis(self, basis_index):
         if basis_index < self.line_nbasis:
@@ -619,6 +641,18 @@ class LRSB_C(LRSB):
         return continuum_model.reconstruct_cube(
             continuum_coeffs, device=device, return_numpy=return_numpy
         )
+
+    def _weights_for_channel(self, basis, channel_index):
+        weights = basis[:, channel_index]
+        if not self._continuum_only_channels[channel_index]:
+            return weights
+
+        line_zeros = torch.zeros(
+            self.line_nbasis,
+            device=weights.device,
+            dtype=weights.dtype,
+        )
+        return torch.cat((line_zeros, weights[self.line_nbasis :]), dim=0)
 
 
 class LRSBMemory(LRSB):
@@ -693,7 +727,7 @@ class LRSBMemory(LRSB):
         need_sd_fft = lambda_sd > 0.0 and fftsd is not None and fftbeam is not None
 
         for c in range(nchan):
-            weights = basis[:, c]
+            weights = self._weights_for_channel(basis, c)
 
             if lambda_pos > 0.0:
                 x2d = self._channel_image(x, weights)
@@ -732,7 +766,7 @@ class LRSBMemory(LRSB):
                     if block is None:
                         continue
 
-                    weights = basis[:, c]
+                    weights = self._weights_for_channel(basis, c)
                     model_vis = torch.einsum(
                         "k,kn->n",
                         weights.to(hk_stack.dtype),
@@ -761,7 +795,7 @@ class LRSBMemory(LRSB):
                 del hk_stack, beam_loss
         else:
             for c in range(nchan):
-                weights = basis[:, c]
+                weights = self._weights_for_channel(basis, c)
 
                 for b in range(nbeam):
                     block = blocks[c][b]
@@ -836,7 +870,7 @@ class LRSB_CMemory(LRSBMemory, LRSB_C):
         continuum_order=0,
         frequency=None,
         reference_frequency=None,
-        orthogonalize_continuum=False,
+        continuum_only_channels=None,
         lambda_r_line_factor=1.0,
         lambda_r_cont_factor=1.0,
         **kwargs,
@@ -848,7 +882,7 @@ class LRSB_CMemory(LRSBMemory, LRSB_C):
             continuum_order=continuum_order,
             frequency=frequency,
             reference_frequency=reference_frequency,
-            orthogonalize_continuum=orthogonalize_continuum,
+            continuum_only_channels=continuum_only_channels,
             lambda_r_line_factor=lambda_r_line_factor,
             lambda_r_cont_factor=lambda_r_cont_factor,
             **kwargs,
