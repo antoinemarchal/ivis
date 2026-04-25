@@ -81,6 +81,9 @@ class LRSB(BaseModel):
     def reconstruct_cube_from_coeffs(self, coeffs, device=None, return_numpy=True):
         return self.reconstruct_cube(coeffs, device=device, return_numpy=return_numpy)
 
+    def _lambda_r_for_basis(self, basis_index):
+        return float(self.lambda_r)
+
     def _reference_operator_inputs(self, vis_data, beam_index):
         if self.reference_channel < 0 or self.reference_channel >= self.nchan:
             raise ValueError(
@@ -463,9 +466,12 @@ class LRSB(BaseModel):
 
         if self.lambda_r > 0.0 and fftkernel is not None:
             for k in range(self.nbasis):
+                lambda_r_k = self._lambda_r_for_basis(k)
+                if lambda_r_k <= 0.0:
+                    continue
                 coeff_fft2 = tfft2(x[k] * tapper_t)
                 conv = (cell_size**2) * coeff_fft2 * fftkernel_t
-                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
+                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * lambda_r_k
                 loss = loss + Lr
 
         loss.backward()
@@ -488,6 +494,8 @@ class LRSB_C(LRSB):
         frequency=None,
         reference_frequency=None,
         orthogonalize_continuum=False,
+        lambda_r_line_factor=1.0,
+        lambda_r_cont_factor=1.0,
         **kwargs,
     ):
         line_basis = np.asarray(basis, dtype=np.float32)
@@ -510,6 +518,8 @@ class LRSB_C(LRSB):
         self._reference_frequency = (
             None if reference_frequency is None else float(reference_frequency)
         )
+        self.lambda_r_line_factor = float(lambda_r_line_factor)
+        self.lambda_r_cont_factor = float(lambda_r_cont_factor)
         hybrid_basis = np.concatenate((self._line_basis_np, self._continuum_basis_np), axis=0)
         super().__init__(basis=hybrid_basis, **kwargs)
 
@@ -586,6 +596,11 @@ class LRSB_C(LRSB):
     @property
     def reference_frequency(self):
         return self._reference_frequency
+
+    def _lambda_r_for_basis(self, basis_index):
+        if basis_index < self.line_nbasis:
+            return float(self.lambda_r) * self.lambda_r_line_factor
+        return float(self.lambda_r) * self.lambda_r_cont_factor
 
     def split_coeffs(self, x):
         if torch.is_tensor(x):
@@ -794,9 +809,12 @@ class LRSBMemory(LRSB):
 
         if self.lambda_r > 0.0 and fftkernel is not None:
             for k in range(self.nbasis):
+                lambda_r_k = self._lambda_r_for_basis(k)
+                if lambda_r_k <= 0.0:
+                    continue
                 coeff_fft2 = tfft2(x[k] * tapper_t)
                 conv = (cell_size**2) * coeff_fft2 * fftkernel_t
-                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
+                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * lambda_r_k
                 loss_value = self._backward_loss(Lr, loss_value)
                 del coeff_fft2, conv, Lr
 
@@ -819,6 +837,8 @@ class LRSB_CMemory(LRSBMemory, LRSB_C):
         frequency=None,
         reference_frequency=None,
         orthogonalize_continuum=False,
+        lambda_r_line_factor=1.0,
+        lambda_r_cont_factor=1.0,
         **kwargs,
     ):
         LRSB_C.__init__(
@@ -829,5 +849,7 @@ class LRSB_CMemory(LRSBMemory, LRSB_C):
             frequency=frequency,
             reference_frequency=reference_frequency,
             orthogonalize_continuum=orthogonalize_continuum,
+            lambda_r_line_factor=lambda_r_line_factor,
+            lambda_r_cont_factor=lambda_r_cont_factor,
             **kwargs,
         )
