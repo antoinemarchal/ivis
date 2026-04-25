@@ -84,6 +84,9 @@ class LRSB(BaseModel):
     def _lambda_r_for_basis(self, basis_index):
         return float(self.lambda_r)
 
+    def _weights_for_channel(self, basis, channel_index):
+        return basis[:, channel_index]
+
     def _reference_operator_inputs(self, vis_data, beam_index):
         if self.reference_channel < 0 or self.reference_channel >= self.nchan:
             raise ValueError(
