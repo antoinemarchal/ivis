@@ -9,14 +9,32 @@ from numpy.fft import fft2, ifft2
 from reproject import reproject_interp
 from spectral_cube import SpectralCube
 
-INPUT_PATHS = [
-    "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits",
-    "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits",
-    "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
+INPUTS = [
+    {
+        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits",
+        "target_velocity_kms": 238.6,
+    },
+    {
+        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits",
+        "target_velocity_kms": 238.6,
+    },
+    {
+        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits",
+        "target_velocity_kms": 6.4905,
+    },
+    {
+        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/averaged_chan1_reprojected.fits",
+        "target_velocity_kms": 238.6,
+    },
+]
+ASKAPSOFT_ORIGINALS = [
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428171-imagecube-531987.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428420-imagecube-556399.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428421-imagecube-542502.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428422-imagecube-556176.fits",
 ]
 SD_CUBE_PATH = "/Users/antoine/Desktop/fullsurvey/GASS_HI_LMC_cube.fits"
 NU_HZ = 1.42040575177e9
-TARGET_VELOCITIES = [238.6, 238.6, 6.4905] * u.km / u.s
 INT_FWHM_DEG = (21 * u.arcsec).to(u.deg).value
 SD_FWHM_DEG = (16 * u.arcmin).to(u.deg).value
 SHORT_SPACING_METHOD = "legacy_fft"
@@ -90,6 +108,54 @@ def k_to_jy_arcsec2(data_k, nu_hz):
     return intensity.to(u.Jy / u.arcsec**2, equivalencies=u.dimensionless_angles()).value
 
 
+def jy_beam_to_jy_arcsec2(data_jy_beam, header):
+    bmaj_arcsec, bmin_arcsec = beam_axes_arcsec(header)
+
+    beam_area_arcsec2 = (np.pi / (4.0 * np.log(2.0))) * bmaj_arcsec * bmin_arcsec
+    return np.asarray(data_jy_beam, dtype=float) / beam_area_arcsec2
+
+
+def beam_axes_arcsec(header):
+    if "BMAJ" in header and "BMIN" in header:
+        return (
+            (header["BMAJ"] * u.deg).to_value(u.arcsec),
+            (header["BMIN"] * u.deg).to_value(u.arcsec),
+        )
+    raise KeyError("Beam keywords BMAJ/BMIN not found in FITS header.")
+
+
+def beam_axes_arcsec_from_file(path):
+    with fits.open(path) as hdul:
+        return beam_axes_arcsec(hdul[0].header)
+
+
+def fallback_beam_axes_arcsec(input_path):
+    basename = os.path.basename(input_path)
+    if basename == "averaged_chan1_reprojected.fits":
+        beam_axes = np.asarray(
+            [beam_axes_arcsec_from_file(path) for path in ASKAPSOFT_ORIGINALS],
+            dtype=float,
+        )
+        return tuple(np.mean(beam_axes, axis=0))
+
+    if basename.endswith("_chan1_reprojected.fits"):
+        original_path = input_path.replace("_chan1_reprojected.fits", ".fits")
+        if os.path.exists(original_path):
+            return beam_axes_arcsec_from_file(original_path)
+
+    raise KeyError(f"No fallback beam metadata available for {input_path}.")
+
+
+def jy_beam_to_jy_arcsec2_for_path(data_jy_beam, header, input_path):
+    try:
+        bmaj_arcsec, bmin_arcsec = beam_axes_arcsec(header)
+    except KeyError:
+        bmaj_arcsec, bmin_arcsec = fallback_beam_axes_arcsec(input_path)
+
+    beam_area_arcsec2 = (np.pi / (4.0 * np.log(2.0))) * bmaj_arcsec * bmin_arcsec
+    return np.asarray(data_jy_beam, dtype=float) / beam_area_arcsec2
+
+
 def wcs2d(header):
     out = wcs.WCS(naxis=2)
     out.wcs.crpix = [header["CRPIX1"], header["CRPIX2"]]
@@ -127,23 +193,49 @@ def image_header(header):
     return out
 
 
+def velocity_from_header(header):
+    spectral_wcs = wcs.WCS(header).sub(["spectral"])
+    pixel = np.array([[0.0]])
+    world = spectral_wcs.all_pix2world(pixel, 0)[0, 0]
+    unit = spectral_wcs.wcs.cunit[0]
+    if unit:
+        quantity = world * u.Unit(unit)
+    else:
+        quantity = world * u.m / u.s
+
+    try:
+        return quantity.to(u.km / u.s)
+    except u.UnitConversionError:
+        rest_frequency = header.get("RESTFRQ", header.get("RESTFREQ", NU_HZ)) * u.Hz
+        return quantity.to(u.km / u.s, equivalencies=u.doppler_radio(rest_frequency))
+
+
+def resolve_target_velocity(input_spec, header):
+    target_velocity_kms = input_spec.get("target_velocity_kms")
+    if target_velocity_kms is not None:
+        return target_velocity_kms * u.km / u.s
+    return velocity_from_header(header)
+
+
 def write_like(path, data, header):
     fits.PrimaryHDU(data=np.asarray(data, dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
 if __name__ == "__main__":
-    if len(INPUT_PATHS) != len(TARGET_VELOCITIES):
-        raise ValueError("INPUT_PATHS and TARGET_VELOCITIES must have the same length.")
-
     sd_cube = SpectralCube.read(SD_CUBE_PATH)
     sd_header = wcs2d(fits.getheader(SD_CUBE_PATH)).to_header()
 
-    for input_path, target_velocity in zip(INPUT_PATHS, TARGET_VELOCITIES):
+    for input_spec in INPUTS:
+        input_path = input_spec["path"]
         with fits.open(input_path) as hdul:
             target_header = hdul[0].header.copy()
             image = first_plane(hdul[0].data)
-            if "LINEAR" in os.path.basename(input_path):
+            bunit = str(target_header.get("BUNIT", "")).strip().lower().replace(" ", "")
+            if "jy/beam" in bunit or "jybeam" in bunit:
+                image = jy_beam_to_jy_arcsec2_for_path(image, target_header, input_path)
+            elif "LINEAR" in os.path.basename(input_path):
                 image = k_to_jy_arcsec2(image, NU_HZ)
+            target_velocity = resolve_target_velocity(input_spec, target_header)
 
         sd_plane = interpolate_velocity_plane(sd_cube, target_velocity)
         sd_regrid_k, _ = reproject_interp(

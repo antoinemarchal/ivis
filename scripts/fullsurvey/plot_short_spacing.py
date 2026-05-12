@@ -13,7 +13,14 @@ PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcs
 JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
 LINEAR_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
 LOW_VEL_JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
-INPUT_PATHS = [JOINT_PATH, LINEAR_PATH, LOW_VEL_JOINT_PATH]
+ASKAPSOFT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/averaged_chan1_reprojected.fits"
+ASKAPSOFT_ORIGINALS = [
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428171-imagecube-531987.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428420-imagecube-556399.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428421-imagecube-542502.fits",
+    "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428422-imagecube-556176.fits",
+]
+INPUT_PATHS = [JOINT_PATH, LINEAR_PATH, LOW_VEL_JOINT_PATH, ASKAPSOFT_PATH]
 OUTPUT_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAP/plot_short_spacing_exports"
 
 NU_HZ = 1.42040575177e9
@@ -40,6 +47,47 @@ def k_to_jy_arcsec2(data_k, nu_hz):
     return intensity.to(u.Jy / u.arcsec**2, equivalencies=u.dimensionless_angles()).value
 
 
+def beam_axes_arcsec(header):
+    if "BMAJ" in header and "BMIN" in header:
+        return (
+            (header["BMAJ"] * u.deg).to_value(u.arcsec),
+            (header["BMIN"] * u.deg).to_value(u.arcsec),
+        )
+    raise KeyError("Beam keywords BMAJ/BMIN not found in FITS header.")
+
+
+def beam_axes_arcsec_from_file(path):
+    with fits.open(path) as hdul:
+        return beam_axes_arcsec(hdul[0].header)
+
+
+def fallback_beam_axes_arcsec(input_path):
+    basename = os.path.basename(input_path)
+    if basename == "averaged_chan1_reprojected.fits":
+        beam_axes = np.asarray(
+            [beam_axes_arcsec_from_file(path) for path in ASKAPSOFT_ORIGINALS],
+            dtype=float,
+        )
+        return tuple(np.mean(beam_axes, axis=0))
+
+    if basename.endswith("_chan1_reprojected.fits"):
+        original_path = input_path.replace("_chan1_reprojected.fits", ".fits")
+        if os.path.exists(original_path):
+            return beam_axes_arcsec_from_file(original_path)
+
+    raise KeyError(f"No fallback beam metadata available for {input_path}.")
+
+
+def jy_beam_to_jy_arcsec2(data_jy_beam, header, input_path):
+    try:
+        bmaj_arcsec, bmin_arcsec = beam_axes_arcsec(header)
+    except KeyError:
+        bmaj_arcsec, bmin_arcsec = fallback_beam_axes_arcsec(input_path)
+
+    beam_area_arcsec2 = (np.pi / (4.0 * np.log(2.0))) * bmaj_arcsec * bmin_arcsec
+    return np.asarray(data_jy_beam, dtype=float) / beam_area_arcsec2
+
+
 def first_plane(data):
     return np.asarray(data[0] if data.ndim == 3 else data, dtype=float)
 
@@ -57,7 +105,10 @@ def load_original_image(path):
     with fits.open(path) as hdul:
         data = first_plane(hdul[0].data)
         header = hdul[0].header
-    if "LINEAR" in os.path.basename(path):
+    bunit = str(header.get("BUNIT", "")).strip().lower().replace(" ", "")
+    if "jy/beam" in bunit or "jybeam" in bunit:
+        data = jy_beam_to_jy_arcsec2(data, header, path)
+    elif "LINEAR" in os.path.basename(path):
         data = k_to_jy_arcsec2(data, NU_HZ)
     return data, header
 
@@ -67,13 +118,34 @@ def output_png_path(input_path, suffix):
     return os.path.join(OUTPUT_DIR, f"{base}{suffix}.png")
 
 
+def label_for_path(input_path, has_short_spacing):
+    basename = os.path.basename(input_path)
+    if basename == os.path.basename(ASKAPSOFT_PATH):
+        return "ASKAPSoft+Parkes" if has_short_spacing else "ASKAPSoft"
+    return "ASKAP+Parkes" if has_short_spacing else "ASKAP"
+
+
 def color_limits_for_path(path):
     if os.path.samefile(path, LOW_VEL_JOINT_PATH):
         return LOW_VEL_VMIN, LOW_VEL_VMAX
     return VMIN, VMAX
 
 
-def plot_image(data, header, pb, output_path, vmin, vmax):
+def label_style_for_data(data):
+    ny, nx = data.shape
+    y1 = max(1, int(0.12 * ny))
+    x1 = max(1, int(0.25 * nx))
+    top_left = np.asarray(data[:y1, :x1], dtype=float)
+    has_nan = np.isnan(top_left).any()
+    if has_nan:
+        return {
+            "color": "black",
+            "bbox": {"facecolor": "white", "alpha": 0.9, "pad": 6, "edgecolor": "none"},
+        }
+    return {"color": "white", "bbox": None}
+
+
+def plot_image(data, header, pb, output_path, vmin, vmax, panel_label):
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=wcs2d(header))
     ax.set_xlabel(r"RA", fontsize=18.0)
@@ -90,6 +162,18 @@ def plot_image(data, header, pb, output_path, vmin, vmax):
             edgecolor="white",
             facecolor="none",
         )
+    )
+    label_style = label_style_for_data(data)
+    ax.text(
+        0.03,
+        0.97,
+        panel_label,
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=22.0,
+        color=label_style["color"],
+        bbox=label_style["bbox"],
     )
     cax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=cax)
@@ -120,6 +204,7 @@ if __name__ == "__main__":
             output_png_path(input_path, "_ASKAP_only"),
             vmin,
             vmax,
+            label_for_path(input_path, has_short_spacing=False),
         )
 
         root = os.path.splitext(input_path)[0]
@@ -133,4 +218,5 @@ if __name__ == "__main__":
             output_png_path(input_path, "_short_spacing"),
             vmin,
             vmax,
+            label_for_path(input_path, has_short_spacing=True),
         )
