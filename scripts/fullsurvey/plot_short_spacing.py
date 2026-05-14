@@ -179,7 +179,7 @@ def plot_image(data, header, pb, output_path, vmin, vmax, panel_label):
     cbar = fig.colorbar(img, cax=cax)
     cbar.ax.tick_params(labelsize=14.0)
     cbar.set_label(r"$T_b\ (\mathrm{mJy}\,\mathrm{arcsec}^{-2})$", fontsize=18.0)
-    fig.savefig(output_path, dpi=400, pad_inches=0.02, bbox_inches="tight")
+    fig.savefig(output_path, dpi=300, pad_inches=0.02, bbox_inches="tight")
     plt.close(fig)
 
 
