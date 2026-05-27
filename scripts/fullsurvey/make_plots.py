@@ -19,7 +19,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.models import ClassicIViS3D
+from ivis.models import Classic3D
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.readers import CasacoreReader

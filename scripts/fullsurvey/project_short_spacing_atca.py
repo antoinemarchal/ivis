@@ -11,7 +11,8 @@ from spectral_cube import SpectralCube
 
 
 PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
-FEATHERED_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing.fits"
+# FEATHERED_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing.fits"
+FEATHERED_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits"
 ATCA_CUBE_PATH = "/Users/antoine/Desktop/fullsurvey/lmc.hi.K.LSR.fits"
 TARGET_VELOCITY = 238.6 * u.km / u.s
 NU_HZ = 1.42040575177e9
@@ -146,7 +147,7 @@ if __name__ == "__main__":
         format="png",
         bbox_inches="tight",
         pad_inches=0.02,
-        dpi=400,
+        dpi=300,
     )
 
     fig = plt.figure(figsize=(10, 10))
@@ -169,5 +170,5 @@ if __name__ == "__main__":
         format="png",
         bbox_inches="tight",
         pad_inches=0.02,
-        dpi=400,
+        dpi=300,
     )

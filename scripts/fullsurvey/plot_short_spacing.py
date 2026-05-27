@@ -10,7 +10,7 @@ from astropy.io import fits
 
 
 PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
-JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
+JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits"
 LINEAR_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
 LOW_VEL_JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
 ASKAPSOFT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/averaged_chan1_reprojected.fits"

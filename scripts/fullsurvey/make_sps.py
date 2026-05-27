@@ -11,8 +11,10 @@ from astropy.io import fits
 
 ASKAP_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAP"
 PB_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits")
+
 JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits")
 JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing.fits")
+
 JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_sd_regrid.fits")
 LINEAR_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits")
 LINEAR_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_short_spacing.fits")

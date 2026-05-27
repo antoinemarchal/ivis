@@ -14,7 +14,7 @@ OUTPUT_PATH_LOW_VEL = os.path.join(ASKAP_DIR, "SPS_ASKAP_low_vel.png")
 LAMBDA_M = 0.211
 ARCMIN_PER_RAD = 3437.75
 FIT_TARGET_D_M = 1000.0
-FIT_D_RANGE_M = (600.0, 1600.0)
+FIT_D_RANGE_M = (600.0, 2000.0)
 
 
 matplotlib.rc("xtick", labelsize=16)
