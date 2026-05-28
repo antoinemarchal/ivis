@@ -98,12 +98,11 @@ def test_get_started_forward_model_smoke(monkeypatch):
     assert np.isfinite(model_vis.imag).all()
 
 
-def test_classic3d_memory_matches_classic3d_objective_and_gradient(monkeypatch):
+def test_classic3d_matches_high_memory_objective_and_gradient(monkeypatch):
     torch = importlib.import_module("torch")
     classic3d_mod = importlib.import_module("ivis.models.classic3D")
-    classic3d_memory_mod = importlib.import_module("ivis.models.classic3D_memory")
     Classic3D = classic3d_mod.Classic3D
-    Classic3DMemory = classic3d_memory_mod.Classic3DMemory
+    Classic3DHighMemory = classic3d_mod.Classic3DHighMemory
 
     def fake_forward_beam(x2d, primary_beam, grid, uu, vv, ww, cell_size, device):
         flat = x2d.reshape(-1)
@@ -111,7 +110,6 @@ def test_classic3d_memory_matches_classic3d_objective_and_gradient(monkeypatch):
         return flat[idx].to(torch.complex64) * torch.tensor(1.25 - 0.5j, device=device)
 
     monkeypatch.setattr(classic3d_mod, "forward_beam", fake_forward_beam)
-    monkeypatch.setattr(classic3d_memory_mod, "forward_beam", fake_forward_beam)
 
     nchan, nbeam, nvis = 2, 2, 3
     height = width = 3
@@ -146,12 +144,12 @@ def test_classic3d_memory_matches_classic3d_objective_and_gradient(monkeypatch):
     loss_classic = Classic3D(lambda_r=0.0).objective(x_classic, **common_params)
     grad_classic = x_classic.grad.detach().clone()
 
-    x_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
-    loss_memory = Classic3DMemory(lambda_r=0.0).objective(x_memory, **common_params)
-    grad_memory = x_memory.grad.detach().clone()
+    x_high_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
+    loss_high_memory = Classic3DHighMemory(lambda_r=0.0).objective(x_high_memory, **common_params)
+    grad_high_memory = x_high_memory.grad.detach().clone()
 
-    assert torch.allclose(loss_memory, loss_classic.detach(), rtol=1e-6, atol=1e-5)
-    assert torch.allclose(grad_memory, grad_classic, rtol=1e-6, atol=1e-5)
+    assert torch.allclose(loss_classic, loss_high_memory.detach(), rtol=1e-6, atol=1e-5)
+    assert torch.allclose(grad_classic, grad_high_memory, rtol=1e-6, atol=1e-5)
 
 
 def test_lrsb_memory_matches_lrsb_objective_and_gradient(monkeypatch):
