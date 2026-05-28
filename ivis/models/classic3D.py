@@ -231,7 +231,7 @@ class Classic3D(BaseModel):
             grid_array=grid_array,
         )
 
-        loss = 0.0
+        loss_value = torch.zeros((), dtype=x.dtype, device=device)
 
         for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
             model_vis = forward_beam(
@@ -253,33 +253,49 @@ class Classic3D(BaseModel):
             residual_real = (model_vis.real - vis_real) / sig
             residual_imag = (model_vis.imag - vis_imag) / sig
             J = torch.sum(residual_real**2 + residual_imag**2)
-            loss = loss + 0.5 * J
+            block_loss = 0.5 * J
+            block_loss.backward()
+            loss_value = loss_value + block_loss.detach()
 
             if verbose:
                 print_gpu_memory(device)
+
+            del model_vis, vis_real, vis_imag, sig, residual_real, residual_imag, J, block_loss
 
         if lambda_sd > 0.0 and fftsd is not None:
             fftsd_t = torch.from_numpy(fftsd).to(device)
             fftbeam_t = torch.from_numpy(fftbeam).to(device)
             tapper_t = torch.from_numpy(tapper).to(device)
-            xfft2 = tfft2(x * tapper_t)
-            model_sd = (cell_size**2) * xfft2 * fftbeam_t
-            Lsd = 0.5 * (
-                torch.nansum((model_sd.real - fftsd_t.real) ** 2)
-                + torch.nansum((model_sd.imag - fftsd_t.imag) ** 2)
-            ) * lambda_sd
-            loss = loss + Lsd
+            for c in range(x.shape[0]):
+                fftsd_c = fftsd_t[c] if fftsd_t.ndim == x.ndim else fftsd_t
+                fftbeam_c = fftbeam_t[c] if fftbeam_t.ndim == x.ndim else fftbeam_t
+                tapper_c = tapper_t[c] if tapper_t.ndim == x.ndim else tapper_t
+                xfft2 = tfft2(x[c] * tapper_c)
+                model_sd = (cell_size**2) * xfft2 * fftbeam_c
+                Lsd = 0.5 * (
+                    torch.nansum((model_sd.real - fftsd_c.real) ** 2)
+                    + torch.nansum((model_sd.imag - fftsd_c.imag) ** 2)
+                ) * lambda_sd
+                Lsd.backward()
+                loss_value = loss_value + Lsd.detach()
+                del fftsd_c, fftbeam_c, tapper_c, xfft2, model_sd, Lsd
+            del fftsd_t, fftbeam_t, tapper_t
 
         if self.lambda_r > 0.0 and fftkernel is not None:
             tapper_t = torch.from_numpy(tapper).to(device)
             fftkernel_t = torch.from_numpy(fftkernel).to(device)
-            xfft2 = tfft2(x * tapper_t)
-            conv = (cell_size**2) * xfft2 * fftkernel_t
-            Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
-            loss = loss + Lr
+            for c in range(x.shape[0]):
+                fftkernel_c = fftkernel_t[c] if fftkernel_t.ndim == x.ndim else fftkernel_t
+                tapper_c = tapper_t[c] if tapper_t.ndim == x.ndim else tapper_t
+                xfft2 = tfft2(x[c] * tapper_c)
+                conv = (cell_size**2) * xfft2 * fftkernel_c
+                Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
+                Lr.backward()
+                loss_value = loss_value + Lr.detach()
+                del fftkernel_c, tapper_c, xfft2, conv, Lr
+            del tapper_t, fftkernel_t
 
-        loss.backward()
-        return loss
+        return loss_value
 
 # import os
 # import numpy as np
