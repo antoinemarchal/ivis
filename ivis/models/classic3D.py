@@ -297,6 +297,99 @@ class Classic3D(BaseModel):
 
         return loss_value
 
+
+class Classic3DHighMemory(Classic3D):
+    """
+    Classic3D variant that accumulates the full objective graph before backward.
+
+    This can be faster for small problems, but peak memory grows with the number
+    of beam blocks processed by each objective call.
+    """
+
+    def objective(
+        self,
+        x,
+        vis_data,
+        device,
+        primary_beam_list=None,
+        primary_beam=None,
+        pb_list=None,
+        grid_list=None,
+        pb=None,
+        grid_array=None,
+        cell_size=None,
+        fftsd=None,
+        fftbeam=None,
+        tapper=None,
+        lambda_sd=0.0,
+        lambda_pos=0.0,
+        fftkernel=None,
+        beam_workers=4,
+        verbose=False,
+        **_,
+    ):
+        x.requires_grad_(True)
+        if x.is_leaf and x.grad is not None:
+            x.grad.zero_()
+
+        primary_beam_list, grid_list = resolve_pb_grid_lists(
+            vis_data,
+            pb_list=primary_beam_list if primary_beam_list is not None else pb_list,
+            grid_list=grid_list,
+            pb=primary_beam if primary_beam is not None else pb,
+            grid_array=grid_array,
+        )
+
+        loss = 0.0
+
+        for c, b, I, sI, uu, vv, ww in vis_data.iter_chan_beam_I():
+            model_vis = forward_beam(
+                x2d=x[c],
+                primary_beam=primary_beam_list[b],
+                grid=grid_list[b],
+                uu=uu,
+                vv=vv,
+                ww=ww,
+                cell_size=cell_size,
+                device=device,
+            )
+
+            I_use = I.conj() if self.conj_data else I
+            vis_real = torch.from_numpy(I_use.real).to(device)
+            vis_imag = torch.from_numpy(I_use.imag).to(device)
+            sig = torch.from_numpy(sI).to(device)
+
+            residual_real = (model_vis.real - vis_real) / sig
+            residual_imag = (model_vis.imag - vis_imag) / sig
+            J = torch.sum(residual_real**2 + residual_imag**2)
+            loss = loss + 0.5 * J
+
+            if verbose:
+                print_gpu_memory(device)
+
+        if lambda_sd > 0.0 and fftsd is not None:
+            fftsd_t = torch.from_numpy(fftsd).to(device)
+            fftbeam_t = torch.from_numpy(fftbeam).to(device)
+            tapper_t = torch.from_numpy(tapper).to(device)
+            xfft2 = tfft2(x * tapper_t)
+            model_sd = (cell_size**2) * xfft2 * fftbeam_t
+            Lsd = 0.5 * (
+                torch.nansum((model_sd.real - fftsd_t.real) ** 2)
+                + torch.nansum((model_sd.imag - fftsd_t.imag) ** 2)
+            ) * lambda_sd
+            loss = loss + Lsd
+
+        if self.lambda_r > 0.0 and fftkernel is not None:
+            tapper_t = torch.from_numpy(tapper).to(device)
+            fftkernel_t = torch.from_numpy(fftkernel).to(device)
+            xfft2 = tfft2(x * tapper_t)
+            conv = (cell_size**2) * xfft2 * fftkernel_t
+            Lr = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
+            loss = loss + Lr
+
+        loss.backward()
+        return loss
+
 # import os
 # import numpy as np
 # import torch
