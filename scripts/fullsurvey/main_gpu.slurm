@@ -32,6 +32,7 @@ echo "SLURM_JOB_GPUS: ${SLURM_JOB_GPUS:-unset}"
 echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-unset}"
 date
 
+export CONDARC=/dev/null
 source /totoro/anmarchal/library/miniforge3/etc/profile.d/conda.sh
 echo "Activating conda env..."
 time conda activate ivis

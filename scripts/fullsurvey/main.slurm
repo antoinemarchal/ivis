@@ -8,6 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
 #SBATCH --time=08:00:00
+#SBATCH --mail-user=antoine.marchal@cnrs.fr
 
 # Go to the directory where the job was submitted
 cd "$SLURM_SUBMIT_DIR"

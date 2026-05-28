@@ -13,7 +13,7 @@ import time
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.models import Classic3D
+from ivis.models import Classic3D, Classic3DMemory 
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.readers import CasacoreReader
@@ -64,7 +64,7 @@ def promote_header_2d_to_3d_velocity(target_header_2d,
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge1_contsub/"
+    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge1_contsub/"
     
     path_beams = "/totoro/anmarchal/data/gaskap/fullsurvey/holography_beams/merge/" #directory of primary beams
     path_sd = "/totoro/anmarchal/data/parkes/" #path single-dish data - dummy here
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     I: VisIData = reader.read_blocks_I(
         ms_root=path_ms,
         uvmin=0, uvmax=np.inf,
-        chan_sel=slice(536,537),
+        chan_sel=slice(1011,1012),
         rest_freq=1.42040575177e9, #HI rest frequency in Hz
         mode="merge",
         target_center=cfield,
@@ -117,15 +117,15 @@ if __name__ == '__main__':
     max_its = 20
     lambda_sd = 0
     lambda_r = 1
-    cost_device = 0        # 0 for GPU, "cpu" for CPU
-    optim_device = 0        # 0 for GPU, "cpu" for CPU
+    cost_device = 0#"cpu"        # 0 for GPU, "cpu" for CPU
+    optim_device = 0#"cpu"        # 0 for GPU, "cpu" for CPU
     positivity = True #ATTENTION
     init_params = np.zeros((1, shape[0], shape[1]), dtype=np.float32) #+ 1.e-6 #not be exactly at bound
 
     # -------------------
     # Choose model
     # -------------------
-    # model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+    # model = Classic3DMemory(lambda_r=lambda_r)
     model = Classic3D(lambda_r=lambda_r)
 
     nchan = len(I.velocity)
@@ -166,7 +166,7 @@ if __name__ == '__main__':
     # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=dv)    
     
     #Write output array on disk
-    fits.writeto(pathout + "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits", result, target_header, overwrite=True)
+    fits.writeto(pathout + "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits", result, target_header, overwrite=True)
     # fits.writeto(pathout + "output_chan_792_6_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits", cube, hdr3, overwrite=True)
         
     # #PLOT RESULT
