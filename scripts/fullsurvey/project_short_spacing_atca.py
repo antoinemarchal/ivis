@@ -81,6 +81,35 @@ def image_header(header):
     return out
 
 
+def label_style_for_data(data):
+    ny, nx = data.shape
+    y1 = max(1, int(0.12 * ny))
+    x1 = max(1, int(0.25 * nx))
+    top_left = np.asarray(data[:y1, :x1], dtype=float)
+    has_nan = np.isnan(top_left).any()
+    if has_nan:
+        return {
+            "color": "black",
+            "bbox": {"facecolor": "white", "alpha": 0.9, "pad": 6, "edgecolor": "none"},
+        }
+    return {"color": "white", "bbox": None}
+
+
+def add_panel_label(ax, data, label):
+    label_style = label_style_for_data(data)
+    ax.text(
+        0.03,
+        0.97,
+        label,
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=22.0,
+        color=label_style["color"],
+        bbox=label_style["bbox"],
+    )
+
+
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -131,13 +160,15 @@ if __name__ == "__main__":
     ax = fig.add_axes([0.1, 0.1, 0.78, 0.8], projection=w_atca)
     ax.set_xlabel(r"RA", fontsize=18.0)
     ax.set_ylabel(r"DEC", fontsize=18.0)
+    atca_jy_arcsec2 = K_to_jy_arcsec2(hi_slice_array_atca, NU_HZ)
     img = ax.imshow(
-        K_to_jy_arcsec2(hi_slice_array_atca, NU_HZ) * PLOT_SCALE,
+        atca_jy_arcsec2 * PLOT_SCALE,
         vmin=VMIN * PLOT_SCALE,
         vmax=VMAX * PLOT_SCALE,
         origin="lower",
         cmap="inferno",
     )
+    add_panel_label(ax, atca_jy_arcsec2, "ATCA+Parkes")
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.0)
@@ -161,6 +192,7 @@ if __name__ == "__main__":
         origin="lower",
         cmap="inferno",
     )
+    add_panel_label(ax, ASKAP, "ASKAP+Parkes")
     colorbar_ax = fig.add_axes([0.89, 0.11, 0.02, 0.78])
     cbar = fig.colorbar(img, cax=colorbar_ax)
     cbar.ax.tick_params(labelsize=14.0)

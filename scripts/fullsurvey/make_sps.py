@@ -12,15 +12,15 @@ from astropy.io import fits
 ASKAP_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAP"
 PB_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits")
 
-JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits")
-JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing.fits")
+JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits")
+JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits")
+JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_sd_regrid.fits")
 
-JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_sd_regrid.fits")
 LINEAR_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits")
 LINEAR_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_short_spacing.fits")
-LOW_VEL_JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits")
-LOW_VEL_JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_short_spacing.fits")
-LOW_VEL_JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_sd_regrid.fits")
+LOW_VEL_JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits")
+LOW_VEL_JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits")
+LOW_VEL_JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_sd_regrid.fits")
 OUTPUT_PATH = os.path.join(ASKAP_DIR, "SPS_ASKAP.png")
 OUTPUT_PATH_LINEAR = os.path.join(ASKAP_DIR, "SPS_ASKAP_linear.png")
 OUTPUT_PATH_LOW_VEL = os.path.join(ASKAP_DIR, "SPS_ASKAP_low_vel.png")

@@ -12,7 +12,7 @@ from astropy.io import fits
 PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
 JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits"
 LINEAR_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
-LOW_VEL_JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits"
+LOW_VEL_JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits"
 ASKAPSOFT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/averaged_chan1_reprojected.fits"
 ASKAPSOFT_ORIGINALS = [
     "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/cutout-1428171-imagecube-531987.fits",
@@ -122,7 +122,7 @@ def label_for_path(input_path, has_short_spacing):
     basename = os.path.basename(input_path)
     if basename == os.path.basename(ASKAPSOFT_PATH):
         return "ASKAPSoft+Parkes" if has_short_spacing else "ASKAPSoft"
-    return "ASKAP+Parkes" if has_short_spacing else "ASKAP"
+    return "Classic3D+Parkes" if has_short_spacing else "Classic3D"
 
 
 def color_limits_for_path(path):
@@ -208,7 +208,12 @@ if __name__ == "__main__":
         )
 
         root = os.path.splitext(input_path)[0]
-        with fits.open(f"{root}_short_spacing.fits") as hdul:
+        short_spacing_path = f"{root}_short_spacing.fits"
+        if not os.path.exists(short_spacing_path):
+            print(f"Skipping missing short-spacing product: {short_spacing_path}")
+            continue
+
+        with fits.open(short_spacing_path) as hdul:
             data = hdul[0].data.astype(float)
             header = hdul[0].header
         plot_image(

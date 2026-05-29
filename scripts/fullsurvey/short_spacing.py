@@ -19,7 +19,7 @@ INPUTS = [
         "target_velocity_kms": 238.6,
     },
     {
-        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1270_vel_6.4905_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0.fits",
+        "path": "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits",
         "target_velocity_kms": 6.4905,
     },
     {
