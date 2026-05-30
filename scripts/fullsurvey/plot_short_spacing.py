@@ -9,9 +9,9 @@ from astropy import wcs
 from astropy.io import fits
 
 
-PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
+PB_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits"
 JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits"
-LINEAR_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
+LINEAR_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits"
 LOW_VEL_JOINT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAP/output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits"
 ASKAPSOFT_PATH = "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data/averaged_chan1_reprojected.fits"
 ASKAPSOFT_ORIGINALS = [
@@ -193,6 +193,16 @@ if __name__ == "__main__":
 
     joint, joint_header = load_original_image(JOINT_PATH)
     linear, linear_header = load_original_image(LINEAR_PATH)
+
+    plot_image(
+        (joint - linear) * mask,
+        joint_header,
+        pb,
+        output_png_path(JOINT_PATH, "_RESIDUAL_JOINT_VS_LINEAR_ASKAP_only"),
+        VMIN,
+        VMAX,
+        "Joint - Linear",
+    )
 
     for input_path in INPUT_PATHS:
         vmin, vmax = color_limits_for_path(input_path)

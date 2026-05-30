@@ -16,8 +16,8 @@ JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1
 JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits")
 JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_sd_regrid.fits")
 
-LINEAR_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits")
-LINEAR_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_short_spacing.fits")
+LINEAR_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR.fits")
+LINEAR_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_short_spacing.fits")
 LOW_VEL_JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits")
 LOW_VEL_JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits")
 LOW_VEL_JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_sd_regrid.fits")
