@@ -75,7 +75,7 @@ def fit_gaussian_to_series(ks, sps):
     return best
 
 
-def plot_sps(output_path, series, ylim):
+def plot_sps(output_path, series, ylim, show_gaussian_line=True, show_legend=True):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111)
     ax.set_xscale("log")
@@ -97,20 +97,22 @@ def plot_sps(output_path, series, ylim):
     if red_series is None:
         raise ValueError("Could not identify the short-spacing series for Gaussian fitting.")
     fitted_fwhm_arcmin, fitted_amplitude = fit_gaussian_to_series(red_series["ks"], red_series["sps"])
-    ax.plot(
-        ks_ref,
-        gaussian_beam_power(ks_ref, fitted_fwhm_arcmin, fitted_amplitude),
-        color="blue",
-        linestyle="--",
-        linewidth=2.0,
-        label=rf"Gaussian {fitted_fwhm_arcmin * 60.0:.1f}$''$",
-    )
+    if show_gaussian_line:
+        ax.plot(
+            ks_ref,
+            gaussian_beam_power(ks_ref, fitted_fwhm_arcmin, fitted_amplitude),
+            color="blue",
+            linestyle="--",
+            linewidth=2.0,
+            label=rf"Gaussian {fitted_fwhm_arcmin * 60.0:.1f}$''$",
+        )
     ax.set_xlabel(r"$k$ (arcmin$^{-1}$)", fontsize=16)
     ax.set_ylabel(r"$P(k)$ [(Jy arcsec$^{-2}$)$^2$]", fontsize=16)
     ax.set_ylim(ylim)
     secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
     secax.set_xlabel(r"$D$ (m)", fontsize=16)
-    ax.legend()
+    if show_legend:
+        ax.legend()
     plt.savefig(output_path, format="png", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     print(f"{os.path.basename(output_path)} effective beam FWHM: {fitted_fwhm_arcmin * 60.0:.2f} arcsec")
@@ -185,6 +187,7 @@ if __name__ == "__main__":
             },
         ],
         ylim=[1.0e-14, 1.0e-2],
+        show_gaussian_line=False,
     )
 
     plot_sps(
