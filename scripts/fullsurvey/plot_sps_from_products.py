@@ -10,6 +10,9 @@ PRODUCTS_DIR = os.path.join(ASKAP_DIR, "products")
 OUTPUT_PATH = os.path.join(ASKAP_DIR, "SPS_ASKAP.png")
 OUTPUT_PATH_LINEAR = os.path.join(ASKAP_DIR, "SPS_ASKAP_linear.png")
 OUTPUT_PATH_LOW_VEL = os.path.join(ASKAP_DIR, "SPS_ASKAP_low_vel.png")
+OUTPUT_PATH_ASKAPSOFT = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft.png")
+OUTPUT_PATH_ASKAPSOFT_ONLY = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft_only.png")
+OUTPUT_PATH_ASKAPSOFT_SS = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft_short_spacing.png")
 
 LAMBDA_M = 0.211
 ARCMIN_PER_RAD = 3437.75
@@ -91,13 +94,13 @@ def plot_sps(output_path, series, ylim, show_gaussian_line=True, show_legend=Tru
             markersize=item.get("markersize"),
             label=item["label"],
         )
-    ks_all = np.concatenate([np.asarray(item["ks"], dtype=float) for item in series])
-    ks_ref = np.logspace(np.log10(np.nanmin(ks_all)), np.log10(np.nanmax(ks_all)), 512)
-    red_series = next((item for item in series if "short spacing" in item["label"].lower()), None)
-    if red_series is None:
-        raise ValueError("Could not identify the short-spacing series for Gaussian fitting.")
-    fitted_fwhm_arcmin, fitted_amplitude = fit_gaussian_to_series(red_series["ks"], red_series["sps"])
     if show_gaussian_line:
+        ks_all = np.concatenate([np.asarray(item["ks"], dtype=float) for item in series])
+        ks_ref = np.logspace(np.log10(np.nanmin(ks_all)), np.log10(np.nanmax(ks_all)), 512)
+        red_series = next((item for item in series if "short spacing" in item["label"].lower()), None)
+        if red_series is None:
+            raise ValueError("Could not identify the short-spacing series for Gaussian fitting.")
+        fitted_fwhm_arcmin, fitted_amplitude = fit_gaussian_to_series(red_series["ks"], red_series["sps"])
         ax.plot(
             ks_ref,
             gaussian_beam_power(ks_ref, fitted_fwhm_arcmin, fitted_amplitude),
@@ -115,13 +118,15 @@ def plot_sps(output_path, series, ylim, show_gaussian_line=True, show_legend=Tru
         ax.legend()
     plt.savefig(output_path, format="png", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
-    print(f"{os.path.basename(output_path)} effective beam FWHM: {fitted_fwhm_arcmin * 60.0:.2f} arcsec")
+    if show_gaussian_line:
+        print(f"{os.path.basename(output_path)} effective beam FWHM: {fitted_fwhm_arcmin * 60.0:.2f} arcsec")
 
 
 if __name__ == "__main__":
     joint = load_products("sps_askap_joint.npz")
     linear = load_products("sps_askap_linear.npz")
     low_vel = load_products("sps_askap_low_vel.npz")
+    askapsoft = load_products("sps_askapsoft.npz")
 
     plot_sps(
         OUTPUT_PATH,
@@ -187,7 +192,6 @@ if __name__ == "__main__":
             },
         ],
         ylim=[1.0e-14, 1.0e-2],
-        show_gaussian_line=False,
     )
 
     plot_sps(
@@ -218,6 +222,72 @@ if __name__ == "__main__":
                 "marker": ".",
                 "markersize": 8.0,
                 "label": "Joint + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT,
+        [
+            {
+                "ks": askapsoft["ks_askapsoft_sd"][askapsoft["askapsoft_sd_mask"]],
+                "sps": askapsoft["sps1d_askapsoft_sd"][askapsoft["askapsoft_sd_mask"]],
+                "color": "green",
+                "linestyle": "-",
+                "linewidth": 2,
+                "label": "SD regrid",
+            },
+            {
+                "ks": askapsoft["ks_askapsoft"],
+                "sps": askapsoft["sps1d_askapsoft"],
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft",
+            },
+            {
+                "ks": askapsoft["ks_askapsoft_ss"],
+                "sps": askapsoft["sps1d_askapsoft_ss"],
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT_ONLY,
+        [
+            {
+                "ks": askapsoft["ks_askapsoft"],
+                "sps": askapsoft["sps1d_askapsoft"],
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+        show_gaussian_line=False,
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT_SS,
+        [
+            {
+                "ks": askapsoft["ks_askapsoft_ss"],
+                "sps": askapsoft["sps1d_askapsoft_ss"],
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft + short spacing",
             },
         ],
         ylim=[1.0e-14, 1.0e-2],

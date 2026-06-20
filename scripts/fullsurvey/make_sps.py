@@ -10,6 +10,7 @@ from astropy.io import fits
 
 
 ASKAP_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAP"
+ASKAPSOFT_DIR = "/Users/antoine/Desktop/IVIS_paper/ASKAPSoft/data"
 PB_PATH = os.path.join(ASKAP_DIR, "output_chan_795_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_LINEAR_PB_eff.fits")
 
 JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits")
@@ -21,9 +22,21 @@ LINEAR_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_536_1blocks_7arcsec_lambda
 LOW_VEL_JOINT_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20.fits")
 LOW_VEL_JOINT_SS_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_short_spacing.fits")
 LOW_VEL_JOINT_SD_PATH = os.path.join(ASKAP_DIR, "output_chan_1011_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_sd_regrid.fits")
+ASKAPSOFT_PATH = os.path.join(ASKAPSOFT_DIR, "averaged_chan1_reprojected.fits")
+ASKAPSOFT_SS_PATH = os.path.join(ASKAPSOFT_DIR, "averaged_chan1_reprojected_short_spacing.fits")
+ASKAPSOFT_SD_PATH = os.path.join(ASKAPSOFT_DIR, "averaged_chan1_reprojected_sd_regrid.fits")
+ASKAPSOFT_ORIGINALS = [
+    os.path.join(ASKAPSOFT_DIR, "cutout-1428171-imagecube-531987.fits"),
+    os.path.join(ASKAPSOFT_DIR, "cutout-1428420-imagecube-556399.fits"),
+    os.path.join(ASKAPSOFT_DIR, "cutout-1428421-imagecube-542502.fits"),
+    os.path.join(ASKAPSOFT_DIR, "cutout-1428422-imagecube-556176.fits"),
+]
 OUTPUT_PATH = os.path.join(ASKAP_DIR, "SPS_ASKAP.png")
 OUTPUT_PATH_LINEAR = os.path.join(ASKAP_DIR, "SPS_ASKAP_linear.png")
 OUTPUT_PATH_LOW_VEL = os.path.join(ASKAP_DIR, "SPS_ASKAP_low_vel.png")
+OUTPUT_PATH_ASKAPSOFT = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft.png")
+OUTPUT_PATH_ASKAPSOFT_ONLY = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft_only.png")
+OUTPUT_PATH_ASKAPSOFT_SS = os.path.join(ASKAP_DIR, "SPS_ASKAPSoft_short_spacing.png")
 PRODUCTS_DIR = os.path.join(ASKAP_DIR, "products")
 
 NU_HZ = 1.42040575177e9
@@ -51,11 +64,55 @@ def k_to_jy_arcsec2(data_k, nu_hz):
     return intensity.to(u.Jy / u.arcsec**2, equivalencies=u.dimensionless_angles()).value
 
 
+def beam_axes_arcsec(header):
+    if "BMAJ" in header and "BMIN" in header:
+        return (
+            (header["BMAJ"] * u.deg).to_value(u.arcsec),
+            (header["BMIN"] * u.deg).to_value(u.arcsec),
+        )
+    raise KeyError("Beam keywords BMAJ/BMIN not found in FITS header.")
+
+
+def beam_axes_arcsec_from_file(path):
+    with fits.open(path) as hdul:
+        return beam_axes_arcsec(hdul[0].header)
+
+
+def fallback_beam_axes_arcsec(input_path):
+    basename = os.path.basename(input_path)
+    if basename == "averaged_chan1_reprojected.fits":
+        beam_axes = np.asarray(
+            [beam_axes_arcsec_from_file(path) for path in ASKAPSOFT_ORIGINALS],
+            dtype=float,
+        )
+        return tuple(np.mean(beam_axes, axis=0))
+
+    if basename.endswith("_chan1_reprojected.fits"):
+        original_path = input_path.replace("_chan1_reprojected.fits", ".fits")
+        if os.path.exists(original_path):
+            return beam_axes_arcsec_from_file(original_path)
+
+    raise KeyError(f"No fallback beam metadata available for {input_path}.")
+
+
+def jy_beam_to_jy_arcsec2(data_jy_beam, header, input_path):
+    try:
+        bmaj_arcsec, bmin_arcsec = beam_axes_arcsec(header)
+    except KeyError:
+        bmaj_arcsec, bmin_arcsec = fallback_beam_axes_arcsec(input_path)
+
+    beam_area_arcsec2 = (np.pi / (4.0 * np.log(2.0))) * bmaj_arcsec * bmin_arcsec
+    return np.asarray(data_jy_beam, dtype=float) / beam_area_arcsec2
+
+
 def load_image(path):
     with fits.open(path) as hdul:
         data = first_plane(hdul[0].data)
         header = hdul[0].header.copy()
-    if "LINEAR" in os.path.basename(path) and header.get("BUNIT") != "Jy / arcsec2":
+    bunit = str(header.get("BUNIT", "")).strip().lower().replace(" ", "")
+    if "jy/beam" in bunit or "jybeam" in bunit:
+        data = jy_beam_to_jy_arcsec2(data, header, path)
+    elif "LINEAR" in os.path.basename(path) and header.get("BUNIT") != "Jy / arcsec2":
         data = k_to_jy_arcsec2(data, NU_HZ)
     return data, header
 
@@ -72,7 +129,7 @@ def centered_subimage(data, fraction):
 def compute_sps(data, pb_eff, header):
     shape = data.shape
     tapper = ml.edges.apodize(0.95, shape)
-    field = data * pb_eff
+    field = np.nan_to_num(data * pb_eff, nan=0.0, posinf=0.0, neginf=0.0)
     field_zm = field - np.mean(field)
     field_apod = field_zm * tapper
     return ml.powspec(field_apod, reso=(header["CDELT2"] * u.deg).to(u.arcmin).value)
@@ -91,7 +148,7 @@ def save_products(path, **arrays):
     np.savez(path, **arrays)
 
 
-def plot_sps(output_path, series, ylim):
+def plot_sps(output_path, series, ylim, show_legend=True):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111)
     ax.set_xscale("log")
@@ -112,7 +169,8 @@ def plot_sps(output_path, series, ylim):
     ax.set_ylim(ylim)
     secax = ax.secondary_xaxis("top", functions=(k_to_D, D_to_k))
     secax.set_xlabel(r"$D$ (m)", fontsize=16)
-    ax.legend()
+    if show_legend:
+        ax.legend()
     plt.savefig(output_path, format="png", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -128,6 +186,9 @@ if __name__ == "__main__":
     low_vel_joint, _ = load_image(LOW_VEL_JOINT_PATH)
     low_vel_joint_ss, _ = load_image(LOW_VEL_JOINT_SS_PATH)
     low_vel_joint_sd, _ = load_image(LOW_VEL_JOINT_SD_PATH)
+    askapsoft, askapsoft_header = load_image(ASKAPSOFT_PATH)
+    askapsoft_ss, _ = load_image(ASKAPSOFT_SS_PATH)
+    askapsoft_sd, _ = load_image(ASKAPSOFT_SD_PATH)
 
     with fits.open(PB_PATH) as hdul:
         pb_eff = np.asarray(hdul[0].data, dtype=float)
@@ -142,6 +203,9 @@ if __name__ == "__main__":
     low_vel_joint = centered_subimage(low_vel_joint, SUBIMAGE_FRACTION)
     low_vel_joint_ss = centered_subimage(low_vel_joint_ss, SUBIMAGE_FRACTION)
     low_vel_joint_sd = centered_subimage(low_vel_joint_sd, SUBIMAGE_FRACTION)
+    askapsoft = centered_subimage(askapsoft, SUBIMAGE_FRACTION)
+    askapsoft_ss = centered_subimage(askapsoft_ss, SUBIMAGE_FRACTION)
+    askapsoft_sd = centered_subimage(askapsoft_sd, SUBIMAGE_FRACTION)
 
     ks_sd, sps1d_sd = compute_sps(joint_sd, pb_eff, header)
     ks_joint, sps1d_joint = compute_sps(joint, pb_eff, header)
@@ -153,6 +217,10 @@ if __name__ == "__main__":
     ks_low_vel_joint, sps1d_low_vel_joint = compute_sps(low_vel_joint, pb_eff, header)
     ks_low_vel_joint_ss, sps1d_low_vel_joint_ss = compute_sps(low_vel_joint_ss, pb_eff, header)
     low_vel_sd_mask = k_to_D(ks_low_vel_sd) <= SD_MAX_D_M
+    ks_askapsoft_sd, sps1d_askapsoft_sd = compute_sps(askapsoft_sd, pb_eff, askapsoft_header)
+    ks_askapsoft, sps1d_askapsoft = compute_sps(askapsoft, pb_eff, askapsoft_header)
+    ks_askapsoft_ss, sps1d_askapsoft_ss = compute_sps(askapsoft_ss, pb_eff, askapsoft_header)
+    askapsoft_sd_mask = k_to_D(ks_askapsoft_sd) <= SD_MAX_D_M
 
     save_products(
         os.path.join(PRODUCTS_DIR, "sps_askap_joint.npz"),
@@ -183,6 +251,16 @@ if __name__ == "__main__":
         sps1d_low_vel_joint=sps1d_low_vel_joint,
         ks_low_vel_joint_ss=ks_low_vel_joint_ss,
         sps1d_low_vel_joint_ss=sps1d_low_vel_joint_ss,
+    )
+    save_products(
+        os.path.join(PRODUCTS_DIR, "sps_askapsoft.npz"),
+        ks_askapsoft_sd=ks_askapsoft_sd,
+        sps1d_askapsoft_sd=sps1d_askapsoft_sd,
+        askapsoft_sd_mask=askapsoft_sd_mask,
+        ks_askapsoft=ks_askapsoft,
+        sps1d_askapsoft=sps1d_askapsoft,
+        ks_askapsoft_ss=ks_askapsoft_ss,
+        sps1d_askapsoft_ss=sps1d_askapsoft_ss,
     )
 
     plot_sps(
@@ -279,6 +357,71 @@ if __name__ == "__main__":
                 "marker": ".",
                 "markersize": 8.0,
                 "label": "Joint + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT,
+        [
+            {
+                "ks": ks_askapsoft_sd[askapsoft_sd_mask],
+                "sps": sps1d_askapsoft_sd[askapsoft_sd_mask],
+                "color": "green",
+                "linestyle": "-",
+                "linewidth": 2,
+                "label": "SD regrid",
+            },
+            {
+                "ks": ks_askapsoft,
+                "sps": sps1d_askapsoft,
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft",
+            },
+            {
+                "ks": ks_askapsoft_ss,
+                "sps": sps1d_askapsoft_ss,
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft + short spacing",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT_ONLY,
+        [
+            {
+                "ks": ks_askapsoft,
+                "sps": sps1d_askapsoft,
+                "color": "black",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft",
+            },
+        ],
+        ylim=[1.0e-14, 1.0e-2],
+    )
+
+    plot_sps(
+        OUTPUT_PATH_ASKAPSOFT_SS,
+        [
+            {
+                "ks": ks_askapsoft_ss,
+                "sps": sps1d_askapsoft_ss,
+                "color": "red",
+                "linestyle": "None",
+                "marker": ".",
+                "markersize": 8.0,
+                "label": "ASKAPSoft + short spacing",
             },
         ],
         ylim=[1.0e-14, 1.0e-2],
