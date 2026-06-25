@@ -32,7 +32,10 @@ def build_effective_pb(pb_cube: np.ndarray, mode: str) -> np.ndarray:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a normalized effective primary beam from reproj_pb.fits."
+        description=(
+            "Build a normalized effective primary beam from a beam cube already "
+            "reprojected onto the target header."
+        )
     )
     parser.add_argument("input_fits", help="Input FITS beam cube, e.g. reproj_pb.fits")
     parser.add_argument(
@@ -44,8 +47,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=("rss", "mean"),
-        default="rss",
-        help="Combination mode: rss=sqrt(sum(pb^2)), mean=average(pb). Default: rss",
+        default="mean",
+        help="Combination mode: mean=average(pb), rss=sqrt(sum(pb^2)). Default: mean",
     )
     return parser.parse_args()
 
