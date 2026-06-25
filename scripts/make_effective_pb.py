@@ -6,71 +6,129 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
+from astropy.wcs import WCS
+
+from ivis.models.operators.reprojection import backward_reprojection_manual
 
 
-def build_effective_pb(pb_cube: np.ndarray, mode: str) -> np.ndarray:
+def combine_effective_pb(
+    pb_cube: np.ndarray,
+    grid_cube: np.ndarray,
+    image_shape: tuple[int, int],
+    mode: str,
+) -> np.ndarray:
     if pb_cube.ndim != 3:
         raise ValueError(
-            f"Expected a 3D primary beam cube with shape (nbeam, ny, nx), got {pb_cube.shape}"
+            f"Expected pb cube with shape (nbeam, ny, nx), got {pb_cube.shape}"
+        )
+    if grid_cube.ndim != 5 or grid_cube.shape[1] != 1 or grid_cube.shape[-1] != 2:
+        raise ValueError(
+            "Expected grid cube with shape (nbeam, 1, ny, nx, 2), "
+            f"got {grid_cube.shape}"
+        )
+    if pb_cube.shape[0] != grid_cube.shape[0]:
+        raise ValueError(
+            f"Beam count mismatch: pb has {pb_cube.shape[0]}, grid has {grid_cube.shape[0]}"
         )
 
-    pb_cube = np.nan_to_num(pb_cube.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    device = "cpu"
+    cache_store: dict[object, object] = {}
+    accum = np.zeros(image_shape, dtype=np.float32)
+
+    for i in range(pb_cube.shape[0]):
+        pb_local = np.nan_to_num(pb_cube[i].astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        back = backward_reprojection_manual(
+            z2d=pb_local,
+            grid=grid_cube[i],
+            image_shape=image_shape,
+            device=device,
+            cache_store=cache_store,
+        )
+        back_np = back.real.detach().cpu().numpy().astype(np.float32)
+        if mode == "mean":
+            accum += back_np
+        elif mode == "rss":
+            accum += back_np**2
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
 
     if mode == "mean":
-        effpb = np.mean(pb_cube, axis=0)
-    elif mode == "rss":
-        effpb = np.sqrt(np.sum(pb_cube**2, axis=0))
+        effpb = accum / float(pb_cube.shape[0])
     else:
-        raise ValueError(f"Unsupported mode: {mode}")
+        effpb = np.sqrt(accum)
 
     peak = float(np.nanmax(effpb))
     if peak <= 0.0:
         raise ValueError("Effective primary beam has non-positive peak; cannot normalize.")
-
     return effpb / peak
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a normalized effective primary beam from a beam cube already "
-            "reprojected onto the target header."
+            "Mosaic local primary beams onto a larger target header using grid_interp.fits, "
+            "then write a normalized effective primary beam."
         )
     )
-    parser.add_argument("input_fits", help="Input FITS beam cube, e.g. reproj_pb.fits")
+    parser.add_argument("pb_fits", help="Input local PB cube, e.g. reproj_pb.fits")
+    parser.add_argument("grid_fits", help="Input interpolation grid cube, e.g. grid_interp.fits")
+    parser.add_argument(
+        "template_fits",
+        help="FITS file whose header defines the large target map to write onto",
+    )
     parser.add_argument(
         "-o",
         "--output",
-        default="effective_pb.fits",
-        help="Output FITS filename (default: effective_pb.fits)",
+        default="effective_pb_large.fits",
+        help="Output FITS filename (default: effective_pb_large.fits)",
     )
     parser.add_argument(
         "--mode",
-        choices=("rss", "mean"),
+        choices=("mean", "rss"),
         default="mean",
-        help="Combination mode: mean=average(pb), rss=sqrt(sum(pb^2)). Default: mean",
+        help="Combine back-projected beams with mean or rss. Default: mean",
     )
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    input_path = Path(args.input_fits)
-    output_path = Path(args.output)
-
-    with fits.open(input_path) as hdul:
-        pb_cube = hdul[0].data
+def extract_celestial_template_header(template_path: Path) -> tuple[fits.Header, tuple[int, int]]:
+    with fits.open(template_path) as hdul:
         header = hdul[0].header.copy()
 
-    effpb = build_effective_pb(pb_cube, mode=args.mode)
+    if "NAXIS1" not in header or "NAXIS2" not in header:
+        raise ValueError(f"Template FITS {template_path} does not define NAXIS1/NAXIS2.")
 
-    header["NAXIS"] = 2
-    for key in ("NAXIS3", "CTYPE3", "CRPIX3", "CRVAL3", "CDELT3", "CUNIT3"):
-        if key in header:
-            del header[key]
+    image_shape = (int(header["NAXIS2"]), int(header["NAXIS1"]))
 
-    fits.PrimaryHDU(effpb.astype(np.float32), header=header).writeto(output_path, overwrite=True)
-    print(f"Wrote normalized effective PB to {output_path}")
+    # Keep only the celestial WCS when the template is a cube.
+    celestial_header = WCS(header).celestial.to_header()
+    out_header = fits.Header()
+    out_header["NAXIS"] = 2
+    out_header["NAXIS1"] = image_shape[1]
+    out_header["NAXIS2"] = image_shape[0]
+    for key, value in celestial_header.items():
+        out_header[key] = value
+
+    return out_header, image_shape
+
+
+def main() -> None:
+    args = parse_args()
+
+    with fits.open(Path(args.pb_fits)) as hdul:
+        pb_cube = hdul[0].data
+
+    with fits.open(Path(args.grid_fits)) as hdul:
+        grid_cube = hdul[0].data
+
+    header, image_shape = extract_celestial_template_header(Path(args.template_fits))
+
+    effpb = combine_effective_pb(pb_cube, grid_cube, image_shape=image_shape, mode=args.mode)
+
+    fits.PrimaryHDU(effpb.astype(np.float32), header=header).writeto(
+        Path(args.output), overwrite=True
+    )
+    print(f"Wrote normalized mosaiced effective PB to {args.output}")
 
 
 if __name__ == "__main__":
