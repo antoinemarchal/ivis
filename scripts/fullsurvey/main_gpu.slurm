@@ -46,7 +46,7 @@ nvidia-smi || true
 
 echo "== running =="
 # Option 1 (simplest): run directly (recommended for single-task jobs)
-python3 -u main_fullsurvey.py --nproc "${SLURM_CPUS_PER_TASK:-12}"
+python3 -u main_fullsurvey_linear.py --nproc "${SLURM_CPUS_PER_TASK:-12}"
 
 # Option 2 (if you want Slurm binding/enforcement), comment Option 1 and use:
 # srun --cpu-bind=cores --accel-bind=gn python3 -u main_fullsurvey.py --nproc "${SLURM_CPUS_PER_TASK:-12}"

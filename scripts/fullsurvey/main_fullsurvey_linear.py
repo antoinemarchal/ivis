@@ -14,7 +14,7 @@ from astropy.wcs import WCS
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.models import ClassicIViS3D
+from ivis.models import Classic3D
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.readers import CasacoreReader
@@ -65,7 +65,7 @@ def promote_header_2d_to_3d_velocity(target_header_2d,
 
 if __name__ == '__main__':    
     #path data
-    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/"
+    path_ms = "/totoro/anmarchal/data/gaskap/fullsurvey/untar/merge/merge1_contsub/"
     path_sd = "/totoro/anmarchal/data/parkes/" #path single-dish data - dummy here
     pathout = "/totoro/anmarchal/data/gaskap/fullsurvey/products/merge/" #path where data will be packaged and stored
 
@@ -113,7 +113,7 @@ if __name__ == '__main__':
         I: VisIData = reader.read_blocks_I(
             ms_root=path_ms,
             uvmin=0, uvmax=np.inf,
-            chan_sel=slice(795,796),
+            chan_sel=slice(536,537),
             rest_freq=1.42040575177e9, #HI rest frequency in Hz
             mode="merge",
             beam_sel=[k]
@@ -134,7 +134,7 @@ if __name__ == '__main__':
         # -------------------
         # Choose model
         # -------------------
-        model = ClassicIViS3D(lambda_r=lambda_r, Nw=0)
+        model = Classic3D(lambda_r=lambda_r)
         
         nchan = len(I.velocity)
         cube = np.zeros((nchan,shape[0],shape[1]))
@@ -174,7 +174,7 @@ if __name__ == '__main__':
             # hdr3 = promote_header_2d_to_3d_velocity(target_header, v0_kms=v0, nchan=nchan, dv_kms=0.5)    #FIXME
     
         #Write output array on disk
-        fits.writeto(pathout + "output_chan_795_linear/output_chan_795_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_K_{:03d}.fits".format(k), result, target_header, overwrite=True)
+        fits.writeto(pathout + "output_chan_536_linear/output_chan_536_1_1blocks_7arcsec_lambda_r_1_positivity_true_iter_20_K_{:03d}.fits".format(k), result, target_header, overwrite=True)
     # fits.writeto(pathout + "output_chan_765_1_2blocks_7arcsec_lambda_r_1_positivity_true_iter_20_Nw_0_TEST_linear.fits", cube, hdr3, overwrite=True)
         
     # #PLOT RESULT

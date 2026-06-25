@@ -13,7 +13,7 @@ import time
 
 from ivis.io import DataProcessor
 from ivis.logger import logger
-from ivis.models import Classic3D, Classic3DMemory 
+from ivis.models import Classic3D
 from ivis.imager import Imager3D
 from ivis.types import VisIData
 from ivis.readers import CasacoreReader
