@@ -11,6 +11,13 @@ from astropy.wcs import WCS
 from ivis.models.operators.reprojection import backward_reprojection_manual
 
 
+def to_native_array(arr: np.ndarray, dtype: np.dtype | None = None) -> np.ndarray:
+    out = np.asarray(arr if dtype is None else arr.astype(dtype, copy=False))
+    if not out.dtype.isnative:
+        out = out.byteswap().view(out.dtype.newbyteorder("="))
+    return np.ascontiguousarray(out)
+
+
 def combine_effective_pb(
     pb_cube: np.ndarray,
     grid_cube: np.ndarray,
@@ -36,7 +43,12 @@ def combine_effective_pb(
     accum = np.zeros(image_shape, dtype=np.float32)
 
     for i in range(pb_cube.shape[0]):
-        pb_local = np.nan_to_num(pb_cube[i].astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        pb_local = np.nan_to_num(
+            to_native_array(pb_cube[i], dtype=np.float32),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
         back = backward_reprojection_manual(
             z2d=pb_local,
             grid=grid_cube[i],
@@ -116,10 +128,10 @@ def main() -> None:
     args = parse_args()
 
     with fits.open(Path(args.pb_fits)) as hdul:
-        pb_cube = hdul[0].data
+        pb_cube = to_native_array(hdul[0].data, dtype=np.float32)
 
     with fits.open(Path(args.grid_fits)) as hdul:
-        grid_cube = hdul[0].data
+        grid_cube = to_native_array(hdul[0].data, dtype=np.float32)
 
     header, image_shape = extract_celestial_template_header(Path(args.template_fits))
 
