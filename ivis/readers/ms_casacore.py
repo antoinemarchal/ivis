@@ -357,8 +357,8 @@ def _read_one_ms(ms_path: str,
 
 def read_ms_block_I(
     ms_dir: str,
-    uvmin: float = 0.0,               # in wavelengths (desired)
-    uvmax: float = float("inf"),      # in wavelengths (desired)
+    uvmin: float = 0.0,               # in meters
+    uvmax: float = float("inf"),      # in meters
     chan_sel=None,                    # None | slice | list[int] | np.ndarray[int]
     rest_freq: float = 1.42040575177e9, # HI rest frequency as default value in unit of Hz
     keep_autocorr: bool = False,
@@ -473,7 +473,7 @@ def read_ms_block_I(
     uu = np.zeros((nbeam, nvis_max), dtype=np.float32)
     vv = np.zeros_like(uu); ww = np.zeros_like(uu)
 
-    # Per-channel UV mask and channel-major transpose
+    # Baseline-length mask in meters, then channel-major transpose
     for b in range(nbeam):
         if nvis[b] == 0:
             continue
