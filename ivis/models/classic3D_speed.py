@@ -123,6 +123,11 @@ class Classic3DSpeed(Classic3D):
         Reuse CPU FINUFFT or CUDA cuFINUFFT plans when the corresponding
         optional package is installed. Other installations retain the
         functional NUFFT backend.
+    use_softplus_positivity
+        Map the PyTorch-LBFGS variable through softplus before evaluating the
+        objective. To use this GPU-resident mode, call ``Imager3D.process``
+        with ``positivity=False``. This is smooth positivity, not an exact
+        zero-inclusive bound.
     """
 
     def __init__(
@@ -134,17 +139,40 @@ class Classic3DSpeed(Classic3D):
         nufft_eps: float = 1e-4,
         reprojection_batch_size: int = 4,
         use_plan_cache: bool = True,
+        use_softplus_positivity: bool = False,
+        positivity_beta: float = 1.0,
+        positivity_floor: float = 0.0,
     ):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
         if nufft_eps <= 0:
             raise ValueError("nufft_eps must be positive.")
         if reprojection_batch_size < 1:
             raise ValueError("reprojection_batch_size must be at least one.")
+        if positivity_beta <= 0:
+            raise ValueError("positivity_beta must be positive.")
         self.nufft_eps = float(nufft_eps)
         self.reprojection_batch_size = int(reprojection_batch_size)
         self.use_plan_cache = bool(use_plan_cache)
+        self.use_softplus_positivity = bool(use_softplus_positivity)
+        self.positivity_beta = float(positivity_beta)
+        self.positivity_floor = float(positivity_floor)
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
+
+    def decode_softplus_parameters(self, parameters):
+        """Convert the unconstrained LBFGS variable into a positive image.
+
+        This is intended for the result returned by ``Imager3D.process`` when
+        ``use_softplus_positivity=True`` and the unmodified generic solver is
+        used. Decode before applying any output-unit conversion.
+        """
+        values = np.asarray(parameters)
+        if not self.use_softplus_positivity:
+            return values
+        return (
+            np.logaddexp(0.0, self.positivity_beta * values) / self.positivity_beta
+            + self.positivity_floor
+        )
 
     def clear_speed_cache(self) -> None:
         """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
@@ -335,6 +363,8 @@ class Classic3DSpeed(Classic3D):
         x.requires_grad_(True)
         if x.is_leaf and x.grad is not None:
             x.grad.zero_()
+        if self.use_softplus_positivity:
+            x = F.softplus(x, beta=self.positivity_beta) + self.positivity_floor
 
         primary_beam_list, grid_list = resolve_pb_grid_lists(
             vis_data,
