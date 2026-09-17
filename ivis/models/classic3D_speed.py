@@ -7,7 +7,7 @@ reprojections, and reuses FINUFFT/cuFINUFFT plans between evaluations.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,9 +104,10 @@ class _PlanPair:
 @dataclass
 class _Block:
     c: int
-    data_real: torch.Tensor
-    data_imag: torch.Tensor
-    sigma: torch.Tensor
+    b: int
+    data_real: torch.Tensor | None
+    data_imag: torch.Tensor | None
+    sigma: torch.Tensor | None
     u_radpix: torch.Tensor | None
     v_radpix: torch.Tensor | None
     # CUDA requires a stacked (2, nvis) tensor.  It is static for a visibility
@@ -127,6 +128,23 @@ class _Batch:
     blocks: list[_Block]
 
 
+@dataclass
+class _CudaVisibility:
+    """A stable GPU copy of a visibility block eligible for plan reuse."""
+
+    data_real: torch.Tensor
+    data_imag: torch.Tensor
+    sigma: torch.Tensor
+    points: torch.Tensor
+
+    @property
+    def nbytes(self) -> int:
+        return sum(
+            tensor.numel() * tensor.element_size()
+            for tensor in (self.data_real, self.data_imag, self.sigma, self.points)
+        )
+
+
 class Classic3DSpeed(Classic3D):
     """Classic3D with cached FINUFFT plans and batched reprojections.
 
@@ -142,6 +160,10 @@ class Classic3DSpeed(Classic3D):
         Reuse CPU FINUFFT plans and, on CUDA, one cuFINUFFT plan pair per
         image shape/device when the corresponding optional package is
         installed. Other installations retain the functional NUFFT backend.
+    cuda_visibility_cache_bytes
+        Maximum GPU memory for stable cached CUDA visibility blocks.  ``None``
+        selects ``min(8 GiB, 25% of device memory)``.  Other blocks are
+        streamed and use the functional CUDA NUFFT backend.
     """
 
     def __init__(
@@ -153,24 +175,34 @@ class Classic3DSpeed(Classic3D):
         nufft_eps: float = 1e-4,
         reprojection_batch_size: int = 4,
         use_plan_cache: bool = True,
+        cuda_visibility_cache_bytes: int | None = None,
     ):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
         if nufft_eps <= 0:
             raise ValueError("nufft_eps must be positive.")
         if reprojection_batch_size < 1:
             raise ValueError("reprojection_batch_size must be at least one.")
+        if cuda_visibility_cache_bytes is not None and cuda_visibility_cache_bytes < 0:
+            raise ValueError("cuda_visibility_cache_bytes must be non-negative.")
         self.nufft_eps = float(nufft_eps)
         self.reprojection_batch_size = int(reprojection_batch_size)
         self.use_plan_cache = bool(use_plan_cache)
+        self.cuda_visibility_cache_bytes = cuda_visibility_cache_bytes
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
         self._cuda_plan_pairs: dict[tuple[Any, ...], _PlanPair] = {}
+        self._cuda_visibility_cache: OrderedDict[tuple[int, int], _CudaVisibility] = OrderedDict()
+        self._cuda_visibility_cache_bytes_used = 0
+        self._cuda_visibility_cache_source_key: tuple[Any, ...] | None = None
 
     def clear_speed_cache(self) -> None:
         """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
         self._speed_caches.clear()
         self._static_tensor_cache.clear()
         self._cuda_plan_pairs.clear()
+        self._cuda_visibility_cache.clear()
+        self._cuda_visibility_cache_bytes_used = 0
+        self._cuda_visibility_cache_source_key = None
 
     def projected_fista(
         self,
@@ -439,10 +471,48 @@ class Classic3DSpeed(Classic3D):
             self._cuda_plan_pairs[key] = plan_pair
         return plan_pair
 
+    def _cuda_visibility_cache_limit(self, device: torch.device) -> int:
+        if self.cuda_visibility_cache_bytes is not None:
+            return int(self.cuda_visibility_cache_bytes)
+        total_memory = torch.cuda.get_device_properties(device).total_memory
+        return min(8 * 1024**3, total_memory // 4)
+
+    def _cuda_visibility(self, vis_data, block: _Block, cell_size, device):
+        """Get a stable cached CUDA block, or stream one for this evaluation.
+
+        The fixed cache deliberately stops filling at its budget instead of
+        using an LRU.  FISTA scans all blocks in the same order every time, so
+        an undersized LRU would evict every entry before the next evaluation
+        reached it and would provide no reuse.
+        """
+        key = (block.c, block.b)
+        cached = self._cuda_visibility_cache.get(key)
+        if cached is not None:
+            return cached, True
+
+        data, sigma, uu, vv, _ww = vis_data.slice_chan_beam_I(block.c, block.b)
+        data_use = data.conj() if self.conj_data else data
+        data_real = _float_tensor(data_use.real, device)
+        data_imag = _float_tensor(data_use.imag, device)
+        sigma_t = _float_tensor(sigma, device)
+        _cell_rad, u_radpix, v_radpix = uvw_to_radpix(uu, vv, cell_size, device)
+        points = torch.stack([-v_radpix, u_radpix], dim=0)
+        entry = _CudaVisibility(data_real, data_imag, sigma_t, points)
+
+        if self._cuda_visibility_cache_bytes_used + entry.nbytes <= self._cuda_visibility_cache_limit(device):
+            self._cuda_visibility_cache[key] = entry
+            self._cuda_visibility_cache_bytes_used += entry.nbytes
+            return entry, True
+        return entry, False
+
     def _prepare_cache(self, vis_data, primary_beam_list, grid_list, device, cell_size, image_shape):
         cache_key = self._cache_key(
             vis_data, primary_beam_list, grid_list, device, cell_size, image_shape
         )
+        if device.type == "cuda" and self._cuda_visibility_cache_source_key != cache_key:
+            self._cuda_visibility_cache.clear()
+            self._cuda_visibility_cache_bytes_used = 0
+            self._cuda_visibility_cache_source_key = cache_key
         cached = self._speed_caches.get(cache_key)
         if cached is not None:
             return cached
@@ -470,32 +540,34 @@ class Classic3DSpeed(Classic3D):
                 beam_geometry[b] = geometry
             grid, primary_beam = geometry
 
-            _cell_rad, u_radpix, v_radpix = uvw_to_radpix(uu, vv, cell_size, device)
-            plan_pair = (
-                self._make_plan_pair(u_radpix, v_radpix, tuple(primary_beam.shape))
-                if device.type == "cpu"
-                else None
-            )
             cuda_plan_pair = (
                 self._get_cuda_plan_pair(tuple(primary_beam.shape), device)
                 if device.type == "cuda"
                 else None
             )
-            data_use = data.conj() if self.conj_data else data
-            block = _Block(
-                c=c,
-                data_real=_float_tensor(data_use.real, device),
-                data_imag=_float_tensor(data_use.imag, device),
-                sigma=_float_tensor(sigma, device),
-                # CPU plans retain their points internally.  Keeping a second
-                # pair of UV tensors for every block is unnecessary there.
-                u_radpix=None if plan_pair is not None else u_radpix,
-                v_radpix=None if plan_pair is not None else v_radpix,
-                points=(torch.stack([-v_radpix, u_radpix], dim=0)
-                        if device.type == "cuda" else None),
-                plan_pair=plan_pair,
-                cuda_plan_pair=cuda_plan_pair,
-            )
+            if device.type == "cuda":
+                block = _Block(
+                    c=c, b=b, data_real=None, data_imag=None, sigma=None,
+                    u_radpix=None, v_radpix=None, points=None,
+                    plan_pair=None, cuda_plan_pair=cuda_plan_pair,
+                )
+            else:
+                _cell_rad, u_radpix, v_radpix = uvw_to_radpix(
+                    uu, vv, cell_size, device
+                )
+                plan_pair = self._make_plan_pair(
+                    u_radpix, v_radpix, tuple(primary_beam.shape)
+                )
+                data_use = data.conj() if self.conj_data else data
+                block = _Block(
+                    c=c, b=b,
+                    data_real=_float_tensor(data_use.real, device),
+                    data_imag=_float_tensor(data_use.imag, device),
+                    sigma=_float_tensor(sigma, device),
+                    u_radpix=None if plan_pair is not None else u_radpix,
+                    v_radpix=None if plan_pair is not None else v_radpix,
+                    points=None, plan_pair=plan_pair, cuda_plan_pair=None,
+                )
             by_channel_and_shape[(c, tuple(primary_beam.shape))].append(
                 (block, grid, primary_beam)
             )
@@ -513,24 +585,26 @@ class Classic3DSpeed(Classic3D):
         self._speed_caches[cache_key] = batches
         return batches
 
-    def _forward_nufft(self, image, block, cell_size):
+    def _forward_nufft(self, image, block, cell_size, *, points=None, use_cuda_plan=True):
         if block.plan_pair is not None:
             return (cell_size ** 2) * _PlanType2.apply(
                 image.to(torch.complex64), block.plan_pair
             )
-        if block.cuda_plan_pair is not None:
-            if block.points is None:
+        if block.cuda_plan_pair is not None and use_cuda_plan:
+            points = block.points if points is None else points
+            if points is None:
                 raise RuntimeError("Cached CUDA NUFFT plan requires UV points.")
             return (cell_size ** 2) * _CudaPlanType2.apply(
-                image.to(torch.complex64), block.points, block.cuda_plan_pair
+                image.to(torch.complex64), points, block.cuda_plan_pair
             )
         # The functional CUDA backend supports the same requested tolerance,
         # even though it does not yet have the CPU plan-cache implementation.
         if image.device.type == "cuda":
-            if block.points is None:
+            points = block.points if points is None else points
+            if points is None:
                 raise RuntimeError("CUDA NUFFT requires cached UV points.")
             return (cell_size ** 2) * pytorch_finufft.functional.finufft_type2(
-                block.points, image.to(torch.complex64),
+                points, image.to(torch.complex64),
                 isign=1, modeord=0, eps=self.nufft_eps,
             )
         if block.u_radpix is None or block.v_radpix is None:
@@ -595,9 +669,28 @@ class Classic3DSpeed(Classic3D):
 
             batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
             for index, block in enumerate(batch.blocks):
-                model_vis = self._forward_nufft(beamed[index], block, cell_size)
-                residual_real = (model_vis.real - block.data_real) / block.sigma
-                residual_imag = (model_vis.imag - block.data_imag) / block.sigma
+                if dev.type == "cuda":
+                    visibility, use_cuda_plan = self._cuda_visibility(
+                        vis_data, block, cell_size, dev
+                    )
+                    data_real = visibility.data_real
+                    data_imag = visibility.data_imag
+                    sigma_t = visibility.sigma
+                    points = visibility.points
+                else:
+                    if block.data_real is None or block.data_imag is None or block.sigma is None:
+                        raise RuntimeError("CPU NUFFT block is missing cached visibility data.")
+                    data_real = block.data_real
+                    data_imag = block.data_imag
+                    sigma_t = block.sigma
+                    points = None
+                    use_cuda_plan = True
+                model_vis = self._forward_nufft(
+                    beamed[index], block, cell_size, points=points,
+                    use_cuda_plan=use_cuda_plan,
+                )
+                residual_real = (model_vis.real - data_real) / sigma_t
+                residual_imag = (model_vis.imag - data_imag) / sigma_t
                 batch_loss = batch_loss + 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
@@ -605,7 +698,13 @@ class Classic3DSpeed(Classic3D):
             loss_value = loss_value + batch_loss.detach()
             # ``backward`` has consumed this batch's autograd graph.  Release
             # its large, transient reprojection tensors before the next batch.
-            del grids, primary_beams, images, projected, beamed, batch_loss
+            del (
+                grids, primary_beams, images, projected, beamed, batch_loss,
+                data_real, data_imag, sigma_t, points, model_vis,
+                residual_real, residual_imag,
+            )
+            if dev.type == "cuda":
+                del visibility
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
         if lambda_sd > 0.0 and fftsd is not None:
