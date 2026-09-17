@@ -17,6 +17,7 @@ import torch.nn.functional as F
 import pytorch_finufft
 from torch.fft import fft2 as tfft2
 
+from ivis.logger import logger
 from ivis.models.classic3D import Classic3D
 from ivis.models.operators.geometry import resolve_pb_grid_lists, uvw_to_radpix
 from ivis.models.operators.nufft import forward_nufft
@@ -123,11 +124,6 @@ class Classic3DSpeed(Classic3D):
         Reuse CPU FINUFFT or CUDA cuFINUFFT plans when the corresponding
         optional package is installed. Other installations retain the
         functional NUFFT backend.
-    use_softplus_positivity
-        Map the PyTorch-LBFGS variable through softplus before evaluating the
-        objective. To use this GPU-resident mode, call ``Imager3D.process``
-        with ``positivity=False``. This is smooth positivity, not an exact
-        zero-inclusive bound.
     """
 
     def __init__(
@@ -139,61 +135,125 @@ class Classic3DSpeed(Classic3D):
         nufft_eps: float = 1e-4,
         reprojection_batch_size: int = 4,
         use_plan_cache: bool = True,
-        use_softplus_positivity: bool = False,
-        positivity_beta: float = 1.0,
-        positivity_floor: float = 0.0,
     ):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
         if nufft_eps <= 0:
             raise ValueError("nufft_eps must be positive.")
         if reprojection_batch_size < 1:
             raise ValueError("reprojection_batch_size must be at least one.")
-        if positivity_beta <= 0:
-            raise ValueError("positivity_beta must be positive.")
         self.nufft_eps = float(nufft_eps)
         self.reprojection_batch_size = int(reprojection_batch_size)
         self.use_plan_cache = bool(use_plan_cache)
-        self.use_softplus_positivity = bool(use_softplus_positivity)
-        self.positivity_beta = float(positivity_beta)
-        self.positivity_floor = float(positivity_floor)
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
-
-    def decode_softplus_parameters(self, parameters):
-        """Convert the unconstrained LBFGS variable into a positive image.
-
-        This is intended for the result returned by ``Imager3D.process`` when
-        ``use_softplus_positivity=True`` and the unmodified generic solver is
-        used. Decode before applying any output-unit conversion.
-        """
-        values = np.asarray(parameters)
-        if not self.use_softplus_positivity:
-            return values
-        return (
-            np.logaddexp(0.0, self.positivity_beta * values) / self.positivity_beta
-            + self.positivity_floor
-        )
-
-    def encode_softplus_image(self, image):
-        """Convert a non-negative physical initial image into the LBFGS variable."""
-        values = np.asarray(image)
-        if not self.use_softplus_positivity:
-            return values
-        physical = np.maximum(
-            values - self.positivity_floor, np.finfo(np.float32).eps
-        )
-        scaled = self.positivity_beta * physical
-        latent = np.where(
-            scaled > 20.0,
-            physical,
-            np.log(np.expm1(np.minimum(scaled, 20.0))) / self.positivity_beta,
-        )
-        return latent.astype(values.dtype, copy=False)
 
     def clear_speed_cache(self) -> None:
         """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
         self._speed_caches.clear()
         self._static_tensor_cache.clear()
+
+    def projected_fista(
+        self,
+        x_init,
+        *,
+        device,
+        max_its: int,
+        initial_step: float | None = None,
+        backtracking_factor: float = 0.5,
+        grow_factor: float = 1.25,
+        **params,
+    ) -> np.ndarray:
+        """Minimize this model's objective with exact non-negative projection.
+
+        This model-local solver deliberately uses ``objective`` directly rather
+        than the shared FISTA implementation: Classic3DSpeed streams its
+        gradient and does not expose the normal-operator interface required by
+        that generic solver.  It is a monotone, backtracking FISTA variant;
+        every accepted physical image satisfies ``x >= 0`` exactly.
+        """
+        if max_its < 1:
+            raise ValueError("max_its must be at least one.")
+        if not 0.0 < backtracking_factor < 1.0:
+            raise ValueError("backtracking_factor must lie between zero and one.")
+        if grow_factor < 1.0:
+            raise ValueError("grow_factor must be at least one.")
+
+        dev = torch.device(device)
+        x = torch.as_tensor(x_init, dtype=torch.float32, device=dev).clone().clamp_min_(0)
+        y = x.clone()
+        t_k = 1.0
+
+        def evaluate(candidate):
+            leaf = candidate.detach().requires_grad_(True)
+            loss = self.objective(leaf, device=dev, **params)
+            if leaf.grad is None:
+                raise RuntimeError("Classic3DSpeed objective did not produce a gradient.")
+            return loss.detach(), leaf.grad.detach()
+
+        loss_x, grad_x = evaluate(x)
+        if initial_step is None:
+            # Choose a scale-aware first trial step, then let majorization
+            # backtracking make it safe.  The target one-step excursion is
+            # 1e-5 Jy/arcsec^2, appropriate for the fBm benchmark scale.
+            initial_step = 1.0e-5 / max(float(grad_x.abs().max()), 1.0e-20)
+        step = float(initial_step)
+        logger.info(
+            f"Starting projected FISTA on {dev}; exact positivity projection; "
+            f"initial step={step:.6e}"
+        )
+
+        for iteration in range(1, int(max_its) + 1):
+            loss_y, grad_y = evaluate(y)
+            reference_y = y
+            local_t = t_k
+
+            # A monotone restart prevents Nesterov extrapolation from moving
+            # away from the last accepted constrained image.
+            if loss_y > loss_x:
+                reference_y = x
+                loss_y, grad_y = loss_x, grad_x
+                local_t = 1.0
+
+            accepted = False
+            for _ in range(30):
+                candidate = (reference_y - step * grad_y).clamp_min(0)
+                loss_candidate, grad_candidate = evaluate(candidate)
+                delta = candidate - reference_y
+                majorizer = loss_y + torch.sum(grad_y * delta) + torch.sum(delta * delta) / (2.0 * step)
+                if torch.isfinite(loss_candidate) and loss_candidate <= majorizer:
+                    accepted = True
+                    break
+                step *= backtracking_factor
+
+            if not accepted:
+                raise RuntimeError("Projected FISTA failed to find a finite descent step.")
+            if loss_candidate > loss_x:
+                # A finite projected step may pass the local majorization test
+                # after an extrapolated restart but still not improve x. Keep
+                # the previous feasible point and restart on the next pass.
+                y = x.clone()
+                t_k = 1.0
+                step *= backtracking_factor
+                logger.info(
+                    f"[Projected FISTA Iter {iteration}/{max_its}] restart; "
+                    f"loss={float(loss_x):.6e}; step={step:.6e}"
+                )
+                continue
+
+            t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * local_t * local_t))
+            y = candidate + ((local_t - 1.0) / t_next) * (candidate - x)
+            relative_change = torch.linalg.vector_norm(candidate - x) / torch.clamp_min(
+                torch.linalg.vector_norm(candidate), 1.0e-20
+            )
+            x, loss_x, grad_x, t_k = candidate, loss_candidate, grad_candidate, t_next
+            step *= grow_factor
+            logger.info(
+                f"[Projected FISTA Iter {iteration}/{max_its}] "
+                f"loss={float(loss_x):.6e}; rel_change={float(relative_change):.6e}; "
+                f"step={step:.6e}"
+            )
+
+        return x.detach().cpu().numpy()
 
     def _static_tensor(self, value: Any, device: torch.device) -> torch.Tensor:
         """Cache an immutable numpy input after its one-time device transfer."""
@@ -379,9 +439,6 @@ class Classic3DSpeed(Classic3D):
         x.requires_grad_(True)
         if x.is_leaf and x.grad is not None:
             x.grad.zero_()
-        if self.use_softplus_positivity:
-            x = F.softplus(x, beta=self.positivity_beta) + self.positivity_floor
-
         primary_beam_list, grid_list = resolve_pb_grid_lists(
             vis_data,
             pb_list=primary_beam_list if primary_beam_list is not None else pb_list,
@@ -415,10 +472,7 @@ class Classic3DSpeed(Classic3D):
                 batch_loss = batch_loss + 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
-            # Softplus creates one shared graph edge from the latent LBFGS
-            # variable to ``x``. The streamed per-batch backwards below must
-            # retain that edge until this objective evaluation is complete.
-            batch_loss.backward(retain_graph=self.use_softplus_positivity)
+            batch_loss.backward()
             loss_value = loss_value + batch_loss.detach()
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
@@ -436,7 +490,7 @@ class Classic3DSpeed(Classic3D):
                     torch.nansum((model_sd.real - fftsd_c.real) ** 2)
                     + torch.nansum((model_sd.imag - fftsd_c.imag) ** 2)
                 ) * lambda_sd
-                loss.backward(retain_graph=self.use_softplus_positivity)
+                loss.backward()
                 loss_value = loss_value + loss.detach()
 
         if self.lambda_r > 0.0 and fftkernel is not None:
@@ -448,7 +502,7 @@ class Classic3DSpeed(Classic3D):
                 xfft2 = tfft2(x[c] * tapper_c)
                 conv = (cell_size**2) * xfft2 * fftkernel_c
                 loss = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
-                loss.backward(retain_graph=self.use_softplus_positivity)
+                loss.backward()
                 loss_value = loss_value + loss.detach()
 
         return loss_value
