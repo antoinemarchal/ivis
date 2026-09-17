@@ -350,9 +350,12 @@ class Classic3DSpeed(Classic3D):
         loss_value = torch.zeros((), dtype=x.dtype, device=dev)
         for batch in speed_batches:
             batch_size = len(batch.blocks)
-            images = x[batch.c].unsqueeze(0).unsqueeze(0).expand(
-                batch_size, -1, -1, -1
-            )
+            # SciPy L-BFGS-B (positivity=True) supplies float64 parameters,
+            # whereas cached grids are deliberately float32. grid_sample
+            # requires matching types; the cast is differentiable, so its
+            # float32 gradient is accumulated correctly on the float64 leaf.
+            images = x[batch.c].to(dtype=batch.grids.dtype).unsqueeze(0).unsqueeze(0)
+            images = images.expand(batch_size, -1, -1, -1)
             projected = F.grid_sample(
                 images, batch.grids, mode="bilinear", align_corners=True
             ).squeeze(1)
