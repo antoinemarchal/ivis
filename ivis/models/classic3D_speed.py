@@ -106,6 +106,10 @@ class _Batch:
     grids: torch.Tensor
     primary_beams: torch.Tensor
     blocks: list[_Block]
+    cuda_plan_pair: _PlanPair | None
+    data_real: torch.Tensor | None
+    data_imag: torch.Tensor | None
+    sigma: torch.Tensor | None
 
 
 class Classic3DSpeed(Classic3D):
@@ -123,6 +127,10 @@ class Classic3DSpeed(Classic3D):
         Reuse CPU FINUFFT or CUDA cuFINUFFT plans when the corresponding
         optional package is installed. Other installations retain the
         functional NUFFT backend.
+    common_uv_sampling
+        Keep only exact UV samples shared by every non-empty pointing in a
+        channel. This excludes unique samples, but enables multi-transform
+        CUDA plans. Disabled by default.
     """
 
     def __init__(
@@ -134,6 +142,7 @@ class Classic3DSpeed(Classic3D):
         nufft_eps: float = 1e-4,
         reprojection_batch_size: int = 4,
         use_plan_cache: bool = True,
+        common_uv_sampling: bool = False,
     ):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
         if nufft_eps <= 0:
@@ -143,6 +152,7 @@ class Classic3DSpeed(Classic3D):
         self.nufft_eps = float(nufft_eps)
         self.reprojection_batch_size = int(reprojection_batch_size)
         self.use_plan_cache = bool(use_plan_cache)
+        self.common_uv_sampling = bool(common_uv_sampling)
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
 
@@ -179,6 +189,7 @@ class Classic3DSpeed(Classic3D):
             self.nufft_eps,
             self.reprojection_batch_size,
             self.use_plan_cache,
+            self.common_uv_sampling,
         )
 
     def _make_plan_pair(self, u_radpix, v_radpix, image_shape):
@@ -198,7 +209,7 @@ class Classic3DSpeed(Classic3D):
         adjoint.setpts(x, y)
         return _PlanPair(forward=forward, adjoint=adjoint)
 
-    def _make_cuda_plan_pair(self, u_radpix, v_radpix, image_shape, device):
+    def _make_cuda_plan_pair(self, u_radpix, v_radpix, image_shape, device, n_trans=1):
         """Create reusable cuFINUFFT plans for a static CUDA visibility block."""
         if not self.use_plan_cache or cufinufft is None:
             return None
@@ -208,14 +219,52 @@ class Classic3DSpeed(Classic3D):
         # not accept it, and native order is the desired modeord=0 behavior.
         options = dict(dtype="complex64", gpu_device_id=device_id)
         forward = cufinufft.Plan(
-            2, image_shape, eps=self.nufft_eps, isign=1, **options
+            2, image_shape, n_trans=n_trans, eps=self.nufft_eps, isign=1, **options
         )
         adjoint = cufinufft.Plan(
-            1, image_shape, eps=self.nufft_eps, isign=-1, **options
+            1, image_shape, n_trans=n_trans, eps=self.nufft_eps, isign=-1, **options
         )
         forward.setpts(-v_radpix, u_radpix)
         adjoint.setpts(-v_radpix, u_radpix)
         return _PlanPair(forward=forward, adjoint=adjoint)
+
+    @staticmethod
+    def _uv_occurrence_keys(uu, vv):
+        """Exact UV keys that retain the multiplicity of repeated samples."""
+        points = np.ascontiguousarray(np.column_stack((uu, vv)))
+        counts: dict[bytes, int] = {}
+        keys = []
+        for row in points:
+            coordinate = row.tobytes()
+            occurrence = counts.get(coordinate, 0)
+            counts[coordinate] = occurrence + 1
+            keys.append((coordinate, occurrence))
+        return keys
+
+    def _common_uv_indices(self, vis_data):
+        """Map blocks to a canonical per-channel sequence of shared UV rows."""
+        by_channel: dict[int, list[tuple[tuple[int, int], list[tuple[bytes, int]]]]] = defaultdict(list)
+        for c, b, _data, _sigma, uu, vv, _ww in vis_data.iter_chan_beam_I():
+            by_channel[c].append(((c, b), self._uv_occurrence_keys(uu, vv)))
+
+        selections: dict[tuple[int, int], np.ndarray] = {}
+        for c, entries in by_channel.items():
+            common = set(entries[0][1])
+            for _block_key, keys in entries[1:]:
+                common.intersection_update(keys)
+            if not common:
+                raise ValueError(
+                    f"common_uv_sampling found no UV samples shared by all "
+                    f"non-empty pointings in channel {c}."
+                )
+
+            canonical = [key for key in entries[0][1] if key in common]
+            for block_key, keys in entries:
+                positions = {key: index for index, key in enumerate(keys)}
+                selections[block_key] = np.asarray(
+                    [positions[key] for key in canonical], dtype=np.intp
+                )
+        return selections
 
     def _prepare_cache(self, vis_data, primary_beam_list, grid_list, device, cell_size, image_shape):
         cache_key = self._cache_key(
@@ -225,6 +274,8 @@ class Classic3DSpeed(Classic3D):
         if cached is not None:
             return cached
 
+        common_indices = self._common_uv_indices(vis_data) if self.common_uv_sampling else None
+
         # Store geometry only until it has been concatenated into each batch.
         # Persisting both the individual tensors and their concatenated batch
         # tensors roughly doubled the grid/PB cache footprint.
@@ -232,6 +283,10 @@ class Classic3DSpeed(Classic3D):
             tuple[int, tuple[int, int]], list[tuple[_Block, torch.Tensor, torch.Tensor]]
         ] = defaultdict(list)
         for c, b, data, sigma, uu, vv, _ww in vis_data.iter_chan_beam_I():
+            if common_indices is not None:
+                indices = common_indices[(c, b)]
+                data, sigma = data[indices], sigma[indices]
+                uu, vv = uu[indices], vv[indices]
             grid = _float_tensor(grid_list[b], device)
             primary_beam = _float_tensor(primary_beam_list[b], device)
             if grid.ndim != 4 or grid.shape[0] != 1 or grid.shape[-1] != 2:
@@ -249,7 +304,7 @@ class Classic3DSpeed(Classic3D):
                 self._make_cuda_plan_pair(
                     u_radpix, v_radpix, tuple(primary_beam.shape), device
                 )
-                if device.type == "cuda"
+                if device.type == "cuda" and not self.common_uv_sampling
                 else None
             )
             data_use = data.conj() if self.conj_data else data
@@ -275,11 +330,28 @@ class Classic3DSpeed(Classic3D):
         for (c, _shape), entries in by_channel_and_shape.items():
             for start in range(0, len(entries), self.reprojection_batch_size):
                 batch_entries = entries[start:start + self.reprojection_batch_size]
+                blocks = [entry[0] for entry in batch_entries]
+                batch_cuda_plan_pair = None
+                if device.type == "cuda" and self.common_uv_sampling:
+                    batch_cuda_plan_pair = self._make_cuda_plan_pair(
+                        blocks[0].u_radpix,
+                        blocks[0].v_radpix,
+                        tuple(batch_entries[0][2].shape),
+                        device,
+                        n_trans=len(blocks),
+                    )
                 batches.append(_Batch(
                     c=c,
                     grids=torch.cat([entry[1] for entry in batch_entries], dim=0),
                     primary_beams=torch.stack([entry[2] for entry in batch_entries]),
-                    blocks=[entry[0] for entry in batch_entries],
+                    blocks=blocks,
+                    cuda_plan_pair=batch_cuda_plan_pair,
+                    data_real=(torch.stack([block.data_real for block in blocks])
+                               if batch_cuda_plan_pair is not None else None),
+                    data_imag=(torch.stack([block.data_imag for block in blocks])
+                               if batch_cuda_plan_pair is not None else None),
+                    sigma=(torch.stack([block.sigma for block in blocks])
+                           if batch_cuda_plan_pair is not None else None),
                 ))
         self._speed_caches[cache_key] = batches
         return batches
@@ -358,14 +430,24 @@ class Classic3DSpeed(Classic3D):
             ).squeeze(1)
             beamed = projected * batch.primary_beams
 
-            batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
-            for index, block in enumerate(batch.blocks):
-                model_vis = self._forward_nufft(beamed[index], block, cell_size)
-                residual_real = (model_vis.real - block.data_real) / block.sigma
-                residual_imag = (model_vis.imag - block.data_imag) / block.sigma
-                batch_loss = batch_loss + 0.5 * torch.sum(
+            if batch.cuda_plan_pair is not None:
+                model_vis = (cell_size ** 2) * _CudaPlanType2.apply(
+                    beamed.to(torch.complex64), batch.cuda_plan_pair
+                )
+                residual_real = (model_vis.real - batch.data_real) / batch.sigma
+                residual_imag = (model_vis.imag - batch.data_imag) / batch.sigma
+                batch_loss = 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
+            else:
+                batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
+                for index, block in enumerate(batch.blocks):
+                    model_vis = self._forward_nufft(beamed[index], block, cell_size)
+                    residual_real = (model_vis.real - block.data_real) / block.sigma
+                    residual_imag = (model_vis.imag - block.data_imag) / block.sigma
+                    batch_loss = batch_loss + 0.5 * torch.sum(
+                        residual_real.square() + residual_imag.square()
+                    )
             batch_loss.backward()
             loss_value = loss_value + batch_loss.detach()
 
