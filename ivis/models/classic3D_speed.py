@@ -1,8 +1,8 @@
-"""Cached and batched CPU implementation of the Classic3D objective.
+"""Cached and batched implementation of the Classic3D objective.
 
 ``Classic3DSpeed`` is deliberately opt-in.  It keeps the Classic3D data term
 and regularizers, but caches static observing geometry, batches compatible
-reprojections, and reuses FINUFFT plans on CPU between optimizer evaluations.
+reprojections, and reuses FINUFFT/cuFINUFFT plans between evaluations.
 """
 
 from __future__ import annotations
@@ -25,6 +25,11 @@ try:  # FINUFFT is an optional IVIS CPU dependency.
     import finufft
 except ImportError:  # pragma: no cover - exercised by the functional fallback
     finufft = None
+
+try:  # cuFINUFFT is optional; pytorch_finufft remains the CUDA fallback.
+    import cufinufft
+except ImportError:  # pragma: no cover - depends on the CUDA installation
+    cufinufft = None
 
 
 def _array_identity(value: Any) -> tuple[Any, ...]:
@@ -60,6 +65,19 @@ class _PlanType2(torch.autograd.Function):
         return torch.from_numpy(result), None
 
 
+class _CudaPlanType2(torch.autograd.Function):
+    """Type-2 cuFINUFFT whose adjoint reuses a cached type-1 plan."""
+
+    @staticmethod
+    def forward(ctx, image: torch.Tensor, plan_pair: "_PlanPair") -> torch.Tensor:
+        ctx.plan_pair = plan_pair
+        return plan_pair.forward.execute(image.detach().contiguous())
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return ctx.plan_pair.adjoint.execute(grad_output.detach().contiguous()), None
+
+
 @dataclass
 class _PlanPair:
     forward: Any
@@ -74,7 +92,12 @@ class _Block:
     sigma: torch.Tensor
     u_radpix: torch.Tensor | None
     v_radpix: torch.Tensor | None
+    # CUDA's functional interface takes a stacked (2, nvis) tensor.  It is
+    # static for a visibility block, so constructing it in every closure is
+    # needless device work and allocation churn.
+    points: torch.Tensor | None
     plan_pair: _PlanPair | None
+    cuda_plan_pair: _PlanPair | None
 
 
 @dataclass
@@ -86,7 +109,7 @@ class _Batch:
 
 
 class Classic3DSpeed(Classic3D):
-    """Classic3D with cached CPU FINUFFT plans and batched reprojections.
+    """Classic3D with cached FINUFFT plans and batched reprojections.
 
     Parameters
     ----------
@@ -97,8 +120,9 @@ class Classic3DSpeed(Classic3D):
         Number of same-channel, same-output-shape pointings in one
         ``grid_sample`` call.  The final batch may be smaller.
     use_plan_cache
-        Reuse CPU FINUFFT plans. CUDA and installations without FINUFFT retain
-        the existing functional NUFFT backend.
+        Reuse CPU FINUFFT or CUDA cuFINUFFT plans when the corresponding
+        optional package is installed. Other installations retain the
+        functional NUFFT backend.
     """
 
     def __init__(
@@ -120,10 +144,24 @@ class Classic3DSpeed(Classic3D):
         self.reprojection_batch_size = int(reprojection_batch_size)
         self.use_plan_cache = bool(use_plan_cache)
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
+        self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
 
     def clear_speed_cache(self) -> None:
-        """Release cached static tensors and CPU FINUFFT plans."""
+        """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
         self._speed_caches.clear()
+        self._static_tensor_cache.clear()
+
+    def _static_tensor(self, value: Any, device: torch.device) -> torch.Tensor:
+        """Cache an immutable numpy input after its one-time device transfer."""
+        array = np.asarray(value)
+        key = (_array_identity(array), str(device))
+        tensor = self._static_tensor_cache.get(key)
+        if tensor is None:
+            # ``ascontiguousarray`` also handles non-contiguous FITS views
+            # accepted by the original objective.
+            tensor = torch.from_numpy(np.ascontiguousarray(array)).to(device)
+            self._static_tensor_cache[key] = tensor
+        return tensor
 
     def _cache_key(self, vis_data, primary_beam_list, grid_list, device, cell_size, shape):
         return (
@@ -160,6 +198,25 @@ class Classic3DSpeed(Classic3D):
         adjoint.setpts(x, y)
         return _PlanPair(forward=forward, adjoint=adjoint)
 
+    def _make_cuda_plan_pair(self, u_radpix, v_radpix, image_shape, device):
+        """Create reusable cuFINUFFT plans for a static CUDA visibility block."""
+        if not self.use_plan_cache or cufinufft is None:
+            return None
+        device_id = device.index if device.index is not None else torch.cuda.current_device()
+        # pytorch_finufft also uses cuFINUFFT's native mode order for this
+        # model.  Do not pass ``modeord``: older cuFINUFFT Python bindings do
+        # not accept it, and native order is the desired modeord=0 behavior.
+        options = dict(dtype="complex64", gpu_device_id=device_id)
+        forward = cufinufft.Plan(
+            2, image_shape, eps=self.nufft_eps, isign=1, **options
+        )
+        adjoint = cufinufft.Plan(
+            1, image_shape, eps=self.nufft_eps, isign=-1, **options
+        )
+        forward.setpts(-v_radpix, u_radpix)
+        adjoint.setpts(-v_radpix, u_radpix)
+        return _PlanPair(forward=forward, adjoint=adjoint)
+
     def _prepare_cache(self, vis_data, primary_beam_list, grid_list, device, cell_size, image_shape):
         cache_key = self._cache_key(
             vis_data, primary_beam_list, grid_list, device, cell_size, image_shape
@@ -188,6 +245,13 @@ class Classic3DSpeed(Classic3D):
                 if device.type == "cpu"
                 else None
             )
+            cuda_plan_pair = (
+                self._make_cuda_plan_pair(
+                    u_radpix, v_radpix, tuple(primary_beam.shape), device
+                )
+                if device.type == "cuda"
+                else None
+            )
             data_use = data.conj() if self.conj_data else data
             block = _Block(
                 c=c,
@@ -198,7 +262,10 @@ class Classic3DSpeed(Classic3D):
                 # pair of UV tensors for every block is unnecessary there.
                 u_radpix=None if plan_pair is not None else u_radpix,
                 v_radpix=None if plan_pair is not None else v_radpix,
+                points=(torch.stack([-v_radpix, u_radpix], dim=0)
+                        if device.type == "cuda" and cuda_plan_pair is None else None),
                 plan_pair=plan_pair,
+                cuda_plan_pair=cuda_plan_pair,
             )
             by_channel_and_shape[(c, tuple(primary_beam.shape))].append(
                 (block, grid, primary_beam)
@@ -222,12 +289,17 @@ class Classic3DSpeed(Classic3D):
             return (cell_size ** 2) * _PlanType2.apply(
                 image.to(torch.complex64), block.plan_pair
             )
+        if block.cuda_plan_pair is not None:
+            return (cell_size ** 2) * _CudaPlanType2.apply(
+                image.to(torch.complex64), block.cuda_plan_pair
+            )
         # The functional CUDA backend supports the same requested tolerance,
         # even though it does not yet have the CPU plan-cache implementation.
         if image.device.type == "cuda":
-            points = torch.stack([-block.v_radpix, block.u_radpix], dim=0)
+            if block.points is None:
+                raise RuntimeError("CUDA NUFFT requires cached UV points.")
             return (cell_size ** 2) * pytorch_finufft.functional.finufft_type2(
-                points, image.to(torch.complex64),
+                block.points, image.to(torch.complex64),
                 isign=1, modeord=0, eps=self.nufft_eps,
             )
         if block.u_radpix is None or block.v_radpix is None:
@@ -299,9 +371,9 @@ class Classic3DSpeed(Classic3D):
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
         if lambda_sd > 0.0 and fftsd is not None:
-            fftsd_t = torch.from_numpy(fftsd).to(dev)
-            fftbeam_t = torch.from_numpy(fftbeam).to(dev)
-            tapper_t = torch.from_numpy(tapper).to(dev)
+            fftsd_t = self._static_tensor(fftsd, dev)
+            fftbeam_t = self._static_tensor(fftbeam, dev)
+            tapper_t = self._static_tensor(tapper, dev)
             for c in range(x.shape[0]):
                 fftsd_c = fftsd_t[c] if fftsd_t.ndim == x.ndim else fftsd_t
                 fftbeam_c = fftbeam_t[c] if fftbeam_t.ndim == x.ndim else fftbeam_t
@@ -316,8 +388,8 @@ class Classic3DSpeed(Classic3D):
                 loss_value = loss_value + loss.detach()
 
         if self.lambda_r > 0.0 and fftkernel is not None:
-            tapper_t = torch.from_numpy(tapper).to(dev)
-            fftkernel_t = torch.from_numpy(fftkernel).to(dev)
+            tapper_t = self._static_tensor(tapper, dev)
+            fftkernel_t = self._static_tensor(fftkernel, dev)
             for c in range(x.shape[0]):
                 fftkernel_c = fftkernel_t[c] if fftkernel_t.ndim == x.ndim else fftkernel_t
                 tapper_c = tapper_t[c] if tapper_t.ndim == x.ndim else tapper_t
