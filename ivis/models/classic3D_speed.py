@@ -120,11 +120,11 @@ class _Block:
 @dataclass
 class _Batch:
     c: int
-    # Source arrays remain on CPU.  The GPU copies and their concatenated
-    # forms are created only for the active batch; retaining one grid/beam per
-    # pointing alone can exhaust VRAM on a full survey.
-    grids: tuple[Any, ...]
-    primary_beams: tuple[Any, ...]
+    # Keep one source geometry tensor per pointing.  The concatenated/stacked
+    # tensors are created only while this batch is evaluated; retaining one
+    # such pair for every channel batch exhausts GPU memory on large mosaics.
+    grids: tuple[torch.Tensor, ...]
+    primary_beams: tuple[torch.Tensor, ...]
     blocks: list[_Block]
 
 
@@ -517,19 +517,19 @@ class Classic3DSpeed(Classic3D):
         if cached is not None:
             return cached
 
-        # Geometry is identical for each channel of a pointing, but a full
-        # survey can have hundreds of large pointings.  Retaining even one
-        # GPU grid/beam pair per pointing scales VRAM with survey size, so
-        # cache the original CPU arrays and materialize only active batches.
-        beam_geometry: dict[int, tuple[Any, Any]] = {}
+        # Geometry is identical for each channel of a pointing.  Cache only
+        # one GPU copy per pointing, and keep batch concatenations transient
+        # in ``objective``.  Retaining a concatenation for every channel batch
+        # otherwise makes the cache scale as channels * pointings * image area.
+        beam_geometry: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
         by_channel_and_shape: dict[
             tuple[int, tuple[int, int]], list[tuple[_Block, torch.Tensor, torch.Tensor]]
         ] = defaultdict(list)
         for c, b, data, sigma, uu, vv, _ww in vis_data.iter_chan_beam_I():
             geometry = beam_geometry.get(b)
             if geometry is None:
-                grid = np.asarray(grid_list[b])
-                primary_beam = np.asarray(primary_beam_list[b])
+                grid = _float_tensor(grid_list[b], device)
+                primary_beam = _float_tensor(primary_beam_list[b], device)
                 if grid.ndim != 4 or grid.shape[0] != 1 or grid.shape[-1] != 2:
                     raise ValueError(
                         f"grid must have shape (1,H,W,2), got {tuple(grid.shape)}"
@@ -654,12 +654,8 @@ class Classic3DSpeed(Classic3D):
         loss_value = torch.zeros((), dtype=x.dtype, device=dev)
         for batch in speed_batches:
             batch_size = len(batch.blocks)
-            grids = torch.cat(
-                tuple(_float_tensor(grid, dev) for grid in batch.grids), dim=0
-            )
-            primary_beams = torch.stack(
-                tuple(_float_tensor(beam, dev) for beam in batch.primary_beams)
-            )
+            grids = torch.cat(batch.grids, dim=0)
+            primary_beams = torch.stack(batch.primary_beams)
             # SciPy L-BFGS-B (positivity=True) supplies float64 parameters,
             # whereas cached grids are deliberately float32. grid_sample
             # requires matching types; the cast is differentiable, so its
