@@ -119,8 +119,11 @@ class _Block:
 @dataclass
 class _Batch:
     c: int
-    grids: torch.Tensor
-    primary_beams: torch.Tensor
+    # Keep one source geometry tensor per pointing.  The concatenated/stacked
+    # tensors are created only while this batch is evaluated; retaining one
+    # such pair for every channel batch exhausts GPU memory on large mosaics.
+    grids: tuple[torch.Tensor, ...]
+    primary_beams: tuple[torch.Tensor, ...]
     blocks: list[_Block]
 
 
@@ -444,19 +447,28 @@ class Classic3DSpeed(Classic3D):
         if cached is not None:
             return cached
 
-        # Store geometry only until it has been concatenated into each batch.
-        # Persisting both the individual tensors and their concatenated batch
-        # tensors roughly doubled the grid/PB cache footprint.
+        # Geometry is identical for each channel of a pointing.  Cache only
+        # one GPU copy per pointing, and keep batch concatenations transient
+        # in ``objective``.  Retaining a concatenation for every channel batch
+        # otherwise makes the cache scale as channels * pointings * image area.
+        beam_geometry: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
         by_channel_and_shape: dict[
             tuple[int, tuple[int, int]], list[tuple[_Block, torch.Tensor, torch.Tensor]]
         ] = defaultdict(list)
         for c, b, data, sigma, uu, vv, _ww in vis_data.iter_chan_beam_I():
-            grid = _float_tensor(grid_list[b], device)
-            primary_beam = _float_tensor(primary_beam_list[b], device)
-            if grid.ndim != 4 or grid.shape[0] != 1 or grid.shape[-1] != 2:
-                raise ValueError(f"grid must have shape (1,H,W,2), got {tuple(grid.shape)}")
-            if tuple(grid.shape[1:3]) != tuple(primary_beam.shape):
-                raise ValueError("grid and primary beam output shapes must match.")
+            geometry = beam_geometry.get(b)
+            if geometry is None:
+                grid = _float_tensor(grid_list[b], device)
+                primary_beam = _float_tensor(primary_beam_list[b], device)
+                if grid.ndim != 4 or grid.shape[0] != 1 or grid.shape[-1] != 2:
+                    raise ValueError(
+                        f"grid must have shape (1,H,W,2), got {tuple(grid.shape)}"
+                    )
+                if tuple(grid.shape[1:3]) != tuple(primary_beam.shape):
+                    raise ValueError("grid and primary beam output shapes must match.")
+                geometry = (grid, primary_beam)
+                beam_geometry[b] = geometry
+            grid, primary_beam = geometry
 
             _cell_rad, u_radpix, v_radpix = uvw_to_radpix(uu, vv, cell_size, device)
             plan_pair = (
@@ -494,8 +506,8 @@ class Classic3DSpeed(Classic3D):
                 batch_entries = entries[start:start + self.reprojection_batch_size]
                 batches.append(_Batch(
                     c=c,
-                    grids=torch.cat([entry[1] for entry in batch_entries], dim=0),
-                    primary_beams=torch.stack([entry[2] for entry in batch_entries]),
+                    grids=tuple(entry[1] for entry in batch_entries),
+                    primary_beams=tuple(entry[2] for entry in batch_entries),
                     blocks=[entry[0] for entry in batch_entries],
                 ))
         self._speed_caches[cache_key] = batches
@@ -568,16 +580,18 @@ class Classic3DSpeed(Classic3D):
         loss_value = torch.zeros((), dtype=x.dtype, device=dev)
         for batch in speed_batches:
             batch_size = len(batch.blocks)
+            grids = torch.cat(batch.grids, dim=0)
+            primary_beams = torch.stack(batch.primary_beams)
             # SciPy L-BFGS-B (positivity=True) supplies float64 parameters,
             # whereas cached grids are deliberately float32. grid_sample
             # requires matching types; the cast is differentiable, so its
             # float32 gradient is accumulated correctly on the float64 leaf.
-            images = x[batch.c].to(dtype=batch.grids.dtype).unsqueeze(0).unsqueeze(0)
+            images = x[batch.c].to(dtype=grids.dtype).unsqueeze(0).unsqueeze(0)
             images = images.expand(batch_size, -1, -1, -1)
             projected = F.grid_sample(
-                images, batch.grids, mode="bilinear", align_corners=True
+                images, grids, mode="bilinear", align_corners=True
             ).squeeze(1)
-            beamed = projected * batch.primary_beams
+            beamed = projected * primary_beams
 
             batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
             for index, block in enumerate(batch.blocks):
@@ -589,6 +603,9 @@ class Classic3DSpeed(Classic3D):
                 )
             batch_loss.backward()
             loss_value = loss_value + batch_loss.detach()
+            # ``backward`` has consumed this batch's autograd graph.  Release
+            # its large, transient reprojection tensors before the next batch.
+            del grids, primary_beams, images, projected, beamed, batch_loss
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
         if lambda_sd > 0.0 and fftsd is not None:
