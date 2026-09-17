@@ -104,18 +104,13 @@ class _PlanPair:
 @dataclass
 class _Block:
     c: int
-    b: int
-    # CPU mode caches these directly.  CUDA mode deliberately leaves them
-    # unset and streams the block from ``vis_data`` during each evaluation.
-    # Retaining every channel/pointing visibility block on a large survey can
-    # consume the entire GPU before backward has any workspace available.
-    data_real: torch.Tensor | None
-    data_imag: torch.Tensor | None
-    sigma: torch.Tensor | None
+    data_real: torch.Tensor
+    data_imag: torch.Tensor
+    sigma: torch.Tensor
     u_radpix: torch.Tensor | None
     v_radpix: torch.Tensor | None
-    # CUDA receives a transient stacked (2, nvis) tensor while evaluating a
-    # block; CPU plans retain their points internally.
+    # CUDA requires a stacked (2, nvis) tensor.  It is static for a visibility
+    # block and is also used to configure a shared cuFINUFFT plan pair.
     points: torch.Tensor | None
     plan_pair: _PlanPair | None
     cuda_plan_pair: _PlanPair | None
@@ -475,40 +470,32 @@ class Classic3DSpeed(Classic3D):
                 beam_geometry[b] = geometry
             grid, primary_beam = geometry
 
+            _cell_rad, u_radpix, v_radpix = uvw_to_radpix(uu, vv, cell_size, device)
+            plan_pair = (
+                self._make_plan_pair(u_radpix, v_radpix, tuple(primary_beam.shape))
+                if device.type == "cpu"
+                else None
+            )
             cuda_plan_pair = (
                 self._get_cuda_plan_pair(tuple(primary_beam.shape), device)
                 if device.type == "cuda"
                 else None
             )
-            if device.type == "cuda":
-                # ``data``, ``sigma`` and UVs are intentionally not cached
-                # on the GPU.  The visibility set can be tens of gigabytes;
-                # they are rebuilt from vis_data and streamed one batch at a
-                # time in ``objective``.
-                block = _Block(
-                    c=c, b=b, data_real=None, data_imag=None, sigma=None,
-                    u_radpix=None, v_radpix=None, points=None,
-                    plan_pair=None, cuda_plan_pair=cuda_plan_pair,
-                )
-            else:
-                _cell_rad, u_radpix, v_radpix = uvw_to_radpix(
-                    uu, vv, cell_size, device
-                )
-                plan_pair = self._make_plan_pair(
-                    u_radpix, v_radpix, tuple(primary_beam.shape)
-                )
-                data_use = data.conj() if self.conj_data else data
-                block = _Block(
-                    c=c, b=b,
-                    data_real=_float_tensor(data_use.real, device),
-                    data_imag=_float_tensor(data_use.imag, device),
-                    sigma=_float_tensor(sigma, device),
-                    # CPU plans retain their points internally.  Keeping a
-                    # second pair of UV tensors is unnecessary there.
-                    u_radpix=None if plan_pair is not None else u_radpix,
-                    v_radpix=None if plan_pair is not None else v_radpix,
-                    points=None, plan_pair=plan_pair, cuda_plan_pair=None,
-                )
+            data_use = data.conj() if self.conj_data else data
+            block = _Block(
+                c=c,
+                data_real=_float_tensor(data_use.real, device),
+                data_imag=_float_tensor(data_use.imag, device),
+                sigma=_float_tensor(sigma, device),
+                # CPU plans retain their points internally.  Keeping a second
+                # pair of UV tensors for every block is unnecessary there.
+                u_radpix=None if plan_pair is not None else u_radpix,
+                v_radpix=None if plan_pair is not None else v_radpix,
+                points=(torch.stack([-v_radpix, u_radpix], dim=0)
+                        if device.type == "cuda" else None),
+                plan_pair=plan_pair,
+                cuda_plan_pair=cuda_plan_pair,
+            )
             by_channel_and_shape[(c, tuple(primary_beam.shape))].append(
                 (block, grid, primary_beam)
             )
@@ -526,26 +513,24 @@ class Classic3DSpeed(Classic3D):
         self._speed_caches[cache_key] = batches
         return batches
 
-    def _forward_nufft(self, image, block, cell_size, *, points=None):
+    def _forward_nufft(self, image, block, cell_size):
         if block.plan_pair is not None:
             return (cell_size ** 2) * _PlanType2.apply(
                 image.to(torch.complex64), block.plan_pair
             )
         if block.cuda_plan_pair is not None:
-            points = block.points if points is None else points
-            if points is None:
+            if block.points is None:
                 raise RuntimeError("Cached CUDA NUFFT plan requires UV points.")
             return (cell_size ** 2) * _CudaPlanType2.apply(
-                image.to(torch.complex64), points, block.cuda_plan_pair
+                image.to(torch.complex64), block.points, block.cuda_plan_pair
             )
         # The functional CUDA backend supports the same requested tolerance,
         # even though it does not yet have the CPU plan-cache implementation.
         if image.device.type == "cuda":
-            points = block.points if points is None else points
-            if points is None:
+            if block.points is None:
                 raise RuntimeError("CUDA NUFFT requires cached UV points.")
             return (cell_size ** 2) * pytorch_finufft.functional.finufft_type2(
-                points, image.to(torch.complex64),
+                block.points, image.to(torch.complex64),
                 isign=1, modeord=0, eps=self.nufft_eps,
             )
         if block.u_radpix is None or block.v_radpix is None:
@@ -610,30 +595,9 @@ class Classic3DSpeed(Classic3D):
 
             batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
             for index, block in enumerate(batch.blocks):
-                if dev.type == "cuda":
-                    data, sigma, uu, vv, _ww = vis_data.slice_chan_beam_I(
-                        block.c, block.b
-                    )
-                    data_use = data.conj() if self.conj_data else data
-                    data_real = _float_tensor(data_use.real, dev)
-                    data_imag = _float_tensor(data_use.imag, dev)
-                    sigma_t = _float_tensor(sigma, dev)
-                    _cell_rad, u_radpix, v_radpix = uvw_to_radpix(
-                        uu, vv, cell_size, dev
-                    )
-                    points = torch.stack([-v_radpix, u_radpix], dim=0)
-                else:
-                    if block.data_real is None or block.data_imag is None or block.sigma is None:
-                        raise RuntimeError("CPU NUFFT block is missing cached visibility data.")
-                    data_real = block.data_real
-                    data_imag = block.data_imag
-                    sigma_t = block.sigma
-                    points = None
-                model_vis = self._forward_nufft(
-                    beamed[index], block, cell_size, points=points
-                )
-                residual_real = (model_vis.real - data_real) / sigma_t
-                residual_imag = (model_vis.imag - data_imag) / sigma_t
+                model_vis = self._forward_nufft(beamed[index], block, cell_size)
+                residual_real = (model_vis.real - block.data_real) / block.sigma
+                residual_imag = (model_vis.imag - block.data_imag) / block.sigma
                 batch_loss = batch_loss + 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
@@ -641,11 +605,7 @@ class Classic3DSpeed(Classic3D):
             loss_value = loss_value + batch_loss.detach()
             # ``backward`` has consumed this batch's autograd graph.  Release
             # its large, transient reprojection tensors before the next batch.
-            del (
-                grids, primary_beams, images, projected, beamed, batch_loss,
-                data_real, data_imag, sigma_t, points, model_vis,
-                residual_real, residual_imag,
-            )
+            del grids, primary_beams, images, projected, beamed, batch_loss
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
         if lambda_sd > 0.0 and fftsd is not None:
