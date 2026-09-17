@@ -110,8 +110,8 @@ class _Block:
     sigma: torch.Tensor | None
     u_radpix: torch.Tensor | None
     v_radpix: torch.Tensor | None
-    # CUDA requires a stacked (2, nvis) tensor.  It is static for a visibility
-    # block and is also used to configure a shared cuFINUFFT plan pair.
+    # CUDA points are held by the bounded stable-point cache rather than the
+    # block metadata itself.
     points: torch.Tensor | None
     plan_pair: _PlanPair | None
     cuda_plan_pair: _PlanPair | None
@@ -129,20 +129,14 @@ class _Batch:
 
 
 @dataclass
-class _CudaVisibility:
-    """A stable GPU copy of a visibility block eligible for plan reuse."""
+class _CudaPoints:
+    """Stable GPU UV coordinates that are safe to reuse with cuFINUFFT."""
 
-    data_real: torch.Tensor
-    data_imag: torch.Tensor
-    sigma: torch.Tensor
     points: torch.Tensor
 
     @property
     def nbytes(self) -> int:
-        return sum(
-            tensor.numel() * tensor.element_size()
-            for tensor in (self.data_real, self.data_imag, self.sigma, self.points)
-        )
+        return self.points.numel() * self.points.element_size()
 
 
 class Classic3DSpeed(Classic3D):
@@ -161,9 +155,9 @@ class Classic3DSpeed(Classic3D):
         image shape/device when the corresponding optional package is
         installed. Other installations retain the functional NUFFT backend.
     cuda_visibility_cache_bytes
-        Maximum GPU memory for stable cached CUDA visibility blocks.  ``None``
-        selects ``min(8 GiB, 25% of device memory)``.  Other blocks are
-        streamed and use the functional CUDA NUFFT backend.
+        Maximum GPU memory for stable cached CUDA UV-point tensors.  ``None``
+        selects ``min(8 GiB, 25% of device memory)``.  Data and weights are
+        streamed, while cached points retain the cuFINUFFT plan fast path.
     """
 
     def __init__(
@@ -191,7 +185,7 @@ class Classic3DSpeed(Classic3D):
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
         self._cuda_plan_pairs: dict[tuple[Any, ...], _PlanPair] = {}
-        self._cuda_visibility_cache: OrderedDict[tuple[int, int], _CudaVisibility] = OrderedDict()
+        self._cuda_visibility_cache: OrderedDict[tuple[int, int], _CudaPoints] = OrderedDict()
         self._cuda_visibility_cache_bytes_used = 0
         self._cuda_visibility_cache_source_key: tuple[Any, ...] | None = None
 
@@ -477,8 +471,8 @@ class Classic3DSpeed(Classic3D):
         total_memory = torch.cuda.get_device_properties(device).total_memory
         return min(8 * 1024**3, total_memory // 4)
 
-    def _cuda_visibility(self, vis_data, block: _Block, cell_size, device):
-        """Get a stable cached CUDA block, or stream one for this evaluation.
+    def _cuda_points(self, block: _Block, uu, vv, cell_size, device):
+        """Get stable cached CUDA points, or a transient functional fallback.
 
         The fixed cache deliberately stops filling at its budget instead of
         using an LRU.  FISTA scans all blocks in the same order every time, so
@@ -488,22 +482,17 @@ class Classic3DSpeed(Classic3D):
         key = (block.c, block.b)
         cached = self._cuda_visibility_cache.get(key)
         if cached is not None:
-            return cached, True
+            return cached.points, True
 
-        data, sigma, uu, vv, _ww = vis_data.slice_chan_beam_I(block.c, block.b)
-        data_use = data.conj() if self.conj_data else data
-        data_real = _float_tensor(data_use.real, device)
-        data_imag = _float_tensor(data_use.imag, device)
-        sigma_t = _float_tensor(sigma, device)
         _cell_rad, u_radpix, v_radpix = uvw_to_radpix(uu, vv, cell_size, device)
         points = torch.stack([-v_radpix, u_radpix], dim=0)
-        entry = _CudaVisibility(data_real, data_imag, sigma_t, points)
+        entry = _CudaPoints(points)
 
         if self._cuda_visibility_cache_bytes_used + entry.nbytes <= self._cuda_visibility_cache_limit(device):
             self._cuda_visibility_cache[key] = entry
             self._cuda_visibility_cache_bytes_used += entry.nbytes
-            return entry, True
-        return entry, False
+            return entry.points, True
+        return entry.points, False
 
     def _prepare_cache(self, vis_data, primary_beam_list, grid_list, device, cell_size, image_shape):
         cache_key = self._cache_key(
@@ -674,13 +663,16 @@ class Classic3DSpeed(Classic3D):
             batch_loss = torch.zeros((), dtype=x.dtype, device=dev)
             for index, block in enumerate(batch.blocks):
                 if dev.type == "cuda":
-                    visibility, use_cuda_plan = self._cuda_visibility(
-                        vis_data, block, cell_size, dev
+                    data, sigma, uu, vv, _ww = vis_data.slice_chan_beam_I(
+                        block.c, block.b
                     )
-                    data_real = visibility.data_real
-                    data_imag = visibility.data_imag
-                    sigma_t = visibility.sigma
-                    points = visibility.points
+                    data_use = data.conj() if self.conj_data else data
+                    data_real = _float_tensor(data_use.real, dev)
+                    data_imag = _float_tensor(data_use.imag, dev)
+                    sigma_t = _float_tensor(sigma, dev)
+                    points, use_cuda_plan = self._cuda_points(
+                        block, uu, vv, cell_size, dev
+                    )
                 else:
                     if block.data_real is None or block.data_imag is None or block.sigma is None:
                         raise RuntimeError("CPU NUFFT block is missing cached visibility data.")
@@ -708,7 +700,7 @@ class Classic3DSpeed(Classic3D):
                 residual_real, residual_imag,
             )
             if dev.type == "cuda":
-                del visibility
+                del data, sigma, uu, vv, _ww, data_use
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
         if lambda_sd > 0.0 and fftsd is not None:
