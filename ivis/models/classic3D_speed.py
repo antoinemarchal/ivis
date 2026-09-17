@@ -174,6 +174,22 @@ class Classic3DSpeed(Classic3D):
             + self.positivity_floor
         )
 
+    def encode_softplus_image(self, image):
+        """Convert a non-negative physical initial image into the LBFGS variable."""
+        values = np.asarray(image)
+        if not self.use_softplus_positivity:
+            return values
+        physical = np.maximum(
+            values - self.positivity_floor, np.finfo(np.float32).eps
+        )
+        scaled = self.positivity_beta * physical
+        latent = np.where(
+            scaled > 20.0,
+            physical,
+            np.log(np.expm1(np.minimum(scaled, 20.0))) / self.positivity_beta,
+        )
+        return latent.astype(values.dtype, copy=False)
+
     def clear_speed_cache(self) -> None:
         """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
         self._speed_caches.clear()
@@ -399,7 +415,10 @@ class Classic3DSpeed(Classic3D):
                 batch_loss = batch_loss + 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
-            batch_loss.backward()
+            # Softplus creates one shared graph edge from the latent LBFGS
+            # variable to ``x``. The streamed per-batch backwards below must
+            # retain that edge until this objective evaluation is complete.
+            batch_loss.backward(retain_graph=self.use_softplus_positivity)
             loss_value = loss_value + batch_loss.detach()
 
         # Keep Classic3D's regularizers numerically and structurally unchanged.
@@ -417,7 +436,7 @@ class Classic3DSpeed(Classic3D):
                     torch.nansum((model_sd.real - fftsd_c.real) ** 2)
                     + torch.nansum((model_sd.imag - fftsd_c.imag) ** 2)
                 ) * lambda_sd
-                loss.backward()
+                loss.backward(retain_graph=self.use_softplus_positivity)
                 loss_value = loss_value + loss.detach()
 
         if self.lambda_r > 0.0 and fftkernel is not None:
@@ -429,7 +448,7 @@ class Classic3DSpeed(Classic3D):
                 xfft2 = tfft2(x[c] * tapper_c)
                 conv = (cell_size**2) * xfft2 * fftkernel_c
                 loss = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
-                loss.backward()
+                loss.backward(retain_graph=self.use_softplus_positivity)
                 loss_value = loss_value + loss.detach()
 
         return loss_value
