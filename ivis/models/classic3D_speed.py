@@ -159,6 +159,7 @@ class Classic3DSpeed(Classic3D):
         device,
         max_its: int,
         initial_step: float | None = None,
+        initial_update: float = 1.0e-5,
         backtracking_factor: float = 0.5,
         grow_factor: float = 1.25,
         **params,
@@ -177,6 +178,8 @@ class Classic3DSpeed(Classic3D):
             raise ValueError("backtracking_factor must lie between zero and one.")
         if grow_factor < 1.0:
             raise ValueError("grow_factor must be at least one.")
+        if initial_update <= 0.0:
+            raise ValueError("initial_update must be positive.")
 
         dev = torch.device(device)
         x = torch.as_tensor(x_init, dtype=torch.float32, device=dev).clone().clamp_min_(0)
@@ -193,13 +196,13 @@ class Classic3DSpeed(Classic3D):
         loss_x, grad_x = evaluate(x)
         if initial_step is None:
             # Choose a scale-aware first trial step, then let majorization
-            # backtracking make it safe.  The target one-step excursion is
-            # 1e-5 Jy/arcsec^2, appropriate for the fBm benchmark scale.
-            initial_step = 1.0e-5 / max(float(grad_x.abs().max()), 1.0e-20)
+            # backtracking make it safe. ``initial_update`` is the requested
+            # maximum first-step excursion in the image's physical units.
+            initial_step = initial_update / max(float(grad_x.abs().max()), 1.0e-20)
         step = float(initial_step)
         logger.info(
             f"Starting projected FISTA on {dev}; exact positivity projection; "
-            f"initial step={step:.6e}"
+            f"initial step={step:.6e}; initial update={initial_update:.6e}"
         )
 
         for iteration in range(1, int(max_its) + 1):
