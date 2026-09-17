@@ -19,6 +19,55 @@ def test_package_exports_logger():
     assert ivis.logger.name == "IViS"
 
 
+def test_classic3d_speed_shares_cuda_plans_by_shape(monkeypatch):
+    """CUDA workspaces must not grow with the number of visibility blocks."""
+    torch = importlib.import_module("torch")
+    speed_mod = importlib.import_module("ivis.models.classic3D_speed")
+
+    class FakePlan:
+        created = []
+
+        def __init__(self, nufft_type, n_modes, **_):
+            self.nufft_type = nufft_type
+            self.n_modes = tuple(n_modes)
+            self.points_history = []
+            FakePlan.created.append(self)
+
+        def setpts(self, x, y):
+            self.points_history.append((x.clone(), y.clone()))
+
+        def execute(self, values):
+            if self.nufft_type == 2:
+                return values.sum().to(torch.complex64).expand(
+                    self.points_history[-1][0].numel()
+                )
+            return values.real.sum().to(torch.complex64).expand(self.n_modes)
+
+    monkeypatch.setattr(speed_mod, "cufinufft", types.SimpleNamespace(Plan=FakePlan))
+    model = speed_mod.Classic3DSpeed(lambda_r=0.0)
+    device = types.SimpleNamespace(type="cuda", index=0)
+
+    first_pair = model._get_cuda_plan_pair((4, 5), device)
+    assert model._get_cuda_plan_pair((4, 5), device) is first_pair
+    assert model._get_cuda_plan_pair((5, 4), device) is not first_pair
+    assert len(FakePlan.created) == 4  # forward and adjoint for each shape
+
+    image = torch.ones((4, 5), requires_grad=True)
+    points_a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    points_b = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    image_complex = image.to(torch.complex64)
+    output_a = speed_mod._CudaPlanType2.apply(image_complex, points_a, first_pair)
+    output_b = speed_mod._CudaPlanType2.apply(image_complex, points_b, first_pair)
+    (output_a.real.sum() + output_b.real.sum()).backward()
+
+    # Autograd configures the shared adjoint with each block's own points.
+    adjoint = first_pair.adjoint
+    assert len(adjoint.points_history) == 2
+    assert torch.equal(adjoint.points_history[0][0], points_b[0])
+    assert torch.equal(adjoint.points_history[1][0], points_a[0])
+    assert torch.allclose(image.grad, torch.full_like(image, 4.0))
+
+
 def _identity_grid(height, width):
     y = np.linspace(-1.0, 1.0, height, dtype=np.float32)
     x = np.linspace(-1.0, 1.0, width, dtype=np.float32)

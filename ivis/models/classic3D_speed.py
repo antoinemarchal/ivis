@@ -67,16 +67,32 @@ class _PlanType2(torch.autograd.Function):
 
 
 class _CudaPlanType2(torch.autograd.Function):
-    """Type-2 cuFINUFFT whose adjoint reuses a cached type-1 plan."""
+    """Type-2 cuFINUFFT using a plan shared by compatible visibility blocks.
+
+    cuFINUFFT plans own a large oversampled Fourier workspace.  Points are
+    deliberately an input to this function rather than being fixed when the
+    plan is made: one plan pair can therefore serve all blocks of an image
+    shape, without retaining one workspace per pointing.
+    """
 
     @staticmethod
-    def forward(ctx, image: torch.Tensor, plan_pair: "_PlanPair") -> torch.Tensor:
+    def forward(
+        ctx, image: torch.Tensor, points: torch.Tensor, plan_pair: "_PlanPair"
+    ) -> torch.Tensor:
         ctx.plan_pair = plan_pair
+        ctx.save_for_backward(points)
+        plan_pair.forward.setpts(points[0], points[1])
         return plan_pair.forward.execute(image.detach().contiguous())
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
-        return ctx.plan_pair.adjoint.execute(grad_output.detach().contiguous()), None
+        (points,) = ctx.saved_tensors
+        ctx.plan_pair.adjoint.setpts(points[0], points[1])
+        return (
+            ctx.plan_pair.adjoint.execute(grad_output.detach().contiguous()),
+            None,
+            None,
+        )
 
 
 @dataclass
@@ -93,9 +109,8 @@ class _Block:
     sigma: torch.Tensor
     u_radpix: torch.Tensor | None
     v_radpix: torch.Tensor | None
-    # CUDA's functional interface takes a stacked (2, nvis) tensor.  It is
-    # static for a visibility block, so constructing it in every closure is
-    # needless device work and allocation churn.
+    # CUDA requires a stacked (2, nvis) tensor.  It is static for a visibility
+    # block and is also used to configure a shared cuFINUFFT plan pair.
     points: torch.Tensor | None
     plan_pair: _PlanPair | None
     cuda_plan_pair: _PlanPair | None
@@ -121,9 +136,9 @@ class Classic3DSpeed(Classic3D):
         Number of same-channel, same-output-shape pointings in one
         ``grid_sample`` call.  The final batch may be smaller.
     use_plan_cache
-        Reuse CPU FINUFFT or CUDA cuFINUFFT plans when the corresponding
-        optional package is installed. Other installations retain the
-        functional NUFFT backend.
+        Reuse CPU FINUFFT plans and, on CUDA, one cuFINUFFT plan pair per
+        image shape/device when the corresponding optional package is
+        installed. Other installations retain the functional NUFFT backend.
     """
 
     def __init__(
@@ -146,11 +161,13 @@ class Classic3DSpeed(Classic3D):
         self.use_plan_cache = bool(use_plan_cache)
         self._speed_caches: dict[tuple[Any, ...], list[_Batch]] = {}
         self._static_tensor_cache: dict[tuple[Any, ...], torch.Tensor] = {}
+        self._cuda_plan_pairs: dict[tuple[Any, ...], _PlanPair] = {}
 
     def clear_speed_cache(self) -> None:
         """Release cached static tensors and FINUFFT/cuFINUFFT plans."""
         self._speed_caches.clear()
         self._static_tensor_cache.clear()
+        self._cuda_plan_pairs.clear()
 
     def projected_fista(
         self,
@@ -386,8 +403,13 @@ class Classic3DSpeed(Classic3D):
         adjoint.setpts(x, y)
         return _PlanPair(forward=forward, adjoint=adjoint)
 
-    def _make_cuda_plan_pair(self, u_radpix, v_radpix, image_shape, device):
-        """Create reusable cuFINUFFT plans for a static CUDA visibility block."""
+    def _cuda_plan_key(self, image_shape, device):
+        """Key a cuFINUFFT workspace by the properties that determine it."""
+        device_id = device.index if device.index is not None else torch.cuda.current_device()
+        return (tuple(image_shape), str(device.type), device_id, self.nufft_eps)
+
+    def _make_cuda_plan_pair(self, image_shape, device):
+        """Create a cuFINUFFT workspace shared by compatible CUDA blocks."""
         if not self.use_plan_cache or cufinufft is None:
             return None
         device_id = device.index if device.index is not None else torch.cuda.current_device()
@@ -401,9 +423,18 @@ class Classic3DSpeed(Classic3D):
         adjoint = cufinufft.Plan(
             1, image_shape, eps=self.nufft_eps, isign=-1, **options
         )
-        forward.setpts(-v_radpix, u_radpix)
-        adjoint.setpts(-v_radpix, u_radpix)
         return _PlanPair(forward=forward, adjoint=adjoint)
+
+    def _get_cuda_plan_pair(self, image_shape, device):
+        """Return the single cached CUDA workspace for this image shape."""
+        if not self.use_plan_cache or cufinufft is None:
+            return None
+        key = self._cuda_plan_key(image_shape, device)
+        plan_pair = self._cuda_plan_pairs.get(key)
+        if plan_pair is None:
+            plan_pair = self._make_cuda_plan_pair(image_shape, device)
+            self._cuda_plan_pairs[key] = plan_pair
+        return plan_pair
 
     def _prepare_cache(self, vis_data, primary_beam_list, grid_list, device, cell_size, image_shape):
         cache_key = self._cache_key(
@@ -434,9 +465,7 @@ class Classic3DSpeed(Classic3D):
                 else None
             )
             cuda_plan_pair = (
-                self._make_cuda_plan_pair(
-                    u_radpix, v_radpix, tuple(primary_beam.shape), device
-                )
+                self._get_cuda_plan_pair(tuple(primary_beam.shape), device)
                 if device.type == "cuda"
                 else None
             )
@@ -451,7 +480,7 @@ class Classic3DSpeed(Classic3D):
                 u_radpix=None if plan_pair is not None else u_radpix,
                 v_radpix=None if plan_pair is not None else v_radpix,
                 points=(torch.stack([-v_radpix, u_radpix], dim=0)
-                        if device.type == "cuda" and cuda_plan_pair is None else None),
+                        if device.type == "cuda" else None),
                 plan_pair=plan_pair,
                 cuda_plan_pair=cuda_plan_pair,
             )
@@ -478,8 +507,10 @@ class Classic3DSpeed(Classic3D):
                 image.to(torch.complex64), block.plan_pair
             )
         if block.cuda_plan_pair is not None:
+            if block.points is None:
+                raise RuntimeError("Cached CUDA NUFFT plan requires UV points.")
             return (cell_size ** 2) * _CudaPlanType2.apply(
-                image.to(torch.complex64), block.cuda_plan_pair
+                image.to(torch.complex64), block.points, block.cuda_plan_pair
             )
         # The functional CUDA backend supports the same requested tolerance,
         # even though it does not yet have the CPU plan-cache implementation.
