@@ -258,6 +258,87 @@ class Classic3DSpeed(Classic3D):
 
         return x.detach().cpu().numpy()
 
+    def process_projected_fista(
+        self,
+        image_processor,
+        *,
+        units: str = "Jy/arcsec^2",
+        initial_step: float | None = None,
+        initial_update: float = 1.0e-5,
+        backtracking_factor: float = 0.5,
+        grow_factor: float = 1.25,
+    ) -> np.ndarray:
+        """Run projected FISTA using an existing :class:`Imager3D` setup.
+
+        This is a Speed-model convenience entry point, so callers can retain
+        their usual ``Imager3D`` configuration without modifying the shared
+        imager or solver dispatch.  It supports the same output units as
+        ``Imager3D.process``.
+        """
+        from astropy import units as u
+        from radio_beam import Beam
+
+        from ivis.utils import dunits, dutils
+
+        if units not in {"Jy/arcsec^2", "Jy/beam", "K"}:
+            logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
+            units = "Jy/arcsec^2"
+
+        hdr = image_processor.hdr
+        shape = (hdr["NAXIS2"], hdr["NAXIS1"])
+        cell_size = (hdr["CDELT2"] * u.deg).to(u.arcsec)
+        tapper = dutils.apodize(0.98, shape)
+        fftkernel = np.abs(np.fft.fft2(dutils.laplacian(shape)))
+        bmaj_pix = image_processor.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
+        beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
+        fftbeam = np.abs(np.fft.fft2(beam))
+        fftsd = cell_size.value**2 * tfft2(
+            torch.from_numpy(np.float32(image_processor.sd))
+        ).cpu().numpy()
+        params = dict(
+            vis_data=image_processor.vis_data,
+            pb=np.asarray(image_processor.pb, dtype=np.float32),
+            fftbeam=np.asarray(fftbeam, dtype=np.float32),
+            fftsd=np.asarray(fftsd, dtype=np.complex64),
+            tapper=np.asarray(tapper, dtype=np.float32),
+            lambda_sd=image_processor.lambda_sd,
+            fftkernel=np.asarray(fftkernel, dtype=np.float32),
+            cell_size=cell_size.value,
+            grid_array=np.asarray(image_processor.grid, dtype=np.float32),
+            beam_workers=image_processor.beam_workers,
+        )
+        result = self.projected_fista(
+            image_processor.init_params,
+            device=image_processor.cost_device,
+            max_its=image_processor.max_its,
+            initial_step=initial_step,
+            initial_update=initial_update,
+            backtracking_factor=backtracking_factor,
+            grow_factor=grow_factor,
+            **params,
+        )
+
+        if units == "Jy/arcsec^2":
+            output = result
+        elif units == "Jy/beam":
+            assumed_fwhm_pix = 3
+            logger.warning(
+                "Converting to Jy/beam assuming a restoring beam of "
+                f"{assumed_fwhm_pix} × cell_size = "
+                f"{assumed_fwhm_pix * cell_size:.3f} FWHM."
+            )
+            beam_r = Beam(
+                assumed_fwhm_pix * cell_size,
+                assumed_fwhm_pix * cell_size,
+                1.e-12 * u.deg,
+            )
+            output = result * beam_r.sr.to(u.arcsec**2).value
+        else:  # K
+            output = dunits.jy_per_arcsec2_to_K(result, image_processor.vis_data.frequency)
+
+        logger.info("Successful run. Please clap.")
+        return output
+
     def _static_tensor(self, value: Any, device: torch.device) -> torch.Tensor:
         """Cache an immutable numpy input after its one-time device transfer."""
         array = np.asarray(value)
