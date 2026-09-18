@@ -138,7 +138,9 @@ class Imager3D:
     # process(): SAME logic + SAME log strings as your original version
     # ------------------------------------------------------------------
     def process(self, model=None, solver="LBFGS", units="Jy/arcsec^2",
-                history_size=10, dtype=torch.float32):
+                history_size=10, dtype=torch.float32, initial_step=None,
+                initial_update=1.0e-5, backtracking_factor=0.5,
+                grow_factor=1.25):
         """
         Devices
         -------
@@ -150,6 +152,11 @@ class Imager3D:
         - ``"FISTA"`` supports either positivity setting.
         - ``"L-BFGS-B"`` requires ``positivity=True``.
         - ``"LBFGS"`` and ``"CG"`` require ``positivity=False``.
+
+        FISTA options
+        -------------
+        ``initial_step``, ``initial_update``, ``backtracking_factor``, and
+        ``grow_factor`` are passed to FISTA when ``solver="FISTA"``.
 
         Notes
         -----
@@ -244,6 +251,10 @@ class Imager3D:
                 optim_dev=optim_dev,
                 params=params,
                 positivity=self.positivity,
+                initial_step=initial_step,
+                initial_update=initial_update,
+                backtracking_factor=backtracking_factor,
+                grow_factor=grow_factor,
             )
             result = flat.reshape(param_shape)
         elif solver_name == "L-BFGS-B":
