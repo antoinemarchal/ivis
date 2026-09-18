@@ -184,9 +184,16 @@ def optimize_torch_cg(*, model, x_init, dtype, max_its, cost_dev, optim_dev, par
 def optimize_torch_fista(
     *, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
     positivity=False, initial_step=None, initial_update=1.0e-5,
-    backtracking_factor=0.5, grow_factor=1.25,
+    backtracking_factor=0.5, grow_factor=1.25, loss_only_line_search=False,
 ):
-    """Monotone backtracking FISTA using gradients from ``model.objective``."""
+    """Monotone backtracking FISTA using gradients from ``model.objective``.
+
+    ``loss_only_line_search`` avoids computing a gradient for each trial
+    point.  It is available only to models that opt in with
+    ``supports_loss_only_objective = True`` and honour
+    ``compute_grad=False`` in ``objective``.  The default preserves the
+    original full-gradient evaluation sequence.
+    """
     if max_its < 1:
         raise ValueError("max_its must be at least one.")
     if not 0.0 < backtracking_factor < 1.0:
@@ -195,6 +202,11 @@ def optimize_torch_fista(
         raise ValueError("grow_factor must be at least one.")
     if initial_update <= 0.0:
         raise ValueError("initial_update must be positive.")
+    if loss_only_line_search and not getattr(model, "supports_loss_only_objective", False):
+        raise ValueError(
+            "loss_only_line_search=True requires a model that supports "
+            "objective(..., compute_grad=False)."
+        )
 
     if optim_dev != cost_dev:
         logger.info(f"FISTA uses the cost device for objective evaluations; solving on {cost_dev}.")
@@ -205,12 +217,21 @@ def optimize_torch_fista(
     y = x.clone()
     t_k = 1.0
 
-    def evaluate(candidate):
-        leaf = candidate.detach().requires_grad_(True)
-        loss = model.objective(leaf, device=cost_dev, **params)
-        if leaf.grad is None:
-            raise RuntimeError("objective() did not produce a gradient.")
-        return loss.detach(), leaf.grad.detach()
+    def evaluate(candidate, *, compute_grad=True):
+        leaf = candidate.detach().requires_grad_(compute_grad)
+        if compute_grad:
+            loss = model.objective(leaf, device=cost_dev, **params)
+            if leaf.grad is None:
+                raise RuntimeError("objective() did not produce a gradient.")
+            return loss.detach(), leaf.grad.detach()
+
+        # The model opts in above.  ``no_grad`` is essential: simply skipping
+        # ``backward`` would still retain a full candidate graph.
+        with torch.no_grad():
+            loss = model.objective(
+                leaf, device=cost_dev, compute_grad=False, **params
+            )
+        return loss.detach(), None
 
     loss_x, grad_x = evaluate(x)
     if initial_step is None:
@@ -230,6 +251,12 @@ def optimize_torch_fista(
         loss_y, grad_y = evaluate(y)
         reference_y, local_t = y, t_k
         if loss_y > loss_x:
+            # In loss-only mode an accepted candidate deliberately has no
+            # cached gradient.  A monotone restart is rare, but when it
+            # occurs obtain the gradient at x before using it as the new
+            # reference point.
+            if grad_x is None:
+                _loss_x_check, grad_x = evaluate(x)
             reference_y, loss_y, grad_y, local_t = x, loss_x, grad_x, 1.0
 
         accepted = False
@@ -237,7 +264,9 @@ def optimize_torch_fista(
             candidate = reference_y - step * grad_y
             if positivity:
                 candidate = candidate.clamp_min(0)
-            loss_candidate, grad_candidate = evaluate(candidate)
+            loss_candidate, grad_candidate = evaluate(
+                candidate, compute_grad=not loss_only_line_search
+            )
             delta = candidate - reference_y
             majorizer = loss_y + torch.sum(grad_y * delta) + torch.sum(delta * delta) / (2.0 * step)
             if torch.isfinite(loss_candidate) and loss_candidate <= majorizer:

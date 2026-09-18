@@ -144,6 +144,10 @@ class Classic3D_optimized(Classic3D):
         installed. Other installations retain the functional NUFFT backend.
     """
 
+    # Allows FISTA to evaluate backtracking candidates without constructing
+    # their adjoint/autograd graph.
+    supports_loss_only_objective = True
+
     def __init__(
         self,
         lambda_r: float = 1,
@@ -373,11 +377,13 @@ class Classic3D_optimized(Classic3D):
         lambda_sd=0.0,
         lambda_pos=0.0,
         fftkernel=None,
+        compute_grad=True,
         **_,
     ):
         dev = torch.device(device)
-        x.requires_grad_(True)
-        if x.is_leaf and x.grad is not None:
+        if compute_grad:
+            x.requires_grad_(True)
+        if compute_grad and x.is_leaf and x.grad is not None:
             x.grad.zero_()
         primary_beam_list, grid_list = resolve_pb_grid_lists(
             vis_data,
@@ -414,8 +420,11 @@ class Classic3D_optimized(Classic3D):
                 batch_loss = batch_loss + 0.5 * torch.sum(
                     residual_real.square() + residual_imag.square()
                 )
-            batch_loss.backward()
-            loss_value = loss_value + batch_loss.detach()
+            if compute_grad:
+                batch_loss.backward()
+                loss_value = loss_value + batch_loss.detach()
+            else:
+                loss_value = loss_value + batch_loss
             # ``backward`` has consumed this batch's autograd graph.  Release
             # its large, transient reprojection tensors before the next batch.
             del grids, primary_beams, images, projected, beamed, batch_loss
@@ -435,8 +444,11 @@ class Classic3D_optimized(Classic3D):
                     torch.nansum((model_sd.real - fftsd_c.real) ** 2)
                     + torch.nansum((model_sd.imag - fftsd_c.imag) ** 2)
                 ) * lambda_sd
-                loss.backward()
-                loss_value = loss_value + loss.detach()
+                if compute_grad:
+                    loss.backward()
+                    loss_value = loss_value + loss.detach()
+                else:
+                    loss_value = loss_value + loss
 
         if self.lambda_r > 0.0 and fftkernel is not None:
             tapper_t = self._static_tensor(tapper, dev)
@@ -447,7 +459,10 @@ class Classic3D_optimized(Classic3D):
                 xfft2 = tfft2(x[c] * tapper_c)
                 conv = (cell_size**2) * xfft2 * fftkernel_c
                 loss = 0.5 * torch.nansum(torch.abs(conv) ** 2) * self.lambda_r
-                loss.backward()
-                loss_value = loss_value + loss.detach()
+                if compute_grad:
+                    loss.backward()
+                    loss_value = loss_value + loss.detach()
+                else:
+                    loss_value = loss_value + loss
 
         return loss_value

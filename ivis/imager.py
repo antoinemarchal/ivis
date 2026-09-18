@@ -140,7 +140,7 @@ class Imager3D:
     def process(self, model=None, solver="LBFGS", units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32, initial_step=None,
                 initial_update=1.0e-5, backtracking_factor=0.5,
-                grow_factor=1.25):
+                grow_factor=1.25, loss_only_line_search=False):
         """
         Devices
         -------
@@ -155,8 +155,10 @@ class Imager3D:
 
         FISTA options
         -------------
-        ``initial_step``, ``initial_update``, ``backtracking_factor``, and
-        ``grow_factor`` are passed to FISTA when ``solver="FISTA"``.
+        ``initial_step``, ``initial_update``, ``backtracking_factor``,
+        ``grow_factor``, and ``loss_only_line_search`` are passed to FISTA
+        when ``solver="FISTA"``.  The latter is an opt-in optimization for
+        models that support loss-only candidate evaluations.
 
         Notes
         -----
@@ -255,6 +257,7 @@ class Imager3D:
                 initial_update=initial_update,
                 backtracking_factor=backtracking_factor,
                 grow_factor=grow_factor,
+                loss_only_line_search=loss_only_line_search,
             )
             result = flat.reshape(param_shape)
         elif solver_name == "L-BFGS-B":

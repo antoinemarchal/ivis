@@ -8,6 +8,7 @@ from radio_beam import Beam
 import types
 
 from ivis.imager import Imager3D
+from ivis.optim.solvers import optimize_torch_fista
 from ivis.types import VisIData
 
 
@@ -17,6 +18,45 @@ def test_package_exports_version():
 
 def test_package_exports_logger():
     assert ivis.logger.name == "IViS"
+
+
+def test_fista_loss_only_line_search_skips_candidate_gradients():
+    torch = importlib.import_module("torch")
+
+    class Quadratic:
+        supports_loss_only_objective = True
+
+        def __init__(self):
+            self.gradient_calls = 0
+            self.loss_only_calls = 0
+
+        def objective(self, x, device, compute_grad=True):
+            loss = 0.5 * torch.sum(x.square())
+            if compute_grad:
+                self.gradient_calls += 1
+                loss.backward()
+            else:
+                self.loss_only_calls += 1
+            return loss
+
+    model = Quadratic()
+    result = optimize_torch_fista(
+        model=model,
+        x_init=np.array([1.0], dtype=np.float32),
+        dtype=torch.float32,
+        max_its=2,
+        cost_dev=torch.device("cpu"),
+        optim_dev=torch.device("cpu"),
+        params={},
+        initial_step=0.1,
+        loss_only_line_search=True,
+    )
+
+    assert np.isfinite(result).all()
+    # Initial gradient plus one gradient at y per FISTA iteration.  Candidate
+    # trials require losses only.
+    assert model.gradient_calls == 3
+    assert model.loss_only_calls == 2
 
 
 def _identity_grid(height, width):
