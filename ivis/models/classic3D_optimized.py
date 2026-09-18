@@ -1,6 +1,6 @@
 """Cached and batched implementation of the Classic3D objective.
 
-``Classic3DSpeed`` is deliberately opt-in.  It keeps the Classic3D data term
+``Classic3D_optimized`` is deliberately opt-in.  It keeps the Classic3D data term
 and regularizers, but caches static observing geometry, batches compatible
 reprojections, and reuses FINUFFT/cuFINUFFT plans between evaluations.
 """
@@ -127,7 +127,7 @@ class _Batch:
     blocks: list[_Block]
 
 
-class Classic3DSpeed(Classic3D):
+class Classic3D_optimized(Classic3D):
     """Classic3D with cached FINUFFT plans and batched reprojections.
 
     Parameters
@@ -171,193 +171,6 @@ class Classic3DSpeed(Classic3D):
         self._speed_caches.clear()
         self._static_tensor_cache.clear()
         self._cuda_plan_pairs.clear()
-
-    def projected_fista(
-        self,
-        x_init,
-        *,
-        device,
-        max_its: int,
-        initial_step: float | None = None,
-        initial_update: float = 1.0e-5,
-        backtracking_factor: float = 0.5,
-        grow_factor: float = 1.25,
-        **params,
-    ) -> np.ndarray:
-        """Minimize this model's objective with exact non-negative projection.
-
-        This model-local solver deliberately uses ``objective`` directly rather
-        than the shared FISTA implementation: Classic3DSpeed streams its
-        gradient and does not expose the normal-operator interface required by
-        that generic solver.  It is a monotone, backtracking FISTA variant;
-        every accepted physical image satisfies ``x >= 0`` exactly.
-        """
-        if max_its < 1:
-            raise ValueError("max_its must be at least one.")
-        if not 0.0 < backtracking_factor < 1.0:
-            raise ValueError("backtracking_factor must lie between zero and one.")
-        if grow_factor < 1.0:
-            raise ValueError("grow_factor must be at least one.")
-        if initial_update <= 0.0:
-            raise ValueError("initial_update must be positive.")
-
-        dev = torch.device(device)
-        x = torch.as_tensor(x_init, dtype=torch.float32, device=dev).clone().clamp_min_(0)
-        y = x.clone()
-        t_k = 1.0
-
-        def evaluate(candidate):
-            leaf = candidate.detach().requires_grad_(True)
-            loss = self.objective(leaf, device=dev, **params)
-            if leaf.grad is None:
-                raise RuntimeError("Classic3DSpeed objective did not produce a gradient.")
-            return loss.detach(), leaf.grad.detach()
-
-        loss_x, grad_x = evaluate(x)
-        if initial_step is None:
-            # Choose a scale-aware first trial step, then let majorization
-            # backtracking make it safe. ``initial_update`` is the requested
-            # maximum first-step excursion in the image's physical units.
-            initial_step = initial_update / max(float(grad_x.abs().max()), 1.0e-20)
-        step = float(initial_step)
-        logger.info(
-            f"Starting projected FISTA on {dev}; exact positivity projection; "
-            f"initial step={step:.6e}; initial update={initial_update:.6e}"
-        )
-
-        for iteration in range(1, int(max_its) + 1):
-            loss_y, grad_y = evaluate(y)
-            reference_y = y
-            local_t = t_k
-
-            # A monotone restart prevents Nesterov extrapolation from moving
-            # away from the last accepted constrained image.
-            if loss_y > loss_x:
-                reference_y = x
-                loss_y, grad_y = loss_x, grad_x
-                local_t = 1.0
-
-            accepted = False
-            for _ in range(30):
-                candidate = (reference_y - step * grad_y).clamp_min(0)
-                loss_candidate, grad_candidate = evaluate(candidate)
-                delta = candidate - reference_y
-                majorizer = loss_y + torch.sum(grad_y * delta) + torch.sum(delta * delta) / (2.0 * step)
-                if torch.isfinite(loss_candidate) and loss_candidate <= majorizer:
-                    accepted = True
-                    break
-                step *= backtracking_factor
-
-            if not accepted:
-                raise RuntimeError("Projected FISTA failed to find a finite descent step.")
-            if loss_candidate > loss_x:
-                # A finite projected step may pass the local majorization test
-                # after an extrapolated restart but still not improve x. Keep
-                # the previous feasible point and restart on the next pass.
-                y = x.clone()
-                t_k = 1.0
-                step *= backtracking_factor
-                logger.info(
-                    f"[Projected FISTA Iter {iteration}/{max_its}] restart; "
-                    f"loss={float(loss_x):.6e}; step={step:.6e}"
-                )
-                continue
-
-            t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * local_t * local_t))
-            y = candidate + ((local_t - 1.0) / t_next) * (candidate - x)
-            relative_change = torch.linalg.vector_norm(candidate - x) / torch.clamp_min(
-                torch.linalg.vector_norm(candidate), 1.0e-20
-            )
-            x, loss_x, grad_x, t_k = candidate, loss_candidate, grad_candidate, t_next
-            step *= grow_factor
-            logger.info(
-                f"[Projected FISTA Iter {iteration}/{max_its}] "
-                f"loss={float(loss_x):.6e}; rel_change={float(relative_change):.6e}; "
-                f"step={step:.6e}"
-            )
-
-        return x.detach().cpu().numpy()
-
-    def process_projected_fista(
-        self,
-        image_processor,
-        *,
-        units: str = "Jy/arcsec^2",
-        initial_step: float | None = None,
-        initial_update: float = 1.0e-5,
-        backtracking_factor: float = 0.5,
-        grow_factor: float = 1.25,
-    ) -> np.ndarray:
-        """Run projected FISTA using an existing :class:`Imager3D` setup.
-
-        This is a Speed-model convenience entry point, so callers can retain
-        their usual ``Imager3D`` configuration without modifying the shared
-        imager or solver dispatch.  It supports the same output units as
-        ``Imager3D.process``.
-        """
-        from astropy import units as u
-        from radio_beam import Beam
-
-        from ivis.utils import dunits, dutils
-
-        if units not in {"Jy/arcsec^2", "Jy/beam", "K"}:
-            logger.warning("Unknown unit type. Returning result in Jy/arcsec^2.")
-            units = "Jy/arcsec^2"
-
-        hdr = image_processor.hdr
-        shape = (hdr["NAXIS2"], hdr["NAXIS1"])
-        cell_size = (hdr["CDELT2"] * u.deg).to(u.arcsec)
-        tapper = dutils.apodize(0.98, shape)
-        fftkernel = np.abs(np.fft.fft2(dutils.laplacian(shape)))
-        bmaj_pix = image_processor.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
-        beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
-        fftbeam = np.abs(np.fft.fft2(beam))
-        fftsd = cell_size.value**2 * tfft2(
-            torch.from_numpy(np.float32(image_processor.sd))
-        ).cpu().numpy()
-        params = dict(
-            vis_data=image_processor.vis_data,
-            pb=np.asarray(image_processor.pb, dtype=np.float32),
-            fftbeam=np.asarray(fftbeam, dtype=np.float32),
-            fftsd=np.asarray(fftsd, dtype=np.complex64),
-            tapper=np.asarray(tapper, dtype=np.float32),
-            lambda_sd=image_processor.lambda_sd,
-            fftkernel=np.asarray(fftkernel, dtype=np.float32),
-            cell_size=cell_size.value,
-            grid_array=np.asarray(image_processor.grid, dtype=np.float32),
-            beam_workers=image_processor.beam_workers,
-        )
-        result = self.projected_fista(
-            image_processor.init_params,
-            device=image_processor.cost_device,
-            max_its=image_processor.max_its,
-            initial_step=initial_step,
-            initial_update=initial_update,
-            backtracking_factor=backtracking_factor,
-            grow_factor=grow_factor,
-            **params,
-        )
-
-        if units == "Jy/arcsec^2":
-            output = result
-        elif units == "Jy/beam":
-            assumed_fwhm_pix = 3
-            logger.warning(
-                "Converting to Jy/beam assuming a restoring beam of "
-                f"{assumed_fwhm_pix} × cell_size = "
-                f"{assumed_fwhm_pix * cell_size:.3f} FWHM."
-            )
-            beam_r = Beam(
-                assumed_fwhm_pix * cell_size,
-                assumed_fwhm_pix * cell_size,
-                1.e-12 * u.deg,
-            )
-            output = result * beam_r.sr.to(u.arcsec**2).value
-        else:  # K
-            output = dunits.jy_per_arcsec2_to_K(result, image_processor.vis_data.frequency)
-
-        logger.info("Successful run. Please clap.")
-        return output
 
     def _static_tensor(self, value: Any, device: torch.device) -> torch.Tensor:
         """Cache an immutable numpy input after its one-time device transfer."""
@@ -638,7 +451,3 @@ class Classic3DSpeed(Classic3D):
                 loss_value = loss_value + loss.detach()
 
         return loss_value
-
-
-# Compatibility-friendly spelling for users who prefer the requested file name.
-Classic3D_speed = Classic3DSpeed

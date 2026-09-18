@@ -1,14 +1,14 @@
-from .classic3D import Classic3D, Classic3DHighMemory
-from .classic3D_speed import Classic3DSpeed, Classic3D_speed
-from .lrsb import LRSB, LRSB_C, LRSB_CMemory, LRSBMemory
+from .classic3D import Classic3D
+# Classic3DHighMemory is intentionally disabled: it retains the complete
+# objective graph and can exhaust memory on practical imaging problems.
+from .classic3D_optimized import Classic3D_optimized
+from .lrsb import LRSB, LRSB_C, LRSB_CHighMemory, LRSBHighMemory
 
 __all__ = [
     "Classic3D",
-    "Classic3DHighMemory",
-    "Classic3DSpeed",
-    "Classic3D_speed",
+    "Classic3D_optimized",
     "LRSB",
     "LRSB_C",
-    "LRSB_CMemory",
-    "LRSBMemory",
+    "LRSB_CHighMemory",
+    "LRSBHighMemory",
 ]

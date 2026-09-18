@@ -12,7 +12,7 @@ from ivis.models.utils.gpu import print_gpu_memory
 
 
 # LRSB: Low-Rank Spectral Basis
-class LRSB(BaseModel):
+class LRSBHighMemory(BaseModel):
     """
     Low-rank spectral basis model driven by a user-supplied basis matrix.
 
@@ -481,7 +481,7 @@ class LRSB(BaseModel):
         return loss
 
 
-class LRSB_C(LRSB):
+class LRSB_CHighMemory(LRSBHighMemory):
     """
     LRSB variant with explicit continuum basis functions.
 
@@ -635,12 +635,12 @@ class LRSB_C(LRSB):
 
     def reconstruct_line_cube(self, x, device=None, return_numpy=False):
         line_coeffs, _ = self.split_coeffs(x)
-        line_model = LRSB(basis=self._line_basis_np)
+        line_model = LRSBHighMemory(basis=self._line_basis_np)
         return line_model.reconstruct_cube(line_coeffs, device=device, return_numpy=return_numpy)
 
     def reconstruct_continuum_cube(self, x, device=None, return_numpy=False):
         _, continuum_coeffs = self.split_coeffs(x)
-        continuum_model = LRSB(basis=self._continuum_basis_np)
+        continuum_model = LRSBHighMemory(basis=self._continuum_basis_np)
         return continuum_model.reconstruct_cube(
             continuum_coeffs, device=device, return_numpy=return_numpy
         )
@@ -658,13 +658,13 @@ class LRSB_C(LRSB):
         return torch.cat((line_zeros, weights[self.line_nbasis :]), dim=0)
 
 
-class LRSBMemory(LRSB):
+class LRSB(LRSBHighMemory):
     """
-    Memory-streaming LRSB variant.
+    Memory-streaming LRSB implementation.
 
-    LRSB stores a smaller coefficient cube than Classic3D, but its objective
-    still accumulates one large autograd graph by default. This variant
-    backpropagates independent loss blocks as soon as they are computed.
+    This is the default LRSB implementation. It backpropagates independent
+    loss blocks as soon as they are computed, matching Classic3D's memory
+    behavior. :class:`LRSBHighMemory` retains the full objective graph.
     """
 
     def _backward_loss(self, loss, loss_value):
@@ -858,12 +858,12 @@ class LRSBMemory(LRSB):
         return loss_value
 
 
-class LRSB_CMemory(LRSBMemory, LRSB_C):
+class LRSB_C(LRSB, LRSB_CHighMemory):
     """
-    Memory-streaming LRSB_C variant.
+    Memory-streaming LRSB_C implementation.
 
-    This combines the hybrid line+continuum basis construction from LRSB_C
-    with the blockwise backward pass from LRSBMemory.
+    This combines the hybrid line+continuum basis construction from
+    :class:`LRSB_CHighMemory` with the blockwise backward pass from LRSB.
     """
 
     def __init__(
@@ -878,7 +878,7 @@ class LRSB_CMemory(LRSBMemory, LRSB_C):
         lambda_r_cont_factor=1.0,
         **kwargs,
     ):
-        LRSB_C.__init__(
+        LRSB_CHighMemory.__init__(
             self,
             basis=basis,
             continuum_basis=continuum_basis,

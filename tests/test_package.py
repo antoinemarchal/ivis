@@ -152,11 +152,11 @@ def test_classic3d_matches_high_memory_objective_and_gradient(monkeypatch):
     assert torch.allclose(grad_classic, grad_high_memory, rtol=1e-6, atol=1e-5)
 
 
-def test_lrsb_memory_matches_lrsb_objective_and_gradient(monkeypatch):
+def test_lrsb_matches_lrsb_high_memory_objective_and_gradient(monkeypatch):
     torch = importlib.import_module("torch")
     lrsb_mod = importlib.import_module("ivis.models.lrsb")
     LRSB = lrsb_mod.LRSB
-    LRSBMemory = lrsb_mod.LRSBMemory
+    LRSBHighMemory = lrsb_mod.LRSBHighMemory
 
     def fake_forward_beam(x2d, primary_beam, grid, uu, vv, ww, cell_size, device):
         flat = x2d.reshape(-1)
@@ -211,16 +211,16 @@ def test_lrsb_memory_matches_lrsb_objective_and_gradient(monkeypatch):
             assume_channel_invariant_operator=invariant,
         )
 
+        x_high_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
+        loss_high_memory = LRSBHighMemory(**model_params).objective(x_high_memory, **common_params)
+        grad_high_memory = x_high_memory.grad.detach().clone()
+
         x_lrsb = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
         loss_lrsb = LRSB(**model_params).objective(x_lrsb, **common_params)
         grad_lrsb = x_lrsb.grad.detach().clone()
 
-        x_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
-        loss_memory = LRSBMemory(**model_params).objective(x_memory, **common_params)
-        grad_memory = x_memory.grad.detach().clone()
-
-        assert torch.allclose(loss_memory, loss_lrsb.detach(), rtol=1e-6, atol=1e-5)
-        assert torch.allclose(grad_memory, grad_lrsb, rtol=1e-6, atol=1e-5)
+        assert torch.allclose(loss_lrsb, loss_high_memory.detach(), rtol=1e-6, atol=1e-5)
+        assert torch.allclose(grad_lrsb, grad_high_memory, rtol=1e-6, atol=1e-5)
 
 
 def test_lrsb_c_matches_lrsb_with_explicit_continuum_basis(monkeypatch):
@@ -293,11 +293,11 @@ def test_lrsb_c_matches_lrsb_with_explicit_continuum_basis(monkeypatch):
     assert torch.allclose(hybrid_grad, ref_grad, rtol=1e-6, atol=1e-5)
 
 
-def test_lrsb_cmemory_matches_lrsb_c_objective_and_gradient(monkeypatch):
+def test_lrsb_c_matches_lrsb_c_high_memory_objective_and_gradient(monkeypatch):
     torch = importlib.import_module("torch")
     lrsb_mod = importlib.import_module("ivis.models.lrsb")
     LRSB_C = lrsb_mod.LRSB_C
-    LRSB_CMemory = lrsb_mod.LRSB_CMemory
+    LRSB_CHighMemory = lrsb_mod.LRSB_CHighMemory
 
     def fake_forward_beam(x2d, primary_beam, grid, uu, vv, ww, cell_size, device):
         flat = x2d.reshape(-1)
@@ -343,11 +343,11 @@ def test_lrsb_cmemory_matches_lrsb_c_objective_and_gradient(monkeypatch):
     )
 
     x_ref = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
-    ref_loss = LRSB_C(basis=basis, lambda_r=0.0, lambda_pos=0.3).objective(x_ref, **common_params)
+    ref_loss = LRSB_CHighMemory(basis=basis, lambda_r=0.0, lambda_pos=0.3).objective(x_ref, **common_params)
     ref_grad = x_ref.grad.detach().clone()
 
     x_memory = torch.tensor(x0, dtype=torch.float32, requires_grad=True)
-    memory_loss = LRSB_CMemory(basis=basis, lambda_r=0.0, lambda_pos=0.3).objective(
+    memory_loss = LRSB_C(basis=basis, lambda_r=0.0, lambda_pos=0.3).objective(
         x_memory, **common_params
     )
     memory_grad = x_memory.grad.detach().clone()

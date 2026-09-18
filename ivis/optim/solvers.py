@@ -181,92 +181,96 @@ def optimize_torch_cg(*, model, x_init, dtype, max_its, cost_dev, optim_dev, par
     return x.detach().cpu().numpy()
 
 
-def _estimate_lipschitz(*, model, x_shape, dtype, cost_dev, params, power_iters=10):
-    v = torch.randn(x_shape, dtype=dtype, device=cost_dev)
-    v_norm = torch.linalg.vector_norm(v)
-    if float(v_norm.detach().cpu()) == 0.0:
-        v = torch.ones(x_shape, dtype=dtype, device=cost_dev)
-        v_norm = torch.linalg.vector_norm(v)
-    v = v / v_norm
-
-    rayleigh = 1.0
-    for _ in range(max(1, int(power_iters))):
-        Av = model.apply_normal_operator(v, device=cost_dev, **params).to(dtype)
-        Av_norm = torch.linalg.vector_norm(Av)
-        avn = float(Av_norm.detach().cpu())
-        if avn == 0.0:
-            return 1.0
-        v = Av / Av_norm
-        rayleigh = float(torch.sum(v * model.apply_normal_operator(v, device=cost_dev, **params).to(dtype)).detach().cpu())
-
-    return max(rayleigh, 1e-12)
-
-
-def optimize_torch_fista(*, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
-                         positivity=False, tol=1e-6, power_iters=10):
-    if not hasattr(model, "apply_normal_operator") or not hasattr(model, "quadratic_rhs"):
-        raise TypeError("FISTA solver requires model.apply_normal_operator() and model.quadratic_rhs().")
+def optimize_torch_fista(
+    *, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
+    positivity=False, initial_step=None, initial_update=1.0e-5,
+    backtracking_factor=0.5, grow_factor=1.25,
+):
+    """Monotone backtracking FISTA using gradients from ``model.objective``."""
+    if max_its < 1:
+        raise ValueError("max_its must be at least one.")
+    if not 0.0 < backtracking_factor < 1.0:
+        raise ValueError("backtracking_factor must lie between zero and one.")
+    if grow_factor < 1.0:
+        raise ValueError("grow_factor must be at least one.")
+    if initial_update <= 0.0:
+        raise ValueError("initial_update must be positive.")
 
     if optim_dev != cost_dev:
-        logger.info(f"FISTA uses the cost device for operator applications; solving on {cost_dev}.")
+        logger.info(f"FISTA uses the cost device for objective evaluations; solving on {cost_dev}.")
 
-    logger.info(
-        f"Starting optimisation: FISTA on {cost_dev}" + (" with positivity projection" if positivity else "")
-    )
-
-    x = torch.tensor(x_init, dtype=dtype, device=cost_dev)
+    x = torch.as_tensor(x_init, dtype=dtype, device=cost_dev).clone()
+    if positivity:
+        x.clamp_(min=0)
     y = x.clone()
-    rhs = model.quadratic_rhs(x_shape=tuple(x.shape), device=cost_dev, **params).to(dtype)
-    lipschitz = 1.2 * _estimate_lipschitz(
-        model=model,
-        x_shape=tuple(x.shape),
-        dtype=dtype,
-        cost_dev=cost_dev,
-        params=params,
-        power_iters=power_iters,
+    t_k = 1.0
+
+    def evaluate(candidate):
+        leaf = candidate.detach().requires_grad_(True)
+        loss = model.objective(leaf, device=cost_dev, **params)
+        if leaf.grad is None:
+            raise RuntimeError("objective() did not produce a gradient.")
+        return loss.detach(), leaf.grad.detach()
+
+    loss_x, grad_x = evaluate(x)
+    if initial_step is None:
+        initial_step = initial_update / max(float(grad_x.abs().max()), 1.0e-20)
+    step = float(initial_step)
+    logger.info(
+        f"Starting optimisation: FISTA on {cost_dev}"
+        + (" with positivity projection" if positivity else "")
+        + f"; initial step={step:.6e}"
     )
-    step = 1.0 / lipschitz
-    logger.info(f"[FISTA] Estimated Lipschitz constant={lipschitz:.6e}; step={step:.6e}")
 
     if cost_dev.type == "cuda":
         torch.cuda.synchronize(cost_dev)
     t0 = time.perf_counter()
 
-    t_k = 1.0
-    iter_count = 0
+    for iteration in range(1, int(max_its) + 1):
+        loss_y, grad_y = evaluate(y)
+        reference_y, local_t = y, t_k
+        if loss_y > loss_x:
+            reference_y, loss_y, grad_y, local_t = x, loss_x, grad_x, 1.0
 
-    for k in range(1, int(max_its) + 1):
-        grad = model.apply_normal_operator(y, device=cost_dev, **params).to(dtype) - rhs
-        x_next = y - step * grad
-        if positivity:
-            x_next.clamp_(min=0)
+        accepted = False
+        for _ in range(30):
+            candidate = reference_y - step * grad_y
+            if positivity:
+                candidate = candidate.clamp_min(0)
+            loss_candidate, grad_candidate = evaluate(candidate)
+            delta = candidate - reference_y
+            majorizer = loss_y + torch.sum(grad_y * delta) + torch.sum(delta * delta) / (2.0 * step)
+            if torch.isfinite(loss_candidate) and loss_candidate <= majorizer:
+                accepted = True
+                break
+            step *= backtracking_factor
 
-        t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * t_k * t_k))
-        y = x_next + ((t_k - 1.0) / t_next) * (x_next - x)
+        if not accepted:
+            raise RuntimeError("FISTA failed to find a finite descent step.")
+        if loss_candidate > loss_x:
+            y, t_k, step = x.clone(), 1.0, step * backtracking_factor
+            logger.info(f"[FISTA Iter {iteration}/{max_its}] restart; loss={float(loss_x):.6e}; step={step:.6e}")
+            continue
 
-        dx = torch.linalg.vector_norm(x_next - x).item()
-        x_norm = max(torch.linalg.vector_norm(x_next).item(), 1e-12)
-        rel_change = dx / x_norm
+        t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * local_t * local_t))
+        y = candidate + ((local_t - 1.0) / t_next) * (candidate - x)
+        rel_change = torch.linalg.vector_norm(candidate - x) / torch.clamp_min(
+            torch.linalg.vector_norm(candidate), 1.0e-20
+        )
+        x, loss_x, grad_x, t_k = candidate, loss_candidate, grad_candidate, t_next
+        step *= grow_factor
         logger.info(
-            f"[PID {os.getpid()}] [FISTA Iter {k}/{max_its}] rel_change={rel_change:.6e}"
+            f"[PID {os.getpid()}] [FISTA Iter {iteration}/{max_its}] "
+            f"loss={float(loss_x):.6e}; rel_change={float(rel_change):.6e}; step={step:.6e}"
         )
 
-        x = x_next
-        t_k = t_next
-        iter_count = k
-        if rel_change <= tol:
-            break
-
-    final_loss = float(model.objective(x, device=cost_dev, **params).detach().cpu())
     if cost_dev.type == "cuda":
         torch.cuda.synchronize(cost_dev)
     elapsed = time.perf_counter() - t0
-
-    end_mem_info = dutils.gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
+    mem_info = dutils.gpu_mem_str(cost_dev) if cost_dev.type == "cuda" else ""
     logger.info(
         f"[Timing] FISTA (cost_dev={cost_dev}, positivity={positivity}) took {elapsed:.2f} s; "
-        f"final loss={final_loss:.6g}; iterations={iter_count}"
-        + (f" | {end_mem_info}" if end_mem_info else "")
+        f"final loss={float(loss_x):.6g}"
+        + (f" | {mem_info}" if mem_info else "")
     )
-
     return x.detach().cpu().numpy()
