@@ -151,7 +151,7 @@ class Classic3D_optimized(Classic3D):
         conj_data: bool = True,
         *,
         nufft_eps: float = 1e-4,
-        reprojection_batch_size: int = 4,
+        reprojection_batch_size: int = 1,
         use_plan_cache: bool = True,
     ):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
