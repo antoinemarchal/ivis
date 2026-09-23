@@ -137,7 +137,7 @@ class Imager3D:
     # ------------------------------------------------------------------
     # process(): SAME logic + SAME log strings as your original version
     # ------------------------------------------------------------------
-    def process(self, model=None, solver="LBFGS", units="Jy/arcsec^2",
+    def process(self, model=None, solver="LBFGS-B", units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32, initial_step=None,
                 initial_update=1.0e-5, backtracking_factor=0.5,
                 grow_factor=1.25, loss_only_line_search=False):
