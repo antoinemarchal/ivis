@@ -249,7 +249,7 @@ def wcs2D(hdr):
     return w
 
 
-def apodize(radius, shape):
+def apodize(radius, shape, *, vectorized=False):
     """
     from JF Robitaille package.
     Create edges apodization tapper
@@ -260,6 +260,8 @@ def apodize(radius, shape):
     size of the tapper
     radius : float
     radius must be lower than 1 and greater than 0.
+    vectorized : bool
+        Use an outer product instead of loops (same taper values).
     
     Returns
     -------
@@ -287,6 +289,9 @@ def apodize(radius, shape):
     tap1d_y[0:dnj] = (np.cos(3. * np.pi/2. + np.pi/2. * (1.* np.arange( dnj )/(dnj-1)) ))
     tap1d_y[ny-dnj:] = (np.cos(0. + np.pi/2. * (1.* np.arange(dnj)/(dnj-1)) ))
     
+    if vectorized:
+        return tap1d_y[:, None] * tap1d_x[None, :]
+
     tapper = np.zeros((ny, nx))
     
     for i in range(nx):

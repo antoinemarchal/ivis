@@ -42,7 +42,7 @@ To get started, we recommend using ``uv`` to manage packages and ``mamba`` to cr
    
    # Create the IViS environment
    mamba create -n ivis -y -c conda-forge \
-   python=3.10 casacore python-casacore gsl \
+   python=3.10 casacore python-casacore gsl h5py \
    numpy scipy astropy matplotlib \
    reproject radio-beam psutil tqdm joblib \
    pip
@@ -58,7 +58,7 @@ To get started, we recommend using ``uv`` to manage packages and ``mamba`` to cr
    export PATH="$HOME/.cargo/bin:$PATH"  # if needed
    
    # Install IViS and dependencies using uv
-   uv pip install "ivis[gpu] @ git+https://github.com/antoinemarchal/ivis.git"
+   uv pip install "ivis[gpu,hdf5] @ git+https://github.com/antoinemarchal/ivis.git"
 
 .. note::
 

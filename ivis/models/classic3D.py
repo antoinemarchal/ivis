@@ -14,6 +14,11 @@ from ivis.models.utils.gpu import print_gpu_memory
 
 
 class Classic3D(BaseModel):
+    # The visibility objective and optional single-dish/regularization terms
+    # are fixed quadratic functions of the image. FISTA can reuse gradients at
+    # accepted iterates for this model and its objective-preserving variants.
+    supports_quadratic_gradient_reuse = True
+
     def __init__(self, lambda_r=1, use_2pi=True, conj_data=True):
         self.lambda_r = lambda_r
         self.use_2pi = use_2pi

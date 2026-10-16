@@ -507,11 +507,11 @@ class DataProcessor:
 
         #init interpolation grid
         if round(ratio) != 1:
-            reproj_pb = np.zeros((n_beams,shape_out[0],shape_out[1]))
-            grid_array = np.zeros((n_beams,1,shape_out[0],shape_out[1],2))
+            reproj_pb = np.zeros((n_beams,shape_out[0],shape_out[1]), dtype=np.float32)
+            grid_array = np.zeros((n_beams,1,shape_out[0],shape_out[1],2), dtype=np.float32)
         else:
-            reproj_pb = np.zeros((n_beams,shape[0],shape[1]))
-            grid_array = np.zeros((n_beams,1,shape[0],shape[1],2))
+            reproj_pb = np.zeros((n_beams,shape[0],shape[1]), dtype=np.float32)
+            grid_array = np.zeros((n_beams,1,shape[0],shape[1],2), dtype=np.float32)
         for i in tqdm(np.arange(n_beams)):
             #open beam cube
             hdu_pb = fits.open(filenames[i])
@@ -559,13 +559,41 @@ class DataProcessor:
         reproj_pb[reproj_pb != reproj_pb] = 0.
 
         #Write on disk
+        pb_path = os.path.join(self.pathout, fitsname_pb)
         hdu0 = fits.PrimaryHDU(reproj_pb, header=target_header)
-        hdulist = fits.HDUList([hdu0])
-        hdulist.writeto(self.pathout + fitsname_pb, overwrite=True)
+        fits.HDUList([hdu0]).writeto(pb_path, overwrite=True)
+        self._write_native_float32_cache(pb_path, reproj_pb)
         
+        grid_path = os.path.join(self.pathout, fitsname_grid)
         hdu0 = fits.PrimaryHDU(grid_array, header=None)
-        hdulist = fits.HDUList([hdu0])
-        hdulist.writeto(self.pathout + fitsname_grid, overwrite=True)
+        fits.HDUList([hdu0]).writeto(grid_path, overwrite=True)
+        self._write_native_float32_cache(grid_path, grid_array)
+
+
+    @staticmethod
+    def _native_cache_path(fits_path):
+        stem, ext = os.path.splitext(fits_path)
+        if ext.lower() in (".fits", ".fit", ".fts"):
+            return stem + ".npy"
+        return fits_path + ".npy"
+
+
+    @staticmethod
+    def _write_native_float32_cache(fits_path, array):
+        """Write a native-endian float32 NPY sidecar atomically."""
+        cache_path = DataProcessor._native_cache_path(fits_path)
+        temp_path = f"{cache_path}.tmp-{os.getpid()}"
+        native = np.asarray(array, dtype=np.dtype("=f4"), order="C")
+        try:
+            with open(temp_path, "wb") as stream:
+                np.save(stream, native, allow_pickle=False)
+            os.replace(temp_path, cache_path)
+        except Exception:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
+            raise
 
 
     def read_pb_and_grid(self, fitsname_pb, fitsname_grid):
@@ -584,11 +612,28 @@ class DataProcessor:
         tuple of np.ndarray
             (primary beam array, interpolation grid array)
         """
-        #read pre-computed pb
-        hdu_grid = fits.open(self.pathout + fitsname_grid)
-        #read pre-computed grid                
-        hdu_pb = fits.open(self.pathout + fitsname_pb)
+        pb_path = os.path.join(self.pathout, fitsname_pb)
+        grid_path = os.path.join(self.pathout, fitsname_grid)
+        pb_cache = self._native_cache_path(pb_path)
+        grid_cache = self._native_cache_path(grid_path)
 
+        # Only use the pair when both caches correspond to the current FITS
+        # products. Copy-on-write mappings are writable to torch without
+        # materializing another host copy; writes remain private to this run.
+        cache_is_current = all(
+            os.path.isfile(cache)
+            and os.stat(cache).st_mtime_ns >= os.stat(source).st_mtime_ns
+            for cache, source in ((pb_cache, pb_path), (grid_cache, grid_path))
+            if os.path.isfile(source)
+        ) and os.path.isfile(pb_path) and os.path.isfile(grid_path)
+        if cache_is_current:
+            return (np.load(pb_cache, mmap_mode="c", allow_pickle=False),
+                    np.load(grid_cache, mmap_mode="c", allow_pickle=False))
+
+        # Backward-compatible fallback for FITS products without fresh NPY
+        # sidecars. The imaging model handles FITS byte order as before.
+        hdu_grid = fits.open(grid_path)
+        hdu_pb = fits.open(pb_path)
         return hdu_pb[0].data, hdu_grid[0].data
 
 

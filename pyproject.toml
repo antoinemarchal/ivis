@@ -49,6 +49,9 @@ docs = [
      "sphinx.ext.graphviz"
      ]
 
+# Optional reader for pre-ingested, channel-major visibility caches.
+hdf5 = ["h5py"]
+
 [project.urls]
 Homepage = "https://github.com/antoinemarchal/ivis"
 

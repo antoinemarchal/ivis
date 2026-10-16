@@ -181,18 +181,52 @@ def optimize_torch_cg(*, model, x_init, dtype, max_its, cost_dev, optim_dev, par
     return x.detach().cpu().numpy()
 
 
+def _quadratic_extrapolation(loss, gradient, previous_gradient, displacement, momentum):
+    """Cost and gradient at x + momentum * displacement for a fixed quadratic.
+
+    ``displacement`` is x - previous_x. Accumulate scalar products in double
+    precision in chunks to avoid full-size double image temporaries on CUDA.
+    The returned gradient has its own storage whenever momentum is nonzero.
+    """
+    if momentum == 0.0:
+        return loss, gradient
+    gradient_delta = gradient - previous_gradient
+    slope = torch.zeros((), dtype=torch.float64, device=gradient.device)
+    curvature = torch.zeros_like(slope)
+    chunks = zip(displacement.reshape(-1).split(1 << 20),
+                 gradient.reshape(-1).split(1 << 20),
+                 gradient_delta.reshape(-1).split(1 << 20))
+    for delta, grad, grad_delta in chunks:
+        delta64 = delta.double()
+        slope.add_(torch.dot(delta64, grad.double()))
+        curvature.add_(torch.dot(delta64, grad_delta.double()))
+    extrapolated_loss = loss + momentum * slope + 0.5 * momentum**2 * curvature
+    extrapolated_gradient = gradient_delta.mul_(momentum).add_(gradient)
+    return extrapolated_loss, extrapolated_gradient
+
+
 def optimize_torch_fista(
     *, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
     positivity=False, initial_step=None, initial_update=1.0e-5,
     backtracking_factor=0.5, grow_factor=1.25, loss_only_line_search=False,
+    quadratic_gradient_reuse=None,
 ):
     """Monotone backtracking FISTA using gradients from ``model.objective``.
 
     ``loss_only_line_search`` avoids computing a gradient for each trial
     point.  It is available only to models that opt in with
     ``supports_loss_only_objective = True`` and honour
-    ``compute_grad=False`` in ``objective``.  The default preserves the
-    original full-gradient evaluation sequence.
+    ``compute_grad=False`` in ``objective``.
+
+    ``quadratic_gradient_reuse=None`` (default) enables reuse for models
+    declaring ``supports_quadratic_gradient_reuse = True``. Such models must
+    have a fixed quadratic objective throughout the solve. Costs and gradients
+    at extrapolated points are obtained from accepted iterates; every candidate
+    is evaluated with its gradient for use by the next iteration. This takes
+    precedence over ``loss_only_line_search``. Set reuse to False for the
+    original evaluation sequence, or True to require a compatible model.
+    Borderline comparisons refresh the extrapolated point directly to avoid
+    roundoff in the quadratic identities stalling a nearly converged solve.
     """
     if max_its < 1:
         raise ValueError("max_its must be at least one.")
@@ -202,7 +236,16 @@ def optimize_torch_fista(
         raise ValueError("grow_factor must be at least one.")
     if initial_update <= 0.0:
         raise ValueError("initial_update must be positive.")
-    if loss_only_line_search and not getattr(model, "supports_loss_only_objective", False):
+    supports_reuse = getattr(model, "supports_quadratic_gradient_reuse", False)
+    if quadratic_gradient_reuse is None:
+        quadratic_gradient_reuse = supports_reuse
+    elif quadratic_gradient_reuse and not supports_reuse:
+        raise ValueError(
+            "quadratic_gradient_reuse=True requires a model declaring "
+            "supports_quadratic_gradient_reuse=True (a fixed quadratic objective)."
+        )
+    if (loss_only_line_search and not quadratic_gradient_reuse
+            and not getattr(model, "supports_loss_only_objective", False)):
         raise ValueError(
             "loss_only_line_search=True requires a model that supports "
             "objective(..., compute_grad=False)."
@@ -216,8 +259,16 @@ def optimize_torch_fista(
         x.clamp_(min=0)
     y = x.clone()
     t_k = 1.0
+    objective_evaluations = 0
+    quadratic_refreshes = 0
+    extrapolated_evaluation = False
+    # Gram arithmetic can have lower precision than the solver image.
+    reuse_eps = max(torch.finfo(dtype).eps,
+                    torch.finfo(getattr(model, "gram_dtype", dtype)).eps)
 
     def evaluate(candidate, *, compute_grad=True):
+        nonlocal objective_evaluations
+        objective_evaluations += 1
         leaf = candidate.detach().requires_grad_(compute_grad)
         if compute_grad:
             loss = model.objective(leaf, device=cost_dev, **params)
@@ -233,14 +284,32 @@ def optimize_torch_fista(
             )
         return loss.detach(), None
 
+    def near_roundoff(left, right):
+        scale = torch.maximum(left.abs(), right.abs()).clamp_min(torch.finfo(dtype).tiny)
+        return torch.abs(left - right) <= 8 * reuse_eps * scale
+
+    def evaluate_trial(reference, reference_loss, reference_gradient, step):
+        candidate = reference - step * reference_gradient
+        if positivity:
+            candidate = candidate.clamp_min(0)
+        loss, gradient = evaluate(
+            candidate, compute_grad=quadratic_gradient_reuse or not loss_only_line_search
+        )
+        delta = candidate - reference
+        majorizer = (reference_loss + torch.sum(reference_gradient * delta)
+                     + torch.sum(delta * delta) / (2.0 * step))
+        return candidate, loss, gradient, majorizer
+
     loss_x, grad_x = evaluate(x)
+    if quadratic_gradient_reuse:
+        loss_y, grad_y = loss_x, grad_x
     if initial_step is None:
         initial_step = initial_update / max(float(grad_x.abs().max()), 1.0e-20)
     step = float(initial_step)
     logger.info(
         f"Starting optimisation: FISTA on {cost_dev}"
         + (" with positivity projection" if positivity else "")
-        + f"; initial step={step:.6e}"
+        + f"; initial step={step:.6e}; quadratic gradient reuse={quadratic_gradient_reuse}"
     )
 
     if cost_dev.type == "cuda":
@@ -248,7 +317,12 @@ def optimize_torch_fista(
     t0 = time.perf_counter()
 
     for iteration in range(1, int(max_its) + 1):
-        loss_y, grad_y = evaluate(y)
+        if not quadratic_gradient_reuse:
+            loss_y, grad_y = evaluate(y)
+        elif extrapolated_evaluation and near_roundoff(loss_y, loss_x):
+            loss_y, grad_y = evaluate(y)
+            extrapolated_evaluation = False
+            quadratic_refreshes += 1
         reference_y, local_t = y, t_k
         if loss_y > loss_x:
             # In loss-only mode an accepted candidate deliberately has no
@@ -258,17 +332,24 @@ def optimize_torch_fista(
             if grad_x is None:
                 _loss_x_check, grad_x = evaluate(x)
             reference_y, loss_y, grad_y, local_t = x, loss_x, grad_x, 1.0
+            extrapolated_evaluation = False
 
         accepted = False
         for _ in range(30):
-            candidate = reference_y - step * grad_y
-            if positivity:
-                candidate = candidate.clamp_min(0)
-            loss_candidate, grad_candidate = evaluate(
-                candidate, compute_grad=not loss_only_line_search
+            candidate, loss_candidate, grad_candidate, majorizer = evaluate_trial(
+                reference_y, loss_y, grad_y, step
             )
-            delta = candidate - reference_y
-            majorizer = loss_y + torch.sum(grad_y * delta) + torch.sum(delta * delta) / (2.0 * step)
+            if extrapolated_evaluation and near_roundoff(loss_candidate, majorizer):
+                loss_y, grad_y = evaluate(reference_y)
+                extrapolated_evaluation = False
+                quadratic_refreshes += 1
+                if loss_y > loss_x:
+                    reference_y, loss_y, grad_y, local_t = x, loss_x, grad_x, 1.0
+                # Rebuild the trial with the refreshed gradient at the same
+                # step size; a refresh does not consume a backtracking step.
+                candidate, loss_candidate, grad_candidate, majorizer = evaluate_trial(
+                    reference_y, loss_y, grad_y, step
+                )
             if torch.isfinite(loss_candidate) and loss_candidate <= majorizer:
                 accepted = True
                 break
@@ -278,11 +359,22 @@ def optimize_torch_fista(
             raise RuntimeError("FISTA failed to find a finite descent step.")
         if loss_candidate > loss_x:
             y, t_k, step = x.clone(), 1.0, step * backtracking_factor
+            if quadratic_gradient_reuse:
+                loss_y, grad_y = loss_x, grad_x
+                extrapolated_evaluation = False
             logger.info(f"[FISTA Iter {iteration}/{max_its}] restart; loss={float(loss_x):.6e}; step={step:.6e}")
             continue
 
         t_next = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * local_t * local_t))
-        y = candidate + ((local_t - 1.0) / t_next) * (candidate - x)
+        momentum = (local_t - 1.0) / t_next
+        displacement = candidate - x
+        y = candidate + momentum * displacement
+        if quadratic_gradient_reuse:
+            loss_y, grad_y = _quadratic_extrapolation(
+                loss_candidate, grad_candidate, grad_x, displacement, momentum
+            )
+            extrapolated_evaluation = momentum != 0.0
+        del displacement
         rel_change = torch.linalg.vector_norm(candidate - x) / torch.clamp_min(
             torch.linalg.vector_norm(candidate), 1.0e-20
         )
@@ -300,6 +392,8 @@ def optimize_torch_fista(
     logger.info(
         f"[Timing] FISTA (cost_dev={cost_dev}, positivity={positivity}) took {elapsed:.2f} s; "
         f"final loss={float(loss_x):.6g}"
+        f"; objective_evaluations={objective_evaluations}"
+        f"; quadratic_refreshes={quadratic_refreshes}"
         + (f" | {mem_info}" if mem_info else "")
     )
     return x.detach().cpu().numpy()

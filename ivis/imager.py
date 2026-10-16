@@ -134,13 +134,42 @@ class Imager3D:
             return_real=return_real,
         )
 
-    # ------------------------------------------------------------------
-    # process(): SAME logic + SAME log strings as your original version
-    # ------------------------------------------------------------------
+    def _prepare_image_terms(self, cell_size, shape, fast_setup=False):
+        if fast_setup:
+            cached = getattr(self, "_image_setup_cache", None)
+            if cached is None or cached[0] != shape:
+                tapper = dutils.apodize(0.98, shape, vectorized=True).astype(np.float32)
+                # Magnitude of the shifted ROHSA stencil's DFT. The shift
+                # changes only phase; frequencies use the existing FFT order.
+                fy, fx = [0.5 * (1 - np.cos(2 * np.pi * np.fft.fftfreq(n)))
+                          for n in shape]
+                fftkernel = (fy[:, None] + fx[None, :]).astype(np.float32)
+                self._image_setup_cache = (shape, tapper, fftkernel)
+            _, tapper, fftkernel = self._image_setup_cache
+        else:
+            tapper = dutils.apodize(0.98, shape)
+            fftkernel = abs(fft2(dutils.laplacian(shape)))
+
+        # Only shape-dependent terms are cached. Active single-dish inputs
+        # are rebuilt so in-place data edits cannot leave a stale FFT.
+        fftbeam = fftsd = None
+        if not fast_setup or self.lambda_sd != 0:
+            bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
+            beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
+            fftbeam = abs(fft2(beam))
+            fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).cpu().numpy()
+        return dict(
+            tapper=np.asarray(tapper, dtype=np.float32),
+            fftkernel=np.asarray(fftkernel, dtype=np.float32),
+            fftbeam=None if fftbeam is None else np.asarray(fftbeam, dtype=np.float32),
+            fftsd=None if fftsd is None else np.asarray(fftsd, dtype=np.complex64),
+        )
+
     def process(self, model=None, solver="LBFGS-B", units="Jy/arcsec^2",
                 history_size=10, dtype=torch.float32, initial_step=None,
                 initial_update=1.0e-5, backtracking_factor=0.5,
-                grow_factor=1.25, loss_only_line_search=False):
+                grow_factor=1.25, loss_only_line_search=False,
+                quadratic_gradient_reuse=None, fast_setup=False):
         """
         Devices
         -------
@@ -156,13 +185,21 @@ class Imager3D:
         FISTA options
         -------------
         ``initial_step``, ``initial_update``, ``backtracking_factor``,
-        ``grow_factor``, and ``loss_only_line_search`` are passed to FISTA
-        when ``solver="FISTA"``.  The latter is an opt-in optimization for
-        models that support loss-only candidate evaluations.
+        ``grow_factor``, ``loss_only_line_search``, and
+        ``quadratic_gradient_reuse`` are passed to FISTA when
+        ``solver="FISTA"``. Quadratic gradient reuse defaults to automatic:
+        enabled for models declaring a fixed quadratic objective (including
+        Classic3D_gram). Set it to False to use the original FISTA path,
+        where ``loss_only_line_search`` can skip candidate gradients.
 
         Notes
         -----
         objective() is expected to call backward() internally (unchanged).
+        ``fast_setup=True`` caches the taper and analytic Laplacian response
+        by image shape and skips single-dish FFTs when ``lambda_sd=0``.
+        Compatible with Classic3D, Classic3D_optimized and Classic3D_gram.
+        Other models must accept None for inactive single-dish inputs.
+        The default keeps the original preparation path.
         """
         if model is None:
             raise ValueError("Must pass a model instance to `process()`.")
@@ -215,30 +252,17 @@ class Imager3D:
         # --- Image/grid params (unchanged) ---
         cell_size = (self.hdr["CDELT2"] * u.deg).to(u.arcsec)
         shape = (self.hdr["NAXIS2"], self.hdr["NAXIS1"])
-        tapper = dutils.apodize(0.98, shape)
-
-        # --- FFT beam for reg (unchanged) ---
-        kernel_map = dutils.laplacian(shape)
-        fftkernel = abs(fft2(kernel_map))
-        bmaj_pix = self.beam_sd.major.to(u.deg).value / cell_size.to(u.deg).value
-        beam = dutils.gauss_beam(bmaj_pix, shape, FWHM=True)
-        fftbeam = abs(fft2(beam))
-
-        # --- FFT single-dish (unchanged) ---
-        fftsd = cell_size.value**2 * tfft2(torch.from_numpy(np.float32(self.sd))).cpu().numpy()
+        image_terms = self._prepare_image_terms(cell_size, shape, fast_setup)
 
         # --- Common params (unchanged keys/values) ---
         params = dict(
             vis_data=self.vis_data,
             pb=np.asarray(self.pb, dtype=np.float32),
-            fftbeam=np.asarray(fftbeam, dtype=np.float32),
-            fftsd=np.asarray(fftsd, dtype=np.complex64),
-            tapper=np.asarray(tapper, dtype=np.float32),
             lambda_sd=self.lambda_sd,
-            fftkernel=np.asarray(fftkernel, dtype=np.float32),
             cell_size=cell_size.value,
             grid_array=np.asarray(self.grid, dtype=np.float32),
             beam_workers=self.beam_workers,
+            **image_terms,
         )
 
         param_shape = self.init_params.shape
@@ -258,6 +282,7 @@ class Imager3D:
                 backtracking_factor=backtracking_factor,
                 grow_factor=grow_factor,
                 loss_only_line_search=loss_only_line_search,
+                quadratic_gradient_reuse=quadratic_gradient_reuse,
             )
             result = flat.reshape(param_shape)
         elif solver_name == "L-BFGS-B":
