@@ -1,5 +1,7 @@
 # ivis/types.py
 from __future__ import annotations
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, MISSING
 from typing import Iterator, Tuple
 import numpy as np
@@ -94,11 +96,12 @@ class VisIData():
         flg = self.flag_I[c, b, :nv]
         good = ~flg
 
-        # exact per-channel scaling: meters → wavelengths
+        # exact per-channel scaling: meters → wavelengths. Scaling after masking
+        # gives the same values as before but skips three full-length products.
         scale = self.frequency[c] / c_light.value  # scalar
-        uu_l = (self.uu[b, :nv] * scale)[good]
-        vv_l = (self.vv[b, :nv] * scale)[good]
-        ww_l = (self.ww[b, :nv] * scale)[good]
+        uu_l = self.uu[b, :nv][good] * scale
+        vv_l = self.vv[b, :nv][good] * scale
+        ww_l = self.ww[b, :nv][good] * scale
 
         return (
             self.data_I [c, b, :nv][good],
@@ -106,13 +109,45 @@ class VisIData():
             uu_l, vv_l, ww_l,
         )
 
-    def iter_chan_beam_I(self) -> Iterator[Tuple[int,int,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]]:
+    def iter_chan_beam_I(self, prefetch: int = 2) -> Iterator[Tuple[int,int,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]]:
+        """
+        Yield (c, b, I, sigma, u, v, w) for every channel/beam with unflagged data, in channel-major order.
+
+        Slicing a pointing masks arrays of millions of visibilities, which takes tens of
+        milliseconds of host time. With ``prefetch`` > 0 the next ``prefetch`` pointings are
+        sliced in background threads (NumPy releases the GIL) while the consumer, usually
+        a GPU, works on the current one. ``prefetch=0`` slices lazily in the calling thread.
+        """
         nchan, nbeam, _ = self.data_I.shape
-        for c in range(nchan):
-            for b in range(nbeam):
+        pairs = ((c, b) for c in range(nchan) for b in range(nbeam))
+        if prefetch <= 0:
+            for c, b in pairs:
                 I, sI, uu, vv, ww = self.slice_chan_beam_I(c, b)
                 if I.size:
                     yield c, b, I, sI, uu, vv, ww
+            return
+        with ThreadPoolExecutor(max_workers=prefetch) as pool:
+            pending: deque = deque()
+
+            def submit():
+                for c, b in pairs:
+                    pending.append((c, b, pool.submit(self.slice_chan_beam_I, c, b)))
+                    return True
+                return False
+
+            for _ in range(prefetch + 1):
+                if not submit():
+                    break
+            try:
+                while pending:
+                    c, b, future = pending.popleft()
+                    submit()
+                    I, sI, uu, vv, ww = future.result()
+                    if I.size:
+                        yield c, b, I, sI, uu, vv, ww
+            finally:
+                for _, _, future in pending:
+                    future.cancel()
 
 
     def single_channel(self, c: int, copy: bool = False) -> "VisIData":
