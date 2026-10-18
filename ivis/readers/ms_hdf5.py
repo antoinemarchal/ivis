@@ -145,6 +145,12 @@ def _pread_into(fd, destination, offset):
         done += count
 
 
+def _is_half_pair(dtype):
+    """True for the compound (r, i) float16 type written by convert_ms_to_hdf5.py --data-dtype float16."""
+    return (dtype.names == ('r', 'i') and all(dtype.fields[name][0] == np.dtype(np.float16) for name in dtype.names)
+            and dtype.itemsize == 4)
+
+
 def _fill_file(meta, arrays, beam, offset, indices, uvmin, uvmax, backend):
     path = meta['path']
     logger.info(f'    [MS] Opening: {path}')
@@ -183,6 +189,13 @@ def _fill_file(meta, arrays, beam, offset, indices, uvmin, uvmax, backend):
                     for output_channel, input_channel in enumerate(indices):
                         source_offset = info['offset'] + int(input_channel)*nv*info['dtype'].itemsize
                         _pread_into(handle.fileno(), destination[output_channel,beam,region], source_offset)
+                elif (backend == 'auto' and hasattr(os, 'preadv') and info['offset'] is not None
+                      and _is_half_pair(info['dtype']) and destination.dtype == np.complex64):
+                    # Complex float16 caches (real/imaginary pairs): read the raw bytes, widen into the complex64 destination.
+                    raw = np.empty(2*nv, dtype=np.float16)
+                    for output_channel, input_channel in enumerate(indices):
+                        _pread_into(handle.fileno(), raw, info['offset'] + int(input_channel)*nv*info['dtype'].itemsize)
+                        destination[output_channel,beam,region].view(np.float32)[:] = raw
                 else:
                     dataset = h5()[name]
                     for begin,end,start,stop in _runs(indices):
