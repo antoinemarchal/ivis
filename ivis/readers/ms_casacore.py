@@ -483,7 +483,7 @@ def read_ms_block_I(
         sI = sI_list[b]
         fI = fI_list[b]            # (nrow_b, nchan)
         
-        bl_m = np.sqrt(UVW0**2 + UVW1**2 + UVW2**2)   # (nrow_b,)
+        bl_m = np.hypot(UVW0, UVW1)   # (nrow_b,) projected (u, v) baseline length in meters; w is not part of the cut
         in_row = (bl_m >= uvmin) & (bl_m <= uvmax)   # (nrow_b,)
         
         fI[~in_row, :] = True

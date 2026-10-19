@@ -179,7 +179,7 @@ def _fill_file(meta, arrays, beam, offset, indices, uvmin, uvmax, backend):
                     with _source_array(handle, h5, name, descriptors[name], backend) as source:
                         arrays[name][beam,region] = source.reshape(-1)
             uu, vv, ww = (arrays[name][beam,region] for name in ('uu','vv','ww'))
-            baseline = np.sqrt(uu**2 + vv**2 + ww**2)
+            baseline = np.hypot(uu, vv)   # uvmin/uvmax are projected (u, v) baseline lengths in meters; w is not part of the cut
             bad = ~((baseline >= uvmin) & (baseline <= uvmax))
             spectral_names = ['data_I','flag_I'] + (['sigma_I'] if 'sigma_I' in descriptors else [])
             for name in spectral_names:

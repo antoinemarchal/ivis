@@ -291,7 +291,7 @@ def read_ms_block_I(
         sigma_chan = si_list[b]
         flag_chan = fi_list[b]
 
-        bl_m = np.sqrt(uvw0**2 + uvw1**2 + uvw2**2)
+        bl_m = np.hypot(uvw0, uvw1)   # projected (u, v) baseline length in meters; w is not part of the cut
         in_row = (bl_m >= uvmin) & (bl_m <= uvmax)
         flag_chan[~in_row, :] = True
         sigma_chan[~in_row, :] = np.inf
