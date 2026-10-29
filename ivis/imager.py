@@ -46,7 +46,8 @@ class Imager3D:
 
     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr,
                  init_params, max_its, lambda_sd, positivity,
-                 cost_device="auto", optim_device="auto", beam_workers=0):
+                 cost_device="auto", optim_device="auto", beam_workers=0,
+                 positivity_floor=None):
 
         self.vis_data = vis_data
         self.pb = pb
@@ -58,6 +59,7 @@ class Imager3D:
         self.max_its = max_its
         self.lambda_sd = lambda_sd
         self.positivity = positivity
+        self.positivity_floor = positivity_floor
         self.beam_workers = beam_workers
 
         # moved to dutils
@@ -70,8 +72,11 @@ class Imager3D:
         if self.lambda_sd == 0:
             logger.warning("lambda_sd = 0 — No short-spacing correction.")
 
+        if self.positivity_floor is not None and not self.positivity:
+            raise ValueError("positivity_floor requires positivity=True.")
         if self.positivity:
-            logger.info("Optimizer bounded - Positivity == True")
+            logger.info("Optimizer bounded - Positivity == True"
+                        + ("" if self.positivity_floor is None else " (lower bound: positivity_floor)"))
         else:
             logger.info("Optimizer not bounded - Positivity == False")
 
@@ -217,6 +222,8 @@ class Imager3D:
             raise ValueError(f"solver='{solver_name}' is incompatible with positivity=True.")
         if not self.positivity and solver_name == "L-BFGS-B":
             raise ValueError("solver='L-BFGS-B' requires positivity=True.")
+        if self.positivity_floor is not None and solver_name != "FISTA":
+            raise ValueError("positivity_floor is only supported by solver='FISTA'.")
         if solver_name == "CG" and not (
             hasattr(model, "apply_normal_operator") and hasattr(model, "quadratic_rhs")
         ):
@@ -277,6 +284,7 @@ class Imager3D:
                 optim_dev=optim_dev,
                 params=params,
                 positivity=self.positivity,
+                positivity_floor=self.positivity_floor,
                 initial_step=initial_step,
                 initial_update=initial_update,
                 backtracking_factor=backtracking_factor,
