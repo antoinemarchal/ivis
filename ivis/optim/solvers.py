@@ -205,11 +205,42 @@ def _quadratic_extrapolation(loss, gradient, previous_gradient, displacement, mo
     return extrapolated_loss, extrapolated_gradient
 
 
+def _lower_bound_projection(positivity, positivity_floor, shape, dtype, device):
+    """Return the projection applied to FISTA iterates, or None when there is no bound.
+
+    positivity_floor=None keeps the original ``clamp(min=0)``. Otherwise the lower bound is
+    the (scalar or broadcastable array) floor, which must be finite and <= 0: a soft
+    positivity that lets the solution go as low as -c*sigma, so that noise stays two-sided
+    while strongly negative sidelobes are still removed.
+    """
+    if not positivity:
+        if positivity_floor is not None:
+            raise ValueError("positivity_floor requires positivity=True.")
+        return None
+    if positivity_floor is None:
+        return lambda v: v.clamp_min(0)
+    floor = torch.as_tensor(np.asarray(positivity_floor), dtype=dtype, device=device)
+    if not bool(torch.isfinite(floor).all()):
+        raise ValueError("positivity_floor must be finite.")
+    if bool((floor > 0).any()):
+        raise ValueError("positivity_floor must be <= 0 (a negative lower bound, e.g. -4 sigma).")
+    try:
+        broadcast = torch.broadcast_shapes(tuple(floor.shape), tuple(shape))
+    except RuntimeError:
+        broadcast = None
+    if broadcast != tuple(shape):
+        raise ValueError(f"positivity_floor of shape {tuple(floor.shape)} does not broadcast to the image shape {tuple(shape)}.")
+    if floor.ndim == 0:
+        value = float(floor)
+        return lambda v: v.clamp_min(value)
+    return lambda v: torch.maximum(v, floor)
+
+
 def optimize_torch_fista(
     *, model, x_init, dtype, max_its, cost_dev, optim_dev, params,
     positivity=False, initial_step=None, initial_update=1.0e-5,
     backtracking_factor=0.5, grow_factor=1.25, loss_only_line_search=False,
-    quadratic_gradient_reuse=None,
+    quadratic_gradient_reuse=None, positivity_floor=None,
 ):
     """Monotone backtracking FISTA using gradients from ``model.objective``.
 
@@ -227,6 +258,10 @@ def optimize_torch_fista(
     original evaluation sequence, or True to require a compatible model.
     Borderline comparisons refresh the extrapolated point directly to avoid
     roundoff in the quadratic identities stalling a nearly converged solve.
+
+    ``positivity_floor`` (default None: iterates are clamped at 0) replaces the lower
+    bound of the positivity projection by a negative scalar or per-pixel array, e.g.
+    -4 sigma(x, y). It requires ``positivity=True``.
     """
     if max_its < 1:
         raise ValueError("max_its must be at least one.")
@@ -255,8 +290,9 @@ def optimize_torch_fista(
         logger.info(f"FISTA uses the cost device for objective evaluations; solving on {cost_dev}.")
 
     x = torch.as_tensor(x_init, dtype=dtype, device=cost_dev).clone()
-    if positivity:
-        x.clamp_(min=0)
+    project = _lower_bound_projection(positivity, positivity_floor, x.shape, dtype, cost_dev)
+    if project is not None:
+        x.copy_(project(x))
     y = x.clone()
     t_k = 1.0
     objective_evaluations = 0
@@ -290,8 +326,8 @@ def optimize_torch_fista(
 
     def evaluate_trial(reference, reference_loss, reference_gradient, step):
         candidate = reference - step * reference_gradient
-        if positivity:
-            candidate = candidate.clamp_min(0)
+        if project is not None:
+            candidate = project(candidate)
         loss, gradient = evaluate(
             candidate, compute_grad=quadratic_gradient_reuse or not loss_only_line_search
         )
