@@ -307,6 +307,17 @@ class Classic3D_gram(Classic3D):
         A value of 0 streams all pointings. This is not a total VRAM limit;
         the image, solver and one pointing batch still need to fit on CUDA.
 
+    psf_positions : sequence of (row, column) or None
+        Measures the response of the whole estimator to unit point sources.
+        When given, the normal-equation right-hand side (the dirty image) is
+        replaced by H*delta, where delta holds a unit pixel at each position
+        in every channel. The objective, regularizers and solvers are
+        unchanged, so an unconstrained solve returns (H + lambda*L)^-1 H delta:
+        the point-source response of the same estimator, in the same units,
+        with the same lambda scaling and iteration count as a normal run.
+        Positions must be far enough apart that their responses do not
+        overlap. The data values are ignored. Default None: normal imaging.
+
     objective() populates x.grad explicitly, as expected by IVIS solvers.
     FISTA uses quadratic gradient reuse by default. The original loss-only
     FISTA path and the existing unconstrained CG interface also work.
@@ -319,7 +330,7 @@ class Classic3D_gram(Classic3D):
                  nufft_eps=1e-6, gram_dtype=torch.float32,
                  reprojection_batch_size=1, use_plan_cache=True,
                  max_cache_bytes=None, gpu_cache_bytes=None,
-                 padding_fraction=2.0, local_gradients=False):
+                 padding_fraction=2.0, local_gradients=False, psf_positions=None):
         super().__init__(lambda_r=lambda_r, use_2pi=use_2pi, conj_data=conj_data)
         if not np.isfinite(nufft_eps) or nufft_eps <= 0:
             raise ValueError("nufft_eps must be finite and positive.")
@@ -342,6 +353,14 @@ class Classic3D_gram(Classic3D):
         self.gpu_cache_bytes = gpu_cache_bytes
         self.padding_fraction = float(padding_fraction)
         self.local_gradients = bool(local_gradients)
+        if psf_positions is not None:
+            try:
+                psf_positions = tuple((int(row), int(col)) for row, col in psf_positions)
+            except (TypeError, ValueError):
+                raise ValueError("psf_positions must be a sequence of (row, column) integer pairs.") from None
+            if not psf_positions:
+                raise ValueError("psf_positions must not be empty; use None for normal imaging.")
+        self.psf_positions = psf_positions
         self._gram_cache: _GramCache | None = None
         self._static_tensors: dict[tuple, tuple[np.ndarray, torch.Tensor]] = {}
 
@@ -579,6 +598,8 @@ class Classic3D_gram(Classic3D):
                       if device.type == "cuda" else 0)
         self._gram_cache = _GramCache(key, blocks, batches, rhs, constant,
                                       nbytes, gpu_nbytes, owners)
+        if self.psf_positions is not None:
+            self._use_point_sources(self._gram_cache, x_shape)
         if device.type == "cuda":
             logger.info(f"Gram cache: {gpu_nbytes / 2**30:.2f} GiB GPU, "
                         f"{(nbytes - gpu_nbytes) / 2**30:.2f} GiB host; "
@@ -587,6 +608,20 @@ class Classic3D_gram(Classic3D):
                         f"padding_fraction={self.padding_fraction:g}, "
                         f"FFT shapes={sorted({b.padded_shape for b in blocks})}")
         return self._gram_cache
+
+    @torch.no_grad()
+    def _use_point_sources(self, cache, x_shape):
+        """Replace the dirty-image right-hand side by H*delta (see ``psf_positions``)."""
+        _, height, width = x_shape
+        delta = torch.zeros(x_shape, dtype=self.gram_dtype, device=cache.rhs.device)
+        for row, col in self.psf_positions:
+            if not (0 <= row < height and 0 <= col < width):
+                raise ValueError(f"psf_positions entry {(row, col)} is outside the {height}x{width} image.")
+            delta[:, row, col] = 1
+        _, h_delta = self._visibility_terms(delta, cache, True, normal_only=True)
+        cache.rhs = h_delta.to(cache.rhs.dtype)
+        cache.constant = torch.zeros_like(cache.constant)
+        logger.info(f"PSF mode: right-hand side replaced by H*delta at {len(self.psf_positions)} position(s); data values ignored.")
 
     def _visibility_terms(self, x, cache, compute_grad, *, normal_only=False):
         loss = cache.constant.new_zeros(()) if normal_only else (
