@@ -140,9 +140,18 @@ def test_invalid_iteration_counts_are_refused(kwargs):
         solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor=-0.3, **kwargs)
 
 
-def test_schedule_needs_a_floor_and_positivity():
-    with pytest.raises(ValueError, match='needs a positivity_floor'):
-        solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor_warmup_iterations=5)
+def test_without_a_floor_the_bound_is_removed_after_the_warmup_iterations():
+    """Plain positivity for N iterations, then nothing: with a unit step the (N+1)th iteration reaches the unconstrained minimiser."""
+    warm = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=3)
+    np.testing.assert_allclose(warm, np.maximum(TARGET, 0), atol=1e-12)
+    scheduled = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=4, positivity_floor_warmup_iterations=3)
+    np.testing.assert_allclose(scheduled, TARGET, atol=1e-12)                                              # unbounded: negative values allowed
+    assert scheduled.min() < -1.0
+    converged = solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor_warmup_iterations=10)
+    np.testing.assert_allclose(converged, TARGET, atol=1e-6)
+
+
+def test_schedule_needs_positivity():
     with pytest.raises(ValueError, match='positivity=True'):
         solve(Separable(TARGET), np.zeros(TARGET.shape), positivity=False, positivity_floor_warmup_iterations=5)
 

@@ -265,9 +265,10 @@ def optimize_torch_fista(
     -4 sigma(x, y). It requires ``positivity=True``.
 
     ``positivity_floor_warmup_iterations`` (default None: no schedule) runs the first N iterations with plain positivity (lower bound 0)
-    and the remaining ones with ``positivity_floor``. Plain positivity early suppresses the faint large-scale sidelobes, relaxing the bound
-    in the last iterations lets the noise become two-sided again. It needs a ``positivity_floor`` and 1 <= N < max_its; the momentum is
-    not reset at the switch.
+    and the remaining ones with ``positivity_floor``; with ``positivity_floor=None`` the bound is removed after the N iterations (the
+    solution is unconstrained at the end). Plain positivity early suppresses the faint large-scale sidelobes, relaxing the bound in the
+    last iterations lets the noise become two-sided again and keeps deep negative features such as absorption, which a floor of -c*sigma
+    would clip. It needs 1 <= N < max_its; the momentum is not reset at the switch.
     """
     if max_its < 1:
         raise ValueError("max_its must be at least one.")
@@ -301,10 +302,10 @@ def optimize_torch_fista(
     warmup = positivity_floor_warmup_iterations is not None
     if warmup and not positivity:
         raise ValueError("positivity_floor_warmup_iterations requires positivity=True.")
-    if warmup and positivity_floor is None:
-        raise ValueError("positivity_floor_warmup_iterations needs a positivity_floor (without one the bound is 0 throughout).")
     project = _lower_bound_projection(positivity, None if warmup else positivity_floor, x.shape, dtype, cost_dev)       # warm-up: plain positivity
-    project_final = _lower_bound_projection(positivity, positivity_floor, x.shape, dtype, cost_dev) if warmup else None
+    project_final = None                                              # after the warm-up: the floor, or no bound at all when there is no floor
+    if warmup and positivity_floor is not None:
+        project_final = _lower_bound_projection(positivity, positivity_floor, x.shape, dtype, cost_dev)
     if project is not None:
         x.copy_(project(x))
     y = x.clone()
@@ -369,7 +370,8 @@ def optimize_torch_fista(
     for iteration in range(1, int(max_its) + 1):
         if warmup and iteration == int(positivity_floor_warmup_iterations) + 1:
             project = project_final                       # read by evaluate_trial at call time
-            logger.info(f"[FISTA Iter {iteration}/{max_its}] lower bound: warm-up floor replaced by positivity_floor")
+            logger.info(f"[FISTA Iter {iteration}/{max_its}] lower bound: plain positivity replaced by "
+                        + ("positivity_floor" if project is not None else "no bound"))
         if not quadratic_gradient_reuse:
             loss_y, grad_y = evaluate(y)
         elif extrapolated_evaluation and near_roundoff(loss_y, loss_x):
