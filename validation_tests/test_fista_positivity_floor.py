@@ -103,3 +103,64 @@ def test_imager_requires_positivity_for_a_floor():
     imager = Imager3D(positivity=True, positivity_floor=-1.0, **common)
     assert imager.positivity_floor == -1.0
     assert Imager3D(positivity=True, **common).positivity_floor is None
+
+
+# ---- floor schedule: plain positivity (bound 0) for the first N iterations, positivity_floor afterwards -----------------------------------------------
+
+def test_the_first_iterations_use_plain_positivity_and_the_floor_applies_after_them():
+    """With a unit step the first iteration lands on the (projected) minimiser, so the bound in force decides the result."""
+    warm = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=3)                    # three iterations of plain positivity
+    np.testing.assert_allclose(warm, np.maximum(TARGET, 0), atol=1e-12)
+    scheduled = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=4,
+                      positivity_floor=-0.3, positivity_floor_warmup_iterations=3)
+    np.testing.assert_allclose(scheduled, np.maximum(TARGET, -0.3), atol=1e-12)                           # the 4th iteration is bounded by the floor
+
+
+def test_scheduled_solution_converges_to_the_floor_minimiser():
+    result = solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor=-0.3, positivity_floor_warmup_iterations=10)
+    np.testing.assert_allclose(result, np.maximum(TARGET, -0.3), atol=1e-6)
+
+
+def test_floor_may_be_a_per_pixel_map_with_a_schedule():
+    floor = -0.5 * np.abs(np.random.default_rng(4).normal(size=(2, 4))) - 0.05
+    result = solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor=floor, positivity_floor_warmup_iterations=5)
+    np.testing.assert_allclose(result, np.maximum(TARGET, floor), atol=1e-6)
+
+
+def test_no_schedule_is_bit_identical_to_the_plain_floor():
+    plain = solve(Separable(TARGET), np.zeros(TARGET.shape), positivity_floor=-0.3)
+    none = solve(Separable(TARGET), np.zeros(TARGET.shape), positivity_floor=-0.3, positivity_floor_warmup_iterations=None)
+    np.testing.assert_array_equal(plain, none)
+
+
+@pytest.mark.parametrize('kwargs', [dict(positivity_floor_warmup_iterations=0), dict(positivity_floor_warmup_iterations=-3),
+                                    dict(positivity_floor_warmup_iterations=300), dict(positivity_floor_warmup_iterations=301)])
+def test_invalid_iteration_counts_are_refused(kwargs):
+    with pytest.raises(ValueError, match='between 1 and max_its'):
+        solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor=-0.3, **kwargs)
+
+
+def test_without_a_floor_the_bound_is_removed_after_the_warmup_iterations():
+    """Plain positivity for N iterations, then nothing: with a unit step the (N+1)th iteration reaches the unconstrained minimiser."""
+    warm = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=3)
+    np.testing.assert_allclose(warm, np.maximum(TARGET, 0), atol=1e-12)
+    scheduled = solve(Separable(TARGET), np.zeros(TARGET.shape), initial_step=1.0, max_its=4, positivity_floor_warmup_iterations=3)
+    np.testing.assert_allclose(scheduled, TARGET, atol=1e-12)                                              # unbounded: negative values allowed
+    assert scheduled.min() < -1.0
+    converged = solve(Separable(TARGET), np.zeros(TARGET.shape), max_its=300, positivity_floor_warmup_iterations=10)
+    np.testing.assert_allclose(converged, TARGET, atol=1e-6)
+
+
+def test_schedule_needs_positivity():
+    with pytest.raises(ValueError, match='positivity=True'):
+        solve(Separable(TARGET), np.zeros(TARGET.shape), positivity=False, positivity_floor_warmup_iterations=5)
+
+
+def test_imager_stores_and_checks_the_warmup_iterations():
+    common = dict(vis_data=None, pb=None, grid=None, sd=None, beam_sd=None, hdr=None,
+                  init_params=np.zeros((1, 2, 2)), max_its=30, lambda_sd=0, cost_device='cpu', optim_device='cpu')
+    with pytest.raises(ValueError, match='positivity=True'):
+        Imager3D(positivity=False, positivity_floor_warmup_iterations=10, **common)
+    imager = Imager3D(positivity=True, positivity_floor=-1.0, positivity_floor_warmup_iterations=10, **common)
+    assert imager.positivity_floor_warmup_iterations == 10
+    assert Imager3D(positivity=True, **common).positivity_floor_warmup_iterations is None
