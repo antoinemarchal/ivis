@@ -241,6 +241,7 @@ def optimize_torch_fista(
     positivity=False, initial_step=None, initial_update=1.0e-5,
     backtracking_factor=0.5, grow_factor=1.25, loss_only_line_search=False,
     quadratic_gradient_reuse=None, positivity_floor=None,
+    positivity_floor_warmup_iterations=None,
 ):
     """Monotone backtracking FISTA using gradients from ``model.objective``.
 
@@ -262,6 +263,11 @@ def optimize_torch_fista(
     ``positivity_floor`` (default None: iterates are clamped at 0) replaces the lower
     bound of the positivity projection by a negative scalar or per-pixel array, e.g.
     -4 sigma(x, y). It requires ``positivity=True``.
+
+    ``positivity_floor_warmup_iterations`` (default None: no schedule) runs the first N iterations with plain positivity (lower bound 0)
+    and the remaining ones with ``positivity_floor``. Plain positivity early suppresses the faint large-scale sidelobes, relaxing the bound
+    in the last iterations lets the noise become two-sided again. It needs a ``positivity_floor`` and 1 <= N < max_its; the momentum is
+    not reset at the switch.
     """
     if max_its < 1:
         raise ValueError("max_its must be at least one.")
@@ -271,6 +277,8 @@ def optimize_torch_fista(
         raise ValueError("grow_factor must be at least one.")
     if initial_update <= 0.0:
         raise ValueError("initial_update must be positive.")
+    if positivity_floor_warmup_iterations is not None and not 1 <= int(positivity_floor_warmup_iterations) < int(max_its):
+        raise ValueError("positivity_floor_warmup_iterations must lie between 1 and max_its - 1.")
     supports_reuse = getattr(model, "supports_quadratic_gradient_reuse", False)
     if quadratic_gradient_reuse is None:
         quadratic_gradient_reuse = supports_reuse
@@ -290,7 +298,13 @@ def optimize_torch_fista(
         logger.info(f"FISTA uses the cost device for objective evaluations; solving on {cost_dev}.")
 
     x = torch.as_tensor(x_init, dtype=dtype, device=cost_dev).clone()
-    project = _lower_bound_projection(positivity, positivity_floor, x.shape, dtype, cost_dev)
+    warmup = positivity_floor_warmup_iterations is not None
+    if warmup and not positivity:
+        raise ValueError("positivity_floor_warmup_iterations requires positivity=True.")
+    if warmup and positivity_floor is None:
+        raise ValueError("positivity_floor_warmup_iterations needs a positivity_floor (without one the bound is 0 throughout).")
+    project = _lower_bound_projection(positivity, None if warmup else positivity_floor, x.shape, dtype, cost_dev)       # warm-up: plain positivity
+    project_final = _lower_bound_projection(positivity, positivity_floor, x.shape, dtype, cost_dev) if warmup else None
     if project is not None:
         x.copy_(project(x))
     y = x.clone()
@@ -353,6 +367,9 @@ def optimize_torch_fista(
     t0 = time.perf_counter()
 
     for iteration in range(1, int(max_its) + 1):
+        if warmup and iteration == int(positivity_floor_warmup_iterations) + 1:
+            project = project_final                       # read by evaluate_trial at call time
+            logger.info(f"[FISTA Iter {iteration}/{max_its}] lower bound: warm-up floor replaced by positivity_floor")
         if not quadratic_gradient_reuse:
             loss_y, grad_y = evaluate(y)
         elif extrapolated_evaluation and near_roundoff(loss_y, loss_x):

@@ -47,7 +47,7 @@ class Imager3D:
     def __init__(self, vis_data, pb, grid, sd, beam_sd, hdr,
                  init_params, max_its, lambda_sd, positivity,
                  cost_device="auto", optim_device="auto", beam_workers=0,
-                 positivity_floor=None):
+                 positivity_floor=None, positivity_floor_warmup_iterations=None):
 
         self.vis_data = vis_data
         self.pb = pb
@@ -60,6 +60,7 @@ class Imager3D:
         self.lambda_sd = lambda_sd
         self.positivity = positivity
         self.positivity_floor = positivity_floor
+        self.positivity_floor_warmup_iterations = positivity_floor_warmup_iterations
         self.beam_workers = beam_workers
 
         # moved to dutils
@@ -74,9 +75,13 @@ class Imager3D:
 
         if self.positivity_floor is not None and not self.positivity:
             raise ValueError("positivity_floor requires positivity=True.")
+        if self.positivity_floor_warmup_iterations is not None and not self.positivity:
+            raise ValueError("positivity_floor_warmup_iterations requires positivity=True.")
         if self.positivity:
             logger.info("Optimizer bounded - Positivity == True"
-                        + ("" if self.positivity_floor is None else " (lower bound: positivity_floor)"))
+                        + ("" if self.positivity_floor is None else " (lower bound: positivity_floor)")
+                        + ("" if self.positivity_floor_warmup_iterations is None else
+                           f" (plain positivity for the first {self.positivity_floor_warmup_iterations} iterations)"))
         else:
             logger.info("Optimizer not bounded - Positivity == False")
 
@@ -224,6 +229,8 @@ class Imager3D:
             raise ValueError("solver='L-BFGS-B' requires positivity=True.")
         if self.positivity_floor is not None and solver_name != "FISTA":
             raise ValueError("positivity_floor is only supported by solver='FISTA'.")
+        if self.positivity_floor_warmup_iterations is not None and solver_name != "FISTA":
+            raise ValueError("positivity_floor_warmup_iterations is only supported by solver='FISTA'.")
         if solver_name == "CG" and not (
             hasattr(model, "apply_normal_operator") and hasattr(model, "quadratic_rhs")
         ):
@@ -285,6 +292,7 @@ class Imager3D:
                 params=params,
                 positivity=self.positivity,
                 positivity_floor=self.positivity_floor,
+                positivity_floor_warmup_iterations=self.positivity_floor_warmup_iterations,
                 initial_step=initial_step,
                 initial_update=initial_update,
                 backtracking_factor=backtracking_factor,
